@@ -1,0 +1,502 @@
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { runQueue, type Executor, type RunnerConfig } from "../src/runner";
+
+describe("runner", () => {
+  test("does not execute when the queue has a blocked task", async () => {
+    const harness = await createHarness("- [!] ship <!-- blocked: earlier -->\n- [ ] sync\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+  });
+
+  test("does not execute when there are no pending tasks", async () => {
+    const harness = await createHarness("- [x] ship\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(called).toBe(false);
+  });
+
+  test("marks the first pending task done on clean success", async () => {
+    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: cleanExecutor,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] sync");
+    expect(queue).toContain("- [ ] archive");
+  });
+
+  test("passes the configured model to opencode", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      opencodeModel: "opencode-go/deepseek-v4-pro",
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual([
+      "run",
+      "--model",
+      "opencode-go/deepseek-v4-pro",
+      "--command",
+      "openspec-main-sync",
+    ]);
+  });
+
+  test("passes the configured model to targeted apply commands", async () => {
+    const harness = await createHarness("- [ ] apply test-20-migrate-notebook-access-button-rntl\n");
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      opencodeModel: "opencode-go/deepseek-v4-pro",
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual([
+      "run",
+      "--model",
+      "opencode-go/deepseek-v4-pro",
+      "--command",
+      "openspec-apply-worktree",
+      "test-20-migrate-notebook-access-button-rntl",
+    ]);
+  });
+
+  test("advances a deliver task to the next phase on success", async () => {
+    const harness = await createHarness("- [ ] deliver test-20-migrate-notebook-access-button-rntl\n");
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual([
+      "run",
+      "--command",
+      "openspec-apply-worktree",
+      "test-20-migrate-notebook-access-button-rntl",
+    ]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
+    expect(queue).toContain("phase: ship");
+  });
+
+  test("runs the current deliver phase", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship -->\n",
+    );
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual([
+      "run",
+      "--command",
+      "openspec-ship-worktree",
+      "test-20-migrate-notebook-access-button-rntl",
+    ]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_merge");
+  });
+
+  test("marks a deliver task done after archive succeeds", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: archive -->\n",
+    );
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: cleanExecutor,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] deliver test-20-migrate-notebook-access-button-rntl");
+  });
+
+  test("skips deliver tasks waiting for dependencies", async () => {
+    const harness = await createHarness(
+      [
+        "- [ ] deliver change-b <!-- depends_on: change-a -->",
+        "- [ ] deliver change-c",
+      ].join("\n"),
+    );
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual(["run", "--command", "openspec-apply-worktree", "change-c"]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver change-b <!-- depends_on: change-a -->");
+    expect(queue).toContain("- [ ] deliver change-c");
+    expect(queue).toContain("phase: ship");
+  });
+
+  test("skips deliver tasks waiting for merge", async () => {
+    const harness = await createHarness(
+      [
+        "- [ ] deliver change-b <!-- phase: waiting_for_merge -->",
+        "- [ ] deliver change-c",
+      ].join("\n"),
+    );
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual(["run", "--command", "openspec-apply-worktree", "change-c"]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver change-b <!-- phase: waiting_for_merge -->");
+    expect(queue).toContain("- [ ] deliver change-c");
+    expect(queue).toContain("phase: ship");
+  });
+
+  test("passes OpenCode log flags before the command", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      opencodeModel: "opencode-go/deepseek-v4-pro",
+      opencodePrintLogs: true,
+      opencodeLogLevel: "ERROR",
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual([
+      "run",
+      "--print-logs",
+      "--log-level",
+      "ERROR",
+      "--model",
+      "opencode-go/deepseek-v4-pro",
+      "--command",
+      "openspec-main-sync",
+    ]);
+  });
+
+  test("passes OpenCode stats options to the executor when enabled", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+    let receivedOptions: Parameters<Executor>[2] | undefined;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      opencodeStats: true,
+      opencodeStatsIntervalMs: 120_000,
+      opencodeStatsTimeoutMs: 10_000,
+      opencodeStatsProject: "",
+      opencodeStatsModels: "5",
+      executor: async (_command, _args, options) => {
+        receivedOptions = options;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedOptions?.stats).toEqual({
+      command: "mock-opencode",
+      cwd: harness.rootDir,
+      intervalMs: 120_000,
+      timeoutMs: 10_000,
+      project: "",
+      models: "5",
+      days: undefined,
+    });
+  });
+
+  test("marks the first pending task blocked on non-zero exit", async () => {
+    const harness = await createHarness("- [ ] ship\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => ({ exitCode: 1, output: "failed" }),
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("command exited with code 1");
+  });
+
+  test("marks the first pending task blocked when output contains an error signal", async () => {
+    const harness = await createHarness("- [ ] ship\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => ({ exitCode: 0, output: "Unexpected server error" }),
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("unexpected server error");
+  });
+
+  test("marks the first pending task blocked when the executor cannot start", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => {
+        throw new Error("spawn failed");
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] sync");
+    expect(queue).toContain("spawn failed");
+  });
+
+  test("blocks before execution when the project command file is missing", async () => {
+    const harness = await createHarness("- [ ] ship\n", { createCommandFiles: false });
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("OpenCode command file not found");
+  });
+
+  test("next mode does not mutate the queue when opencode is already active", async () => {
+    const harness = await createHarness("- [ ] ship\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      processDetector: async () => ["12345"],
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toBe("- [ ] ship\n");
+  });
+
+  test("run mode processes pending tasks until the queue is complete", async () => {
+    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+    const calls: string[] = [];
+    const sleeps: number[] = [];
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      executor: async (_command, args) => {
+        calls.push(args.join(" "));
+        return { exitCode: 0, output: "done" };
+      },
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toHaveLength(2);
+    expect(sleeps).toEqual([]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] sync");
+    expect(queue).toContain("- [x] archive");
+  });
+
+  test("run mode stops after the first blocked task", async () => {
+    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+    let calls = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      executor: async () => {
+        calls += 1;
+        return { exitCode: 1, output: "failed" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(calls).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] sync");
+    expect(queue).toContain("- [ ] archive");
+  });
+
+  test("run mode waits instead of blocking when opencode is already active", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+    const sleeps: number[] = [];
+    let checks = 0;
+    let calls = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      busyDelayMs: 5,
+      processDetector: async () => {
+        checks += 1;
+        return checks === 1 ? ["12345"] : [];
+      },
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      executor: async () => {
+        calls += 1;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(1);
+    expect(sleeps).toEqual([5]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] sync");
+  });
+
+  test("stop mode requests a safe queue stop", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+
+    const exitCode = await runQueue("stop", harness.config);
+
+    expect(exitCode).toBe(0);
+    const stop = await readFile(join(harness.config.stateDir, "stop"), "utf8");
+    expect(stop).toContain("Stop queue:run at the next safe checkpoint");
+  });
+
+  test("run mode exits while waiting when stop is requested", async () => {
+    const harness = await createHarness("- [ ] sync\n");
+    const sleeps: number[] = [];
+    let called = false;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      busyDelayMs: 60_000,
+      processDetector: async () => ["12345"],
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        await writeFile(join(harness.config.stateDir, "stop"), "{}");
+      },
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(called).toBe(false);
+    expect(sleeps).toEqual([1_000]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toBe("- [ ] sync\n");
+  });
+});
+
+const cleanExecutor: Executor = async () => ({ exitCode: 0, output: "done" });
+
+async function createHarness(queueContent: string, options: { createCommandFiles?: boolean } = {}) {
+  const rootDir = await mkdtemp(join(tmpdir(), "orchester-test-"));
+  const queuePath = join(rootDir, "queue.md");
+  await writeFile(queuePath, queueContent);
+  const createCommandFiles = options.createCommandFiles ?? true;
+
+  if (createCommandFiles) {
+    const commandDir = join(rootDir, ".opencode", "commands");
+    await mkdir(commandDir, { recursive: true });
+    await Promise.all(
+      [
+        "openspec-apply-worktree",
+        "openspec-ship-worktree",
+        "openspec-main-sync",
+        "openspec-archive-merged",
+      ].map((commandName) => writeFile(join(commandDir, `${commandName}.md`), "")),
+    );
+  }
+
+  const config: RunnerConfig = {
+    rootDir,
+    projectDir: rootDir,
+    queuePath,
+    stateDir: join(rootDir, ".orchester"),
+    opencodeBin: "mock-opencode",
+    opencodeStatsIntervalMs: 120_000,
+    opencodeStatsTimeoutMs: 10_000,
+    opencodeStatsProject: "",
+    loopDelayMs: 0,
+    busyDelayMs: 0,
+    taskTimeoutMs: 1_000,
+    heartbeatMs: 0,
+    processDetector: async () => [],
+    now: () => new Date("2026-06-17T12:00:00.000Z"),
+  };
+
+  return { rootDir, queuePath, config };
+}

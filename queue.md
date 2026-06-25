@@ -1,0 +1,27 @@
+# OpenCode Worker Queue
+
+- [x] sync <!-- done: 2026-06-25T08:00:39.191Z; log: .orchester/runs/2026-06-25T08-00-39-191Z-sync.log -->
+- [x] apply test-20-migrate-notebook-access-button-rntl <!-- done: 2026-06-25T11:44:50.838Z; log: .orchester/runs/2026-06-25T11-44-50-838Z-apply-test-20-migrate-notebook-access-button-rntl.log -->
+- [x] sync <!-- done: 2026-06-25T15:44:13.085Z; log: .orchester/runs/2026-06-25T15-44-13-085Z-sync.log -->
+- [x] archive
+- [x] archive <!-- done: 2026-06-25T16:07:32.642Z; log: .orchester/runs/2026-06-25T16-07-32-642Z-archive.log -->
+- [x] apply test-06-remove-act-page1-drawing-test <!-- done: 2026-06-25T16:29:08.533Z; log: .orchester/runs/2026-06-25T16-29-08-533Z-apply-test-06-remove-act-page1-drawing-test.log -->
+- [x] ship <!-- done: 2026-06-25T16:33:56.974Z; log: .orchester/runs/2026-06-25T16-33-56-974Z-ship.log -->
+- [x] sync <!-- done: 2026-06-25T16:39:15.144Z; log: .orchester/runs/2026-06-25T16-39-15-144Z-sync.log -->
+- [x] archive <!-- done: 2026-06-25T16:41:29.382Z; log: .orchester/runs/2026-06-25T16-41-29-382Z-archive.log -->
+- [x] apply test-07-remove-act-cable-puzzle-test <!-- done: 2026-06-25T16:43:40.942Z; log: .orchester/runs/2026-06-25T16-43-40-942Z-apply-test-07-remove-act-cable-puzzle-test.log -->
+- [x] ship <!-- done: 2026-06-25T16:46:06.871Z; log: .orchester/runs/2026-06-25T16-46-06-871Z-ship.log -->
+- [x] sync <!-- done: 2026-06-25T16:50:28.820Z; log: .orchester/runs/2026-06-25T16-50-28-820Z-sync.log -->
+- [x] archive <!-- done: 2026-06-25T16:52:56.858Z; log: .orchester/runs/2026-06-25T16-52-56-858Z-archive.log -->
+- [x] deliver test-06-remove-act-page1-drawing-test <!-- done: 2026-06-25T18:39:10.959Z; log: .orchester/runs/2026-06-25T18-39-10-959Z-deliver-archive-test-06-remove-act-page1-drawing-test.log -->
+- [x] deliver test-09-migrate-notebook-page-shell-rntl <!-- done: 2026-06-25T19:22:32.954Z; log: .orchester/runs/2026-06-25T19-22-32-954Z-deliver-archive-test-09-migrate-notebook-page-shell-rntl.log -->
+- [x] deliver test-10-migrate-tap-zone-layer-rntl <!-- done: 2026-06-25T19:35:19.978Z; log: .orchester/runs/2026-06-25T19-35-19-978Z-deliver-archive-test-10-migrate-tap-zone-layer-rntl.log -->
+- [x] deliver test-11-migrate-tap-zone-overlay-rntl <!-- done: 2026-06-25T19:52:07.816Z; log: .orchester/runs/2026-06-25T19-52-07-816Z-deliver-archive-test-11-migrate-tap-zone-overlay-rntl.log -->
+- [x] deliver test-12-migrate-language-selector-rntl <!-- done: 2026-06-25T20:09:17.988Z; log: .orchester/runs/2026-06-25T20-09-17-988Z-deliver-archive-test-12-migrate-language-selector-rntl.log -->
+- [x] deliver test-13-migrate-vhs-transition-overlay-rntl <!-- done: 2026-06-25T20:27:17.516Z; log: .orchester/runs/2026-06-25T20-27-17-516Z-deliver-archive-test-13-migrate-vhs-transition-overlay-rntl.log -->
+- [!] deliver test-14-migrate-blinking-led-rntl <!-- phase: ship; blocked: 2026-06-25T20:35:31.115Z; reason: OpenCode auto-rejected a permission request; log: .orchester/runs/2026-06-25T20-35-31-115Z-deliver-ship-test-14-migrate-blinking-led-rntl.log -->
+- [ ] deliver test-15-migrate-dialogue-box-rntl
+- [ ] deliver test-16-migrate-camera-osd-overlay-rntl
+- [ ] deliver test-17-migrate-crt-overlay-rntl
+- [ ] deliver test-18-migrate-cover-background-rntl
+- [ ] deliver test-19-migrate-back-to-console-button-rntl

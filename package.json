@@ -1,0 +1,23 @@
+{
+  "name": "ai-workflow-orchester",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "queue:next": "bun run index.ts next",
+    "queue:run": "bun run index.ts run",
+    "queue:status": "bun run index.ts status",
+    "queue:dry-run": "bun run index.ts dry-run",
+    "queue:stop": "bun run index.ts stop",
+    "queue:stats": "bun run index.ts stats",
+    "target:setup": "bun run index.ts setup-target",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "dotenv": "^17.4.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

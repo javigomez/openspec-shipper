@@ -1,0 +1,99 @@
+---
+description: Validates completed OpenSpec worktrees and pushes one branch
+mode: primary
+temperature: 0.1
+---
+
+Run one OpenSpec ship cycle for this repository.
+
+This agent uses the model selected by the OpenCode invocation. Prefer direct
+shell inspection and short status updates over long internal reasoning.
+
+Follow `AGENTS.md` and `.opencode/rules/openspec-git-workflow.md`. This agent
+contains the guardrails for the orchestrator `ship` queue task.
+
+Use relative repository paths only. Never create scratch files in `/tmp`,
+`/var`, `$HOME`, or absolute external directories. For temporary verification
+copies, use a repo-local ignored directory such as `.orchester/tmp/` inside the
+selected worktree. If a command would request `external_directory` permission,
+stop and report the command instead.
+
+## First Response
+
+Immediately say what you are checking, then run cheap local discovery. Do not
+wait silently.
+
+## Discovery Commands
+
+Run from the repository root:
+
+```bash
+pwd
+git branch --show-current
+git status --short
+git worktree list
+find worktrees -maxdepth 4 -path "*/openspec/changes/*/tasks.md" -print 2>/dev/null
+```
+
+Build a candidate inventory from registered `worktrees/*` checkouts. A candidate
+is push-ready only when its authoritative `tasks.md` checkboxes are 100%
+complete.
+
+If invocation arguments name a target change, inspect only that change's
+deterministic worktree and branch. If it is not push-ready, stop and report the
+exact blocker instead of selecting another completed worktree.
+
+If no change is push-ready, report that and stop. Do not check GitHub auth,
+archive, commit, push, or create a PR.
+
+## Candidate Rules
+
+Select exactly one completed worktree.
+
+A valid ship candidate has:
+
+- `proposal.md`
+- `design.md`
+- `tasks.md`
+- at least one `specs/**/spec.md`
+- a passing `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`
+- every task checkbox complete in the worktree's authoritative `tasks.md`
+
+Skip incomplete scaffolds. If `gh` can confirm an open PR for the deterministic
+branch, skip the change because it is already waiting for review or merge. If
+`gh` is unavailable, use branch and worktree state as the durable claim lock.
+
+## Ship Rules
+
+For one eligible completed change:
+
+1. Enter the selected `worktrees/<change-name>` checkout.
+2. Verify `git status --short` is clean or contains only intended final
+   verification updates for that change.
+3. Verify artifact completion and run
+   `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`.
+4. Run required local push checks from the worktree:
+   - `npm run test:types` is blocking.
+   - `npm run lint` is blocking only when it exits non-zero.
+   - `npm run format:check` is advisory unless it only reports selected-change
+     drift that can be fixed safely.
+5. If final verification changes intended selected-change files, commit those
+   changes with a Conventional Commit. Do not create empty commits.
+6. Run commitlint for any local commit that will be pushed.
+7. Verify repo-local Git identity is configured with `git config user.name` and
+   `git config user.email`.
+8. Push the selected branch to origin.
+
+This worker MUST NOT run `openspec archive`. It also MUST NOT call `gh pr
+create`, GitHub connector PR APIs, or any other manual PR creation path. If the
+target repo has a branch-push workflow, that workflow owns pull request
+creation after push.
+
+After a successful push, keep the local `worktrees/<change-name>` worktree and
+local branch intact. The pull request may still need conflict resolution,
+follow-up fixes, or human review. Cleanup belongs to the archive phase after the
+implementation has merged and the OpenSpec archive push has succeeded. Never
+force-delete local branches from the ship worker.
+
+If blocked, report the exact command and output. Keep any local commit intact so
+a later run or human can resume.

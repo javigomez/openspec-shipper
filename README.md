@@ -78,7 +78,10 @@ After a successful apply phase, the first line becomes:
 
 The task is marked `[x]` only after the archive phase succeeds. Dependencies are
 simple queue-level gates: if a deliver task has `depends_on`, it will be skipped
-until a queue task with that change name is marked `[x]`.
+until a queue task with that change name is marked `[x]`. This is intentionally
+based on queue state, so ordering still stays readable from top to bottom while
+hard dependencies can be declared when one OpenSpec change must land before
+another starts.
 
 After `ship`, a deliver task moves to `waiting_for_merge`. That phase is
 intentionally not runnable: the queue will skip it until you move it to
@@ -116,8 +119,9 @@ Statuses:
 - `[x]` done
 - `[!]` blocked
 
-If any task is `[!]`, the runner pauses and will not call OpenCode again until
-you edit the queue.
+By default, any `[!]` task pauses the runner. Set
+`ORCHESTER_MAX_BLOCKED_TASKS` to allow that many blocked tasks to be skipped
+while the queue continues with the next runnable task.
 
 ## Ways To Run It
 
@@ -259,6 +263,9 @@ ORCHESTER_TASK_TIMEOUT_MS=5400000
 
 # Heartbeat while OpenCode is silent, default 60000 ms
 ORCHESTER_HEARTBEAT_MS=60000
+
+# Number of blocked tasks the queue may skip before pausing, default 0
+ORCHESTER_MAX_BLOCKED_TASKS=0
 
 # Advanced escape hatch: set to 1 to allow running even when pgrep sees opencode
 ORCHESTER_ALLOW_ACTIVE_OPENCODE=0

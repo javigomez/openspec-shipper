@@ -21,6 +21,45 @@ describe("runner", () => {
     expect(called).toBe(false);
   });
 
+  test("skips existing blocked tasks within the configured limit", async () => {
+    const harness = await createHarness("- [!] ship <!-- blocked: earlier -->\n- [ ] sync\n");
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      maxBlockedTasks: 1,
+      executor: async (_command, args) => {
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedArgs).toEqual(["run", "--command", "openspec-main-sync"]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("- [x] sync");
+  });
+
+  test("pauses when blocked tasks exceed the configured limit", async () => {
+    const harness = await createHarness(
+      "- [!] ship <!-- blocked: earlier -->\n- [!] archive <!-- blocked: earlier -->\n- [ ] sync\n",
+    );
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      maxBlockedTasks: 1,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+  });
+
   test("does not execute when there are no pending tasks", async () => {
     const harness = await createHarness("- [x] ship\n");
     let called = false;
@@ -394,6 +433,26 @@ describe("runner", () => {
     expect(queue).toContain("- [ ] archive");
   });
 
+  test("run mode continues after blocked tasks within the configured limit", async () => {
+    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+    let calls = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      maxBlockedTasks: 1,
+      executor: async () => {
+        calls += 1;
+        return calls === 1 ? { exitCode: 1, output: "failed" } : { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(2);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] sync");
+    expect(queue).toContain("- [x] archive");
+  });
+
   test("run mode waits instead of blocking when opencode is already active", async () => {
     const harness = await createHarness("- [ ] sync\n");
     const sleeps: number[] = [];
@@ -494,6 +553,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     busyDelayMs: 0,
     taskTimeoutMs: 1_000,
     heartbeatMs: 0,
+    maxBlockedTasks: 0,
     processDetector: async () => [],
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };

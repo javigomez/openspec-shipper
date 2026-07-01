@@ -38,6 +38,7 @@ export type RunnerConfig = {
   busyDelayMs: number;
   taskTimeoutMs: number;
   heartbeatMs: number;
+  maxBlockedTasks: number;
   executor?: Executor;
   processDetector?: ProcessDetector;
   sleep?: Sleep;
@@ -110,6 +111,7 @@ export function defaultConfig(): RunnerConfig {
     busyDelayMs: parsePositiveInt(process.env.ORCHESTER_BUSY_DELAY_MS, DEFAULT_BUSY_DELAY_MS),
     taskTimeoutMs: parsePositiveInt(process.env.ORCHESTER_TASK_TIMEOUT_MS, DEFAULT_TASK_TIMEOUT_MS),
     heartbeatMs: parsePositiveInt(process.env.ORCHESTER_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
+    maxBlockedTasks: parsePositiveInt(process.env.ORCHESTER_MAX_BLOCKED_TASKS, 0),
   };
 }
 
@@ -136,19 +138,18 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
   const pendingTask = findFirstRunnableTask(queue.tasks);
 
   if (mode === "status") {
-    printStatus(queue.tasks);
+    printStatus(queue.tasks, config);
     if (await stopRequested(config)) {
       console.log(`Stop requested: ${stopPath(config)}`);
     }
-    return blockedTasks.length > 0 ? 1 : 0;
+    return blockedTasksExceedLimit(blockedTasks, config) ? 1 : 0;
   }
 
-  if (blockedTasks.length > 0) {
-    console.log(`Queue is paused: ${blockedTasks.length} blocked task(s) found.`);
-    for (const task of blockedTasks) {
-      console.log(`- ${task.rawCommand}`);
-    }
+  if (blockedTasksExceedLimit(blockedTasks, config)) {
+    printBlockedPause("Queue is paused", blockedTasks, config);
     return 1;
+  } else if (blockedTasks.length > 0) {
+    printBlockedSkip("Queue has blocked task(s), continuing within configured limit", blockedTasks, config);
   }
 
   if (!pendingTask) {
@@ -199,7 +200,7 @@ async function runSingleTaskWithLock(
   args: string[],
 ): Promise<number> {
   const lockPath = join(config.stateDir, "orchester.lock");
-  const lock = await acquireLock(config, lockPath, task.rawCommand);
+  const lock = await acquireLock(config, lockPath, task.rawCommand, "immediate");
   if (!lock.acquired) {
     return 1;
   }
@@ -224,7 +225,7 @@ async function runSingleTaskWithLock(
 
 async function runLoopWithLock(config: RunnerConfig): Promise<number> {
   const lockPath = join(config.stateDir, "orchester.lock");
-  const lock = await acquireLock(config, lockPath, "queue:run");
+  const lock = await acquireLock(config, lockPath, "queue:run", "graceful");
   if (!lock.acquired) {
     return 1;
   }
@@ -254,12 +255,11 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
       }
 
       const blockedTasks = findBlockedTasks(queue.tasks);
-      if (blockedTasks.length > 0) {
-        console.log(`Queue paused: ${blockedTasks.length} blocked task(s) found.`);
-        for (const task of blockedTasks) {
-          console.log(`- ${task.rawCommand}`);
-        }
+      if (blockedTasksExceedLimit(blockedTasks, config)) {
+        printBlockedPause("Queue paused", blockedTasks, config);
         return completedThisRun > 0 ? 0 : 1;
+      } else if (blockedTasks.length > 0) {
+        printBlockedSkip("Queue has blocked task(s), continuing within configured limit", blockedTasks, config);
       }
 
       const pendingTask = findFirstRunnableTask(queue.tasks);
@@ -279,7 +279,15 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
 
       const preflight = await blockOnFailedPreflight(config, queue.lines, pendingTask);
       if (preflight.blocked) {
-        return 1;
+        const nextQueue = await loadQueue(config.queuePath);
+        const nextBlockedTasks = findBlockedTasks(nextQueue.tasks);
+        if (blockedTasksExceedLimit(nextBlockedTasks, config)) {
+          printBlockedPause("Queue paused", nextBlockedTasks, config);
+          return completedThisRun > 0 ? 0 : 1;
+        }
+
+        printBlockedSkip("Preflight blocked a task, continuing within configured limit", nextBlockedTasks, config);
+        continue;
       }
 
       const processCheck = await checkActiveOpenCode(config);
@@ -295,6 +303,13 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
       busyState = undefined;
       const exitCode = await executeTask(config, queue.lines, pendingTask, buildConfiguredOpenCodeArgs(config, pendingTask));
       if (exitCode !== 0) {
+        const nextQueue = await loadQueue(config.queuePath);
+        const nextBlockedTasks = findBlockedTasks(nextQueue.tasks);
+        if (!blockedTasksExceedLimit(nextBlockedTasks, config)) {
+          printBlockedSkip("Task blocked, continuing within configured limit", nextBlockedTasks, config);
+          continue;
+        }
+
         return exitCode;
       }
 
@@ -307,7 +322,10 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
       }
 
       const nextQueue = await loadQueue(config.queuePath);
-      if (findBlockedTasks(nextQueue.tasks).length > 0 || !findFirstRunnableTask(nextQueue.tasks)) {
+      if (
+        blockedTasksExceedLimit(findBlockedTasks(nextQueue.tasks), config) ||
+        !findFirstRunnableTask(nextQueue.tasks)
+      ) {
         continue;
       }
 
@@ -326,6 +344,7 @@ async function acquireLock(
   config: RunnerConfig,
   lockPath: string,
   task: string,
+  interruptMode: "graceful" | "immediate",
 ): Promise<{ acquired: true; release: () => Promise<void> } | { acquired: false }> {
   if (await fileExists(lockPath)) {
     console.log(`Queue is already running: lock exists at ${lockPath}`);
@@ -350,7 +369,7 @@ async function acquireLock(
   let gracefulStopRequested = false;
   let forceInterruptAllowedAt = 0;
   const signalHandler = (signal: NodeJS.Signals) => {
-    if (signal === "SIGINT" && !gracefulStopRequested) {
+    if (signal === "SIGINT" && interruptMode === "graceful" && !gracefulStopRequested) {
       gracefulStopRequested = true;
       forceInterruptAllowedAt = Date.now() + SIGINT_DUPLICATE_GRACE_MS;
       requestStopSync(config);
@@ -359,7 +378,7 @@ async function acquireLock(
       return;
     }
 
-    if (signal === "SIGINT" && Date.now() < forceInterruptAllowedAt) {
+    if (signal === "SIGINT" && interruptMode === "graceful" && Date.now() < forceInterruptAllowedAt) {
       return;
     }
 
@@ -759,7 +778,7 @@ function describeProcess(pid: string): string {
   return result.stdout.trim().replace(/\s+/g, " ") || pid;
 }
 
-function printStatus(tasks: QueueTask[]) {
+function printStatus(tasks: QueueTask[], config: RunnerConfig) {
   const counts = {
     pending: tasks.filter((task) => task.status === "pending").length,
     done: tasks.filter((task) => task.status === "done").length,
@@ -770,11 +789,12 @@ function printStatus(tasks: QueueTask[]) {
 
   const blocked = findBlockedTasks(tasks);
   if (blocked.length > 0) {
-    console.log("Paused by:");
-    for (const task of blocked) {
-      console.log(`- ${task.rawCommand}`);
+    if (blockedTasksExceedLimit(blocked, config)) {
+      printBlockedPause("Paused by", blocked, config);
+      return;
+    } else {
+      printBlockedSkip("Skipped blocked task(s)", blocked, config);
     }
-    return;
   }
 
   const next = findFirstRunnableTask(tasks);
@@ -798,6 +818,24 @@ function waitingReason(task: QueueTask): string {
   }
 
   return `waits for ${task.dependsOn.join(", ")}`;
+}
+
+function blockedTasksExceedLimit(blockedTasks: QueueTask[], config: RunnerConfig): boolean {
+  return blockedTasks.length > config.maxBlockedTasks;
+}
+
+function printBlockedPause(prefix: string, blockedTasks: QueueTask[], config: RunnerConfig) {
+  console.log(`${prefix}: ${blockedTasks.length} blocked task(s) found; limit is ${config.maxBlockedTasks}.`);
+  for (const task of blockedTasks) {
+    console.log(`- ${task.rawCommand}`);
+  }
+}
+
+function printBlockedSkip(prefix: string, blockedTasks: QueueTask[], config: RunnerConfig) {
+  console.log(`${prefix}: ${blockedTasks.length}/${config.maxBlockedTasks} blocked task(s).`);
+  for (const task of blockedTasks) {
+    console.log(`- ${task.rawCommand}`);
+  }
 }
 
 function capOutput(value: string): string {

@@ -1,4 +1,4 @@
-# OpenCode Worker Queue
+# OpenSpec Backlog Queue
 
 - [x] sync <!-- done: 2026-06-25T08:00:39.191Z; log: .orchester/runs/2026-06-25T08-00-39-191Z-sync.log -->
 - [x] apply test-20-migrate-notebook-access-button-rntl <!-- done: 2026-06-25T11:44:50.838Z; log: .orchester/runs/2026-06-25T11-44-50-838Z-apply-test-20-migrate-notebook-access-button-rntl.log -->
@@ -20,8 +20,8 @@
 - [x] deliver test-12-migrate-language-selector-rntl <!-- done: 2026-06-25T20:09:17.988Z; log: .orchester/runs/2026-06-25T20-09-17-988Z-deliver-archive-test-12-migrate-language-selector-rntl.log -->
 - [x] deliver test-13-migrate-vhs-transition-overlay-rntl <!-- done: 2026-06-25T20:27:17.516Z; log: .orchester/runs/2026-06-25T20-27-17-516Z-deliver-archive-test-13-migrate-vhs-transition-overlay-rntl.log -->
 - [!] deliver test-14-migrate-blinking-led-rntl <!-- phase: ship; blocked: 2026-06-25T20:35:31.115Z; reason: OpenCode auto-rejected a permission request; log: .orchester/runs/2026-06-25T20-35-31-115Z-deliver-ship-test-14-migrate-blinking-led-rntl.log -->
-- [ ] deliver test-15-migrate-dialogue-box-rntl
-- [ ] deliver test-16-migrate-camera-osd-overlay-rntl
-- [ ] deliver test-17-migrate-crt-overlay-rntl
-- [ ] deliver test-18-migrate-cover-background-rntl
-- [ ] deliver test-19-migrate-back-to-console-button-rntl
+- [ ] deliver test-15-migrate-dialogue-box-rntl <!-- phase: waiting_for_merge; advanced: 2026-06-26T04:40:56.751Z; log: .orchester/runs/2026-06-26T04-40-56-751Z-deliver-ship-test-15-migrate-dialogue-box-rntl.log --> ![waiting_for_merge](https://img.shields.io/badge/waiting_for_merge-pending-blue) · _([log](.orchester/runs/2026-06-26T04-40-56-751Z-deliver-ship-test-15-migrate-dialogue-box-rntl.log))_
+- [ ] deliver test-16-migrate-camera-osd-overlay-rntl <!-- phase: waiting_for_merge; advanced: 2026-06-26T04:50:16.140Z; log: .orchester/runs/2026-06-26T04-50-16-140Z-deliver-ship-test-16-migrate-camera-osd-overlay-rntl.log --> ![waiting_for_merge](https://img.shields.io/badge/waiting_for_merge-pending-blue) · _([log](.orchester/runs/2026-06-26T04-50-16-140Z-deliver-ship-test-16-migrate-camera-osd-overlay-rntl.log))_
+- [ ] deliver test-17-migrate-crt-overlay-rntl <!-- phase: waiting_for_merge; advanced: 2026-06-26T05:02:33.715Z; log: .orchester/runs/2026-06-26T05-02-33-715Z-deliver-ship-test-17-migrate-crt-overlay-rntl.log --> ![waiting_for_merge](https://img.shields.io/badge/waiting_for_merge-pending-blue) · _([log](.orchester/runs/2026-06-26T05-02-33-715Z-deliver-ship-test-17-migrate-crt-overlay-rntl.log))_
+- [ ] deliver test-18-migrate-cover-background-rntl <!-- phase: waiting_for_merge; advanced: 2026-06-26T05:12:41.283Z; log: .orchester/runs/2026-06-26T05-12-41-283Z-deliver-ship-test-18-migrate-cover-background-rntl.log --> ![waiting_for_merge](https://img.shields.io/badge/waiting_for_merge-pending-blue) · _([log](.orchester/runs/2026-06-26T05-12-41-283Z-deliver-ship-test-18-migrate-cover-background-rntl.log))_
+- [ ] deliver test-19-migrate-back-to-console-button-rntl <!-- phase: waiting_for_merge; advanced: 2026-06-26T05:20:31.666Z; log: .orchester/runs/2026-06-26T05-20-31-666Z-deliver-ship-test-19-migrate-back-to-console-button-rntl.log --> ![waiting_for_merge](https://img.shields.io/badge/waiting_for_merge-pending-blue) · _([log](.orchester/runs/2026-06-26T05-20-31-666Z-deliver-ship-test-19-migrate-back-to-console-button-rntl.log))_

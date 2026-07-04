@@ -6,7 +6,7 @@ The core idea is deliberately simple: keep a typed Markdown queue, run one
 worker task at a time, mark completed tasks, and pause immediately when anything
 looks blocked or expensive to retry.
 
-## Install
+## Install The Orchestrator
 
 ```bash
 bun install
@@ -20,22 +20,87 @@ PROJECT_DIR=/absolute/path/to/target-repo
 OPENCODE_BIN=/absolute/path/to/opencode
 ```
 
-Install the reusable OpenCode worker assets into the target repository:
+## Prepare A Target Repository
+
+Install the Orchester kit into the repository that contains OpenSpec changes:
 
 ```bash
-bun run target:setup
+bun run target:init /absolute/path/to/target-repo --profile node-npm
 ```
 
-This copies the orchestrator-owned templates into:
+Available profiles:
 
-```text
-$PROJECT_DIR/.opencode/commands/
-$PROJECT_DIR/.opencode/agents/
-$PROJECT_DIR/.opencode/rules/
+- `node-npm`
+- `node-pnpm`
+- `bun`
+- `generic`
+
+`target:init` installs:
+
+- `.opencode/commands`, `.opencode/agents`, and `.opencode/rules`
+- `.github/workflows/open-pr-on-branch-push.yml`
+- `.github/workflows/pr-checks.yml`
+- `.orchester/config.json`
+- `docs/agents/orchester-workflow.md`
+- branch-name and OpenSpec validation helper scripts
+- package scripts and dev dependencies when they are missing
+- `.gitignore` entries for `node_modules/`, `worktrees/`, and Orchester run logs
+
+Run a readiness check after setup:
+
+```bash
+bun run target:doctor /absolute/path/to/target-repo
 ```
 
-Run this again whenever the orchestrator updates its worker commands, agents, or
-rules.
+Refresh installed assets after pulling Orchester updates:
+
+```bash
+bun run target:update /absolute/path/to/target-repo
+```
+
+Installed files are tracked in `.orchester/installed.json`. `target:update`
+updates files that still match the previous installed version and reports
+`drifted` for files changed locally, instead of overwriting them. Use `--force`
+only when you intentionally want to replace local edits.
+
+`target:setup` remains as a backwards-compatible alias for `target:init`.
+
+## Target Configuration
+
+The target repo gets its own `.orchester/config.json`. It stores the selected
+profile, expected check commands, GitHub workflow toggles, and safety flags:
+
+```json
+{
+  "safety": {
+    "enablePush": false,
+    "enableArchive": false
+  }
+}
+```
+
+New target repos start conservatively. Ship workers stop before pushing while
+`enablePush` is `false`; archive workers stop before archiving while
+`enableArchive` is `false`. Enable those only after `target:doctor`,
+`queue:dry-run`, and a manual first run look good.
+
+The installed `openspec/config.orchester.example.yaml` is a starting point, not
+a file the runner reads. Copy the useful parts into the target repo's real
+`openspec/config.yaml` and keep project-specific architecture/testing context
+there.
+
+## Demo Repository
+
+`/Users/javigomez/Documents/projects/openspec-demo` is a tiny Node.js hello
+world target repo prepared with this kit. It includes:
+
+- a working `npm run check`
+- one active OpenSpec change: `add-name-greeting`
+- `queue.example.md` with `deliver add-name-greeting`
+- Orchester safety flags disabled by default
+
+Use it as the first local smoke test before trying the workflow on a real
+project.
 
 ## Queue Format
 

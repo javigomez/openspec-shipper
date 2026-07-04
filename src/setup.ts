@@ -65,6 +65,8 @@ export async function installOrchesterKit(config: SetupConfig): Promise<Installe
     installed.push({ source: "generated:gitignore", target: gitignorePath, status: "unchanged" });
   }
 
+  installed.push(await updatePackageJson(config));
+
   return installed;
 }
 
@@ -172,6 +174,47 @@ async function readText(path: string): Promise<string | undefined> {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+async function updatePackageJson(config: SetupConfig): Promise<InstalledFile> {
+  const target = join(config.projectDir, "package.json");
+  const raw = await readText(target);
+  const packageJson = raw ? JSON.parse(raw) : {};
+  const before = JSON.stringify(packageJson, null, 2);
+
+  packageJson.scripts = {
+    ...defaultScripts(),
+    ...(packageJson.scripts ?? {}),
+  };
+  packageJson.devDependencies = {
+    ...defaultDevDependencies(),
+    ...(packageJson.devDependencies ?? {}),
+  };
+
+  const after = JSON.stringify(packageJson, null, 2);
+  if (after === before) {
+    return { source: "generated:package-json", target, status: "unchanged" };
+  }
+
+  await writeFile(target, `${after}\n`);
+  return { source: "generated:package-json", target, status: raw ? "updated" : "installed" };
+}
+
+function defaultScripts(): Record<string, string> {
+  return {
+    "openspec:cli": "env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec",
+    "openspec:validate-proposal": "node scripts/validate-openspec-proposal.mjs",
+    "lint:branch": "node scripts/validate-branch-name.mjs",
+    "lint:commits": "commitlint --from origin/main --to HEAD",
+  };
+}
+
+function defaultDevDependencies(): Record<string, string> {
+  return {
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
+    "@fission-ai/openspec": "^1.2.0",
+  };
 }
 
 function isNotFoundError(error: unknown): boolean {

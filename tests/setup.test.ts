@@ -18,6 +18,9 @@ describe("target setup", () => {
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
     expect(await readFile(join(harness.projectDir, ".orchester/config.json"), "utf8")).toContain('"profile": "node-npm"');
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("worktrees/");
+    const packageJson = JSON.parse(await readFile(join(harness.projectDir, "package.json"), "utf8"));
+    expect(packageJson.scripts["openspec:cli"]).toBe("env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec");
+    expect(packageJson.devDependencies["@fission-ai/openspec"]).toBe("^1.2.0");
   });
 
   test("does not overwrite target files that drifted after installation", async () => {

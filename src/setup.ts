@@ -54,7 +54,7 @@ export async function installOrchesterKit(config: SetupConfig): Promise<Installe
   installed.push(await installGeneratedFile(config, "generated:orchester-config", configPath, configContent));
 
   const gitignorePath = join(config.projectDir, ".gitignore");
-  const gitignoreAppend = ["", "# Orchester", ".orchester/runs/", ".orchester/tmp/", "worktrees/"].join("\n");
+  const gitignoreAppend = ["", "# Dependencies", "node_modules/", "", "# Orchester", ".orchester/runs/", ".orchester/tmp/", "worktrees/"].join("\n");
   const currentGitignore = await readText(gitignorePath);
   if (!currentGitignore) {
     installed.push(await installGeneratedFile(config, "generated:gitignore", gitignorePath, `${gitignoreAppend.trimStart()}\n`));

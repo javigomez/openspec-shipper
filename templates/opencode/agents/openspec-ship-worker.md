@@ -80,9 +80,12 @@ For one eligible completed change:
 5. If final verification changes intended selected-change files, commit those
    changes with a Conventional Commit. Do not create empty commits.
 6. Run commitlint for any local commit that will be pushed.
-7. Verify repo-local Git identity is configured with `git config user.name` and
+7. Before pushing, inspect `.orchester/config.json` when it exists. If it
+   contains `"enablePush": false`, stop and report that Orchester push safety is
+   disabled. Do not push until a human enables it.
+8. Verify repo-local Git identity is configured with `git config user.name` and
    `git config user.email`.
-8. Push the selected branch to origin.
+9. Push the selected branch to origin.
 
 This worker MUST NOT run `openspec archive`. It also MUST NOT call `gh pr
 create`, GitHub connector PR APIs, or any other manual PR creation path. If the

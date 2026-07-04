@@ -61,13 +61,16 @@ commit, or push.
 For the selected change:
 
 1. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`.
-2. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec archive <change-name> -y`.
-3. Inspect the diff and verify it only touches OpenSpec change/archive and
+2. Before archiving, inspect `.orchester/config.json` when it exists. If it
+   contains `"enableArchive": false`, stop and report that Orchester archive
+   safety is disabled. Do not archive until a human enables it.
+3. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec archive <change-name> -y`.
+4. Inspect the diff and verify it only touches OpenSpec change/archive and
    canonical spec files.
-4. Stage only archive/spec-sync paths. Never use `git add .`.
-5. Commit on `main` with `chore: archive <change-name>`.
-6. Fetch/rebase against `origin/main` once before pushing.
-7. Push `main`.
+5. Stage only archive/spec-sync paths. Never use `git add .`.
+6. Commit on `main` with `chore: archive <change-name>`.
+7. Fetch/rebase against `origin/main` once before pushing.
+8. Push `main`.
 
 After push succeeds, clean local implementation artifacts only when safe: remove
 a clean `worktrees/<change-name>` worktree and delete the corresponding local

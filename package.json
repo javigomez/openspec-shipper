@@ -11,6 +11,9 @@
     "queue:stop": "bun run index.ts stop",
     "queue:stats": "bun run index.ts stats",
     "target:setup": "bun run index.ts setup-target",
+    "target:init": "bun run index.ts init",
+    "target:update": "bun run index.ts update",
+    "target:doctor": "bun run index.ts doctor",
     "test": "bun test"
   },
   "devDependencies": {

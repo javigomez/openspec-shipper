@@ -1,0 +1,22 @@
+schema: spec-driven
+
+context: |
+  Project: describe this repository in one or two paragraphs.
+  Architecture: document the boundaries agents must preserve.
+  Testing: document the checks that prove a change is safe.
+  Orchester workflow source of truth: docs/agents/orchester-workflow.md.
+  OpenSpec planning and archive operations run from the clean root main checkout.
+  Implementation work runs in worktrees/<change-name> on <type>/<change-name>.
+
+rules:
+  proposal:
+    - Prefer the smallest coherent change that solves the problem now.
+    - Include explicit non-goals or deferred work to enforce YAGNI.
+    - Before finishing proposal work, validate the change and every modified capability.
+  specs:
+    - Write scenarios that are directly translatable into tests.
+    - Cover happy path first, then alternatives, then edge cases.
+  tasks:
+    - Break implementation into small vertical slices.
+    - Mark tasks complete only after the work and relevant validation are done.
+    - Put human validation work in tasks.md as checkbox tasks.

@@ -1,0 +1,48 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate branch, commits, and project checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate branch name
+        run: npm run lint:branch -- "${{ github.head_ref }}"
+
+      - name: Validate commit messages
+        run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}"
+
+      - name: Run type check
+        run: npm run test:types
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Check formatting
+        continue-on-error: true
+        run: npm run format:check
+
+      - name: Run unit tests
+        run: npm run test:unit

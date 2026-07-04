@@ -1,0 +1,23 @@
+name: Auto Open PR
+
+on:
+  push:
+    branches:
+      - "feat/**"
+      - "fix/**"
+      - "docs/**"
+      - "refactor/**"
+      - "test/**"
+      - "chore/**"
+      - "ci/**"
+      - "build/**"
+      - "perf/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-pr:
+    name: Open PR for pushed branch
+    uses: javigomez/ai-workflow-orchester/.github/workflows/open-pr-on-branch-push-reusable.yml@main

@@ -1,34 +1,132 @@
+import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
+import {
+  CONFIG_PATH,
+  defaultOrchesterConfig,
+  type OrchesterProfile,
+} from "./orchester-config";
 
 export type SetupConfig = {
   rootDir: string;
   projectDir: string;
+  profile?: OrchesterProfile;
+  force?: boolean;
 };
 
-type InstalledFile = {
+export type InstalledFile = {
   source: string;
   target: string;
+  status: "installed" | "updated" | "unchanged" | "drifted";
 };
 
 const TEMPLATE_DIR = "templates/opencode";
 const TARGET_DIR = ".opencode";
+const TARGET_TEMPLATE_DIR = "templates/target";
+const MANIFEST_PATH = ".orchester/installed.json";
+
+type Manifest = {
+  version: 1;
+  installedAt: string;
+  files: Record<string, ManifestFile>;
+};
+
+type ManifestFile = {
+  sourceHash: string;
+  targetHash: string;
+};
 
 export async function installOpenCodeTemplates(config: SetupConfig): Promise<InstalledFile[]> {
   const sourceRoot = join(config.rootDir, TEMPLATE_DIR);
   const targetRoot = join(config.projectDir, TARGET_DIR);
+  return await installTemplateTree(config, sourceRoot, targetRoot);
+}
+
+export async function installOrchesterKit(config: SetupConfig): Promise<InstalledFile[]> {
+  const profile = config.profile ?? "node-npm";
+  const installed = [
+    ...(await installOpenCodeTemplates(config)),
+    ...(await installTemplateTree(config, join(config.rootDir, TARGET_TEMPLATE_DIR), config.projectDir)),
+  ];
+
+  const configPath = join(config.projectDir, CONFIG_PATH);
+  const configContent = `${JSON.stringify(defaultOrchesterConfig(profile), null, 2)}\n`;
+  installed.push(await installGeneratedFile(config, "generated:orchester-config", configPath, configContent));
+
+  const gitignorePath = join(config.projectDir, ".gitignore");
+  const gitignoreAppend = ["", "# Orchester", ".orchester/runs/", ".orchester/tmp/", "worktrees/"].join("\n");
+  const currentGitignore = await readText(gitignorePath);
+  if (!currentGitignore) {
+    installed.push(await installGeneratedFile(config, "generated:gitignore", gitignorePath, `${gitignoreAppend.trimStart()}\n`));
+  } else if (!currentGitignore.includes("worktrees/") || !currentGitignore.includes(".orchester/runs/")) {
+    await writeFile(gitignorePath, `${currentGitignore.replace(/\s*$/, "\n")}${gitignoreAppend}\n`);
+    installed.push({ source: "generated:gitignore", target: gitignorePath, status: "updated" });
+  } else {
+    installed.push({ source: "generated:gitignore", target: gitignorePath, status: "unchanged" });
+  }
+
+  return installed;
+}
+
+async function installTemplateTree(
+  config: SetupConfig,
+  sourceRoot: string,
+  targetRoot: string,
+): Promise<InstalledFile[]> {
   const files = await listTemplateFiles(sourceRoot);
   const installed: InstalledFile[] = [];
 
   for (const source of files) {
-    const target = join(targetRoot, relative(sourceRoot, source));
+    const target = join(targetRoot, relative(sourceRoot, source).replace(/\.template$/, ""));
     const content = await readFile(source, "utf8");
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, content);
-    installed.push({ source, target });
+    installed.push(await installGeneratedFile(config, source, target, content));
   }
 
   return installed;
+}
+
+async function installGeneratedFile(
+  config: SetupConfig,
+  source: string,
+  target: string,
+  content: string,
+): Promise<InstalledFile> {
+  const manifest = await readManifest(config.projectDir);
+  const relativeTarget = relative(config.projectDir, target);
+  const previous = manifest.files[relativeTarget];
+  const currentContent = await readText(target);
+  const sourceHash = hash(content);
+
+  if (currentContent !== undefined) {
+    const currentHash = hash(currentContent);
+    if (currentHash === sourceHash) {
+      return { source, target, status: "unchanged" };
+    }
+
+    if (!config.force && (!previous || previous.targetHash !== currentHash)) {
+      return { source, target, status: "drifted" };
+    }
+  }
+
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, content);
+  await writeManifest(config.projectDir, {
+    ...manifest,
+    installedAt: new Date().toISOString(),
+    files: {
+      ...manifest.files,
+      [relativeTarget]: {
+        sourceHash,
+        targetHash: sourceHash,
+      },
+    },
+  });
+
+  return {
+    source,
+    target,
+    status: currentContent === undefined ? "installed" : "updated",
+  };
 }
 
 async function listTemplateFiles(dir: string): Promise<string[]> {
@@ -45,4 +143,37 @@ async function listTemplateFiles(dir: string): Promise<string[]> {
   }
 
   return files.sort();
+}
+
+async function readManifest(projectDir: string): Promise<Manifest> {
+  const raw = await readText(join(projectDir, MANIFEST_PATH));
+  if (!raw) {
+    return { version: 1, installedAt: new Date().toISOString(), files: {} };
+  }
+
+  return JSON.parse(raw) as Manifest;
+}
+
+async function writeManifest(projectDir: string, manifest: Manifest): Promise<void> {
+  const target = join(projectDir, MANIFEST_PATH);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+async function readText(path: string): Promise<string | undefined> {
+  return await readFile(path, "utf8").catch((error: unknown) => {
+    if (isNotFoundError(error)) {
+      return undefined;
+    }
+
+    throw error;
+  });
+}
+
+function hash(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

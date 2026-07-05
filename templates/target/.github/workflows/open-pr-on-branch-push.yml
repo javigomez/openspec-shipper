@@ -20,4 +20,4 @@ permissions:
 jobs:
   open-pr:
     name: Open PR for pushed branch
-    uses: javigomez/ai-workflow-orchester/.github/workflows/open-pr-on-branch-push-reusable.yml@main
+    uses: javigomez/openspec-shipper/.github/workflows/open-pr-on-branch-push-reusable.yml@main

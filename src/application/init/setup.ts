@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import {
   CONFIG_PATH,
+  DEFAULT_QUEUE_PATH,
   ENV_EXAMPLE_PATH,
   defaultShipperConfig,
   type ExecutorProviderId,
@@ -60,6 +61,7 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
   installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample()));
+  installed.push(await ensureQueueFile(config.projectDir));
 
   const gitignorePath = join(config.projectDir, ".gitignore");
   const gitignoreAppend = ["", "# Dependencies", "node_modules/", "", "# OpenSpec Shipper", ".openspec-shipper/.env", ".openspec-shipper/queue.md", ".openspec-shipper/runs/", ".openspec-shipper/tmp/", "worktrees/"].join("\n");
@@ -180,6 +182,18 @@ async function readText(path: string): Promise<string | undefined> {
 
     throw error;
   });
+}
+
+async function ensureQueueFile(projectDir: string): Promise<InstalledFile> {
+  const target = join(projectDir, DEFAULT_QUEUE_PATH);
+  const currentContent = await readText(target);
+  if (currentContent !== undefined) {
+    return { source: "generated:shipper-queue", target, status: "unchanged" };
+  }
+
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, "# OpenSpec Shipper Queue\n\n");
+  return { source: "generated:shipper-queue", target, status: "installed" };
 }
 
 function hash(value: string): string {

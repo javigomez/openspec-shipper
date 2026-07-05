@@ -18,6 +18,7 @@ describe("target setup", () => {
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8")).toContain('"profile": "node-npm"');
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.md"), "utf8")).toBe("# OpenSpec Shipper Queue\n\n");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("worktrees/");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("node_modules/");
     const packageJson = JSON.parse(await readFile(join(harness.projectDir, "package.json"), "utf8"));
@@ -49,6 +50,19 @@ describe("target setup", () => {
 
     expect(result.find((file) => file.target === workflowPath)?.status).toBe("updated");
     expect(await readFile(workflowPath, "utf8")).toContain("name: PR Checks");
+  });
+
+  test("does not overwrite an existing queue", async () => {
+    const harness = await createHarness();
+    const queuePath = join(harness.projectDir, ".openspec-shipper/queue.md");
+
+    await mkdir(join(harness.projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(queuePath, "- [ ] deliver add-name-greeting\n");
+
+    const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
+
+    expect(result.find((file) => file.target === queuePath)?.status).toBe("unchanged");
+    expect(await readFile(queuePath, "utf8")).toBe("- [ ] deliver add-name-greeting\n");
   });
 });
 

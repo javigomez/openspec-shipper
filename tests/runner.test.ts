@@ -1,10 +1,33 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { runQueue, type Executor, type RunnerConfig } from "../src/runner";
+import { defaultConfig, runQueue, type Executor, type RunnerConfig } from "../src/runner";
 
 describe("runner", () => {
+  test("default config discovers the shipper project root from a nested directory", async () => {
+    const previousCwd = process.cwd();
+    const projectDir = await realpath(await mkdtemp(join(tmpdir(), "shipper-root-")));
+    const nestedDir = join(projectDir, "openspec/changes");
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await mkdir(nestedDir, { recursive: true });
+    await writeFile(join(projectDir, ".openspec-shipper/config.json"), "{}\n");
+
+    delete process.env.OPENSPEC_SHIPPER_PROJECT_DIR;
+    delete process.env.OPENSPEC_SHIPPER_QUEUE_PATH;
+    delete process.env.PROJECT_DIR;
+    delete process.env.QUEUE_PATH;
+    process.chdir(nestedDir);
+    try {
+      const config = defaultConfig();
+
+      expect(config.projectDir).toBe(projectDir);
+      expect(config.queuePath).toBe(join(projectDir, ".openspec-shipper/queue.md"));
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
   test("does not execute when the queue has a blocked task", async () => {
     const harness = await createHarness("- [!] ship <!-- blocked: earlier -->\n- [ ] sync\n");
     let called = false;

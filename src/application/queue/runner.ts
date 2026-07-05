@@ -18,6 +18,7 @@ import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/
 import { DEFAULT_QUEUE_PATH, DEFAULT_STATE_DIR } from "../../domain/config/shipper-config.js";
 import { providerById } from "../../infrastructure/providers/registry.js";
 import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
+import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
 
@@ -95,7 +96,7 @@ let activeChildProcess: ReturnType<typeof spawn> | undefined;
 
 export function defaultConfig(): RunnerConfig {
   const rootDir = ROOT_DIR;
-  const projectDir = process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.env.PROJECT_DIR ?? process.cwd();
+  const projectDir = process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.env.PROJECT_DIR ?? discoverProjectDirSync();
   const stateDir = process.env.OPENSPEC_SHIPPER_STATE_DIR ?? join(projectDir, DEFAULT_STATE_DIR);
 
   return {

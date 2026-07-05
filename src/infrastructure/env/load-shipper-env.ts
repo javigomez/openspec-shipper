@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ENV_PATH } from "../../domain/config/shipper-config.js";
+import { discoverProjectDir } from "../filesystem/project-root.js";
 
 export type ShipperCliFlags = {
   projectDir?: string;
@@ -10,7 +11,7 @@ export type ShipperCliFlags = {
 };
 
 export async function loadShipperEnv(flags: ShipperCliFlags, cwd = process.cwd()): Promise<void> {
-  const projectDir = flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? cwd;
+  const projectDir = flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? await discoverProjectDir(cwd);
   const envFile = flags.envFile ?? join(projectDir, ENV_PATH);
   const values = await readEnvFile(envFile);
 
@@ -20,8 +21,8 @@ export async function loadShipperEnv(flags: ShipperCliFlags, cwd = process.cwd()
     }
   }
 
-  if (flags.projectDir) {
-    process.env.OPENSPEC_SHIPPER_PROJECT_DIR = flags.projectDir;
+  if (!process.env.OPENSPEC_SHIPPER_PROJECT_DIR || flags.projectDir) {
+    process.env.OPENSPEC_SHIPPER_PROJECT_DIR = projectDir;
   }
   if (flags.queuePath) {
     process.env.OPENSPEC_SHIPPER_QUEUE_PATH = flags.queuePath;

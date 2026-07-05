@@ -21,10 +21,6 @@ The default OpenSpec Shipper profile expects these package scripts:
 - `openspec:cli`
 - `openspec:validate-proposal`
 - `lint:branch`
-- `test:types`
-- `lint`
-- `format:check`
-- `test:unit`
 
 If this repository uses different commands, update `.openspec-shipper/config.json`
 and the GitHub workflows together.

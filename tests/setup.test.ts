@@ -29,7 +29,7 @@ describe("target setup", () => {
 
   test("does not overwrite target files that drifted after installation", async () => {
     const harness = await createHarness();
-    const workflowPath = join(harness.projectDir, ".github/workflows/pr-checks.yml");
+    const workflowPath = join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml");
 
     await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
     await writeFile(workflowPath, "name: Custom Checks\n");
@@ -42,7 +42,7 @@ describe("target setup", () => {
 
   test("force overwrites target files that drifted", async () => {
     const harness = await createHarness();
-    const workflowPath = join(harness.projectDir, ".github/workflows/pr-checks.yml");
+    const workflowPath = join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml");
 
     await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
     await writeFile(workflowPath, "name: Custom Checks\n");
@@ -50,7 +50,7 @@ describe("target setup", () => {
     const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir, force: true });
 
     expect(result.find((file) => file.target === workflowPath)?.status).toBe("updated");
-    expect(await readFile(workflowPath, "utf8")).toContain("name: PR Checks");
+    expect(await readFile(workflowPath, "utf8")).toContain("name: Auto Open PR");
   });
 
   test("does not overwrite an existing queue", async () => {

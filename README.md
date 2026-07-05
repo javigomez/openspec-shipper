@@ -125,7 +125,7 @@ npx openspec-shipper init --profile node-npm
 - `.openspec-shipper/config.json` and `.openspec-shipper/.env.example`
 - `.openspec-shipper/openspec-config.example.yaml` as optional OpenSpec config guidance
 - `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
-- GitHub workflows for auto PR and PR checks
+- GitHub workflow for auto PR creation after branch push
 - branch/OpenSpec validation helper scripts
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees

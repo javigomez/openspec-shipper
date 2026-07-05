@@ -21,10 +21,6 @@ const REQUIRED_PACKAGE_SCRIPTS = [
   "openspec:cli",
   "openspec:validate-proposal",
   "lint:branch",
-  "test:types",
-  "lint",
-  "format:check",
-  "test:unit",
 ];
 
 export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
@@ -74,12 +70,6 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
       config?.github.autoOpenPr === false
       ? ok("auto PR workflow", "Auto PR workflow is installed or disabled")
       : warning("auto PR workflow", "Auto PR workflow missing; ship workers push but do not create PRs themselves"),
-  );
-
-  checks.push(
-    (await fileExists(join(projectDir, ".github/workflows/pr-checks.yml"))) || config?.github.prChecks === false
-      ? ok("PR checks workflow", "PR checks workflow is installed or disabled")
-      : warning("PR checks workflow", "PR checks workflow missing; GitHub will not validate branch pushes"),
   );
 
   return checks;

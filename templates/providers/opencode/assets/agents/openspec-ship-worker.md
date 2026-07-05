@@ -72,11 +72,10 @@ For one eligible completed change:
    verification updates for that change.
 3. Verify artifact completion and run
    `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`.
-4. Run required local push checks from the worktree:
-   - `npm run test:types` is blocking.
-   - `npm run lint` is blocking only when it exits non-zero.
-   - `npm run format:check` is advisory unless it only reports selected-change
-     drift that can be fixed safely.
+4. Run the project checks configured in `.openspec-shipper/config.json` when
+   they exist and are applicable to this repository. If the configured check is
+   missing or clearly belongs to another stack, report the mismatch as a
+   blocker instead of inventing npm scripts.
 5. If final verification changes intended selected-change files, commit those
    changes with a Conventional Commit. Do not create empty commits.
 6. Run commitlint for any local commit that will be pushed.

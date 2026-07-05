@@ -18,6 +18,7 @@ describe("target setup", () => {
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8")).toContain('"profile": "node-npm"');
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/openspec-config.example.yaml"), "utf8")).toContain("OpenSpec Shipper workflow source");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.md"), "utf8")).toBe("# OpenSpec Shipper Queue\n\n");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("worktrees/");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("node_modules/");

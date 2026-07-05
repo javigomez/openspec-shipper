@@ -3,6 +3,7 @@
 This repository has OpenSpec Shipper assets installed:
 
 - `.openspec-shipper/config.json`
+- `.openspec-shipper/openspec-config.example.yaml`
 - `.opencode/commands`
 - `.opencode/agents`
 - `.opencode/rules`

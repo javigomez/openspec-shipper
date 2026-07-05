@@ -123,6 +123,7 @@ npx openspec-shipper init --profile node-npm
 `init` installs:
 
 - `.openspec-shipper/config.json` and `.openspec-shipper/.env.example`
+- `.openspec-shipper/openspec-config.example.yaml` as optional OpenSpec config guidance
 - `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
 - GitHub workflows for auto PR and PR checks
 - branch/OpenSpec validation helper scripts

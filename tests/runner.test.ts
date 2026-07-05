@@ -394,6 +394,48 @@ describe("runner", () => {
     expect(queue).toContain("OpenCode command file not found");
   });
 
+  test("blocks ship before execution when git remote origin is missing", async () => {
+    const harness = await createHarness("- [ ] ship\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      gitRemoteDetector: async () => undefined,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("Git remote origin is not configured");
+  });
+
+  test("blocks deliver ship phase before waiting for merge when git remote origin is missing", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      gitRemoteDetector: async () => undefined,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("Git remote origin is not configured");
+    expect(queue).not.toContain("waiting_for_merge");
+  });
+
   test("next mode does not mutate the queue when opencode is already active", async () => {
     const harness = await createHarness("- [ ] ship\n");
     let called = false;
@@ -578,6 +620,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     heartbeatMs: 0,
     maxBlockedTasks: 0,
     processDetector: async () => [],
+    gitRemoteDetector: async () => "git@github.com:example/project.git",
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };
 

@@ -47,6 +47,7 @@ export type RunnerConfig = {
   maxBlockedTasks: number;
   executor?: Executor;
   processDetector?: ProcessDetector;
+  gitRemoteDetector?: GitRemoteDetector;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -81,6 +82,7 @@ export type ExecutorResult = {
 };
 
 export type ProcessDetector = () => Promise<string[]>;
+export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
 export type Sleep = (ms: number) => Promise<void>;
 
 const DEFAULT_LOOP_DELAY_MS = 120_000;
@@ -445,11 +447,24 @@ async function validateTaskPreflight(
   config: RunnerConfig,
   task: QueueTask,
 ): Promise<{ ok: true; commandPath: string } | { ok: false; commandPath: string; reason: string }> {
-  const commandName = openCodeCommandName(task.action === "deliver" ? deliverPhase(task) : task.action);
+  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  const commandName = openCodeCommandName(phase);
+  const commandPath =
+    provider(config).id === "opencode"
+      ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
+      : "(provider does not use OpenCode command files)";
+
+  if (phase === "ship" && !(await gitRemoteOrigin(config))) {
+    return {
+      ok: false,
+      commandPath,
+      reason: "Git remote origin is not configured; cannot push branch or open PR.",
+    };
+  }
+
   if (provider(config).id !== "opencode") {
     return { ok: true, commandPath: "(provider does not use OpenCode command files)" };
   }
-  const commandPath = join(config.projectDir, ".opencode", "commands", `${commandName}.md`);
 
   if (commandName.startsWith("/")) {
     return {
@@ -468,6 +483,11 @@ async function validateTaskPreflight(
   }
 
   return { ok: true, commandPath };
+}
+
+async function gitRemoteOrigin(config: RunnerConfig): Promise<string | undefined> {
+  const detector = config.gitRemoteDetector ?? detectGitRemoteOrigin;
+  return await detector(config.projectDir);
 }
 
 async function executeTask(
@@ -788,6 +808,15 @@ export async function detectActiveOpenCodeProcesses(): Promise<string[]> {
     .map((line) => line.trim())
     .filter(Boolean)
     .map(describeProcess);
+}
+
+export async function detectGitRemoteOrigin(projectDir: string): Promise<string | undefined> {
+  const result = spawnSync("git", ["-C", projectDir, "remote", "get-url", "origin"], { encoding: "utf8" });
+  if (result.status !== 0) {
+    return undefined;
+  }
+
+  return result.stdout.trim() || undefined;
 }
 
 function describeProcess(pid: string): string {

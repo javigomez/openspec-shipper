@@ -111,7 +111,7 @@ jobs:
               "",
               "## Tests",
               "",
-              "- PR Checks workflow will report branch, commit, type, lint, and unit validation.",
+              "- Run the target repository checks configured for this project.",
             ].join("\n");
 
             const { data: pr } = await github.rest.pulls.create({

@@ -20,4 +20,116 @@ permissions:
 jobs:
   open-pr:
     name: Open PR for pushed branch
-    uses: javigomez/openspec-shipper/.github/workflows/open-pr-on-branch-push-reusable.yml@main
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether this push should open a PR
+        id: readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branch="${GITHUB_REF_NAME}"
+          change_name="${branch#*/}"
+
+          should_create="true"
+          summary="- Auto-opened from branch push."
+
+          ahead_count="$(git rev-list --count "origin/main..HEAD")"
+          if [ "${ahead_count}" = "0" ]; then
+            should_create="false"
+            summary="- Branch ${branch} has no commits ahead of main, so PR creation is skipped."
+          fi
+
+          if [ "${should_create}" = "true" ] && [ -d "openspec/changes/${change_name}" ]; then
+            tasks_file="openspec/changes/${change_name}/tasks.md"
+
+            if [ ! -f "${tasks_file}" ]; then
+              should_create="false"
+              summary="- OpenSpec change ${change_name} has no tasks.md yet, so PR creation is deferred."
+            else
+              incomplete_count="$(grep -Ec '^[[:space:]]*- \[ \]' "${tasks_file}" || true)"
+              total_count="$(grep -Ec '^[[:space:]]*- \[[ xX]\]' "${tasks_file}" || true)"
+
+              if [ "${total_count}" = "0" ]; then
+                should_create="false"
+                summary="- OpenSpec change ${change_name} has no checkbox tasks, so PR creation is deferred."
+              elif [ "${incomplete_count}" != "0" ]; then
+                should_create="false"
+                summary="- OpenSpec change ${change_name} still has ${incomplete_count} incomplete task(s), so PR creation is deferred."
+              else
+                summary="- OpenSpec change ${change_name} has all tasks complete; archive will run on main after merge."
+              fi
+            fi
+          elif [ "${should_create}" = "true" ] && [ -d "openspec/changes/archive" ] && find "openspec/changes/archive" -maxdepth 1 -type d -name "*-${change_name}" | grep -q .; then
+            summary="- Auto-opened for legacy archived OpenSpec change ${change_name}."
+          fi
+
+          {
+            echo "should_create=${should_create}"
+            echo "branch_name=${branch}"
+            echo "latest_subject<<EOF"
+            git log -1 --pretty=%s
+            echo "EOF"
+            echo "summary_line<<EOF"
+            echo "${summary}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Create PR when none is open yet
+        if: steps.readiness.outputs.should_create == 'true'
+        uses: actions/github-script@v7
+        env:
+          BRANCH_NAME: ${{ steps.readiness.outputs.branch_name }}
+          LATEST_SUBJECT: ${{ steps.readiness.outputs.latest_subject }}
+          SUMMARY_LINE: ${{ steps.readiness.outputs.summary_line }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = process.env.BRANCH_NAME;
+            const latestSubject = process.env.LATEST_SUBJECT.trim();
+            const summaryLine = process.env.SUMMARY_LINE.trim();
+            const head = `${owner}:${branch}`;
+
+            const { data: prs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              head,
+              base: "main",
+              per_page: 100,
+            });
+
+            if (prs.length > 0) {
+              core.info(`Open PR already exists for ${branch}: #${prs[0].number}`);
+              return;
+            }
+
+            const title = latestSubject || branch;
+            const body = [
+              "## Summary",
+              "",
+              summaryLine,
+              "",
+              "## Validation",
+              "",
+              "- Run the target repository checks configured for this project.",
+            ].join("\n");
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner,
+              repo,
+              head: branch,
+              base: "main",
+              title,
+              body,
+            });
+
+            core.info(`Created PR #${pr.number} for ${branch}`);

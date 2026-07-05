@@ -2,6 +2,7 @@
   "name": "openspec-shipper",
   "version": "0.1.1",
   "description": "Ship OpenSpec changes through an agent-backed queue.",
+  "license": "MIT",
   "bin": {
     "openspec-shipper": "dist/infrastructure/cli.js"
   },

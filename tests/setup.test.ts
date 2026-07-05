@@ -2,13 +2,13 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { installOrchesterKit } from "../src/setup";
+import { installShipperKit } from "../src/setup";
 
 describe("target setup", () => {
-  test("installs the Orchester kit into a target repository", async () => {
+  test("installs the OpenSpec Shipper kit into a target repository", async () => {
     const harness = await createHarness();
 
-    const result = await installOrchesterKit({
+    const result = await installShipperKit({
       rootDir: harness.rootDir,
       projectDir: harness.projectDir,
       profile: "node-npm",
@@ -16,7 +16,8 @@ describe("target setup", () => {
 
     expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-apply-worktree.md"))).toBe(true);
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
-    expect(await readFile(join(harness.projectDir, ".orchester/config.json"), "utf8")).toContain('"profile": "node-npm"');
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8")).toContain('"profile": "node-npm"');
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("worktrees/");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("node_modules/");
     const packageJson = JSON.parse(await readFile(join(harness.projectDir, "package.json"), "utf8"));
@@ -28,10 +29,10 @@ describe("target setup", () => {
     const harness = await createHarness();
     const workflowPath = join(harness.projectDir, ".github/workflows/pr-checks.yml");
 
-    await installOrchesterKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
+    await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
     await writeFile(workflowPath, "name: Custom Checks\n");
 
-    const result = await installOrchesterKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
+    const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
 
     expect(result.find((file) => file.target === workflowPath)?.status).toBe("drifted");
     expect(await readFile(workflowPath, "utf8")).toBe("name: Custom Checks\n");
@@ -41,10 +42,10 @@ describe("target setup", () => {
     const harness = await createHarness();
     const workflowPath = join(harness.projectDir, ".github/workflows/pr-checks.yml");
 
-    await installOrchesterKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
+    await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
     await writeFile(workflowPath, "name: Custom Checks\n");
 
-    const result = await installOrchesterKit({ rootDir: harness.rootDir, projectDir: harness.projectDir, force: true });
+    const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir, force: true });
 
     expect(result.find((file) => file.target === workflowPath)?.status).toBe("updated");
     expect(await readFile(workflowPath, "utf8")).toContain("name: PR Checks");

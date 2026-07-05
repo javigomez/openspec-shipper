@@ -1,0 +1,47 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { queueAdd } from "../src/application/queue/queue-add";
+import type { RunnerConfig } from "../src/runner";
+
+describe("queue add", () => {
+  test("creates a queue and avoids duplicate changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shipper-queue-"));
+    const config = testConfig(join(dir, ".openspec-shipper/queue.md"));
+
+    expect(await queueAdd(config, ["add-name-greeting"])).toBe(0);
+    expect(await queueAdd(config, ["add-name-greeting"])).toBe(0);
+
+    const queue = await readFile(config.queuePath, "utf8");
+    expect(queue.match(/add-name-greeting/g)).toHaveLength(1);
+  });
+
+  test("adds dependencies as queue metadata", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "shipper-queue-"));
+    const config = testConfig(join(dir, ".openspec-shipper/queue.md"));
+
+    expect(await queueAdd(config, ["add-spanish-greeting", "--depends-on", "add-name-greeting"])).toBe(0);
+
+    const queue = await readFile(config.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver add-spanish-greeting <!-- depends_on: add-name-greeting -->");
+  });
+});
+
+function testConfig(queuePath: string): RunnerConfig {
+  return {
+    rootDir: join(queuePath, ".."),
+    projectDir: join(queuePath, ".."),
+    queuePath,
+    stateDir: join(queuePath, "..", "runs"),
+    opencodeBin: "opencode",
+    opencodeStatsIntervalMs: 120_000,
+    opencodeStatsTimeoutMs: 10_000,
+    opencodeStatsProject: "",
+    loopDelayMs: 0,
+    busyDelayMs: 0,
+    taskTimeoutMs: 1_000,
+    heartbeatMs: 0,
+    maxBlockedTasks: 0,
+  };
+}

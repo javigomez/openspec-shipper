@@ -1,7 +1,10 @@
 #!/usr/bin/env node
+import { access } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { stdin as input, stdout as output } from "node:process";
 import { printDoctorReport, runDoctor } from "../application/doctor/doctor.js";
-import { isShipperProfile, type ShipperProfile } from "../domain/config/shipper-config.js";
+import { isShipperProfile, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
 import { defaultConfig, runQueue, type RunnerMode } from "../application/queue/runner.js";
 import { installShipperKit } from "../application/init/setup.js";
 import { loadShipperEnv, type ShipperCliFlags } from "./env/load-shipper-env.js";
@@ -17,7 +20,9 @@ export async function runCli(argv: string[]): Promise<void> {
   if (normalized.command === "setup-target" || normalized.command === "init" || normalized.command === "update") {
     const command = normalized.command;
     const parsed = parseTargetOptions(normalized.args);
-    const projectDir = parsed.projectDir ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
+    const interactive = command === "init" && !parsed.yes && input.isTTY && output.isTTY;
+    const options = interactive ? await promptInitOptions(parsed, global.flags) : parsed;
+    const projectDir = options.projectDir ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
     if (!projectDir) {
       console.error(`OPENSPEC_SHIPPER_PROJECT_DIR is required, or pass it as \`${command} <path>\`.`);
       process.exitCode = 2;
@@ -27,13 +32,20 @@ export async function runCli(argv: string[]): Promise<void> {
     const installed = await installShipperKit({
       rootDir: ROOT_DIR,
       projectDir,
-      profile: parsed.profile,
-      force: parsed.force,
+      profile: options.profile,
+      provider: options.provider ?? providerFlag(global.flags.provider),
+      force: options.force,
     });
     console.log(`Processed ${installed.length} OpenSpec Shipper file(s) for ${projectDir}:`);
     for (const file of installed) {
       console.log(`- [${file.status}] ${file.target}`);
     }
+    console.log("");
+    console.log("Next steps:");
+    console.log("  openspec-shipper doctor");
+    console.log("  openspec-shipper queue add <change-name>");
+    console.log("  openspec-shipper queue dry-run");
+    console.log("  openspec-shipper queue next");
     process.exitCode = 0;
     return;
   }
@@ -60,6 +72,14 @@ export async function runCli(argv: string[]): Promise<void> {
   process.exitCode = exitCode;
 }
 
+function providerFlag(value: string | undefined): ExecutorProviderId | undefined {
+  if (value === "opencode" || value === "codex-cli") {
+    return value;
+  }
+
+  return undefined;
+}
+
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   await runCli(process.argv.slice(2));
 }
@@ -75,10 +95,18 @@ function parseMode(argv: string[]): RunnerMode | undefined {
   return undefined;
 }
 
-function parseTargetOptions(argv: string[]): { projectDir?: string; profile: ShipperProfile; force: boolean } {
+function parseTargetOptions(argv: string[]): {
+  projectDir?: string;
+  profile: ShipperProfile;
+  provider?: ExecutorProviderId;
+  force: boolean;
+  yes: boolean;
+} {
   let projectDir: string | undefined;
   let profile: ShipperProfile = "node-npm";
+  let provider: ExecutorProviderId | undefined;
   let force = false;
+  let yes = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -89,6 +117,33 @@ function parseTargetOptions(argv: string[]): { projectDir?: string; profile: Shi
     if (arg === "--force") {
       force = true;
       continue;
+    }
+
+    if (arg === "--yes" || arg === "-y") {
+      yes = true;
+      continue;
+    }
+
+    if (arg === "--provider") {
+      const next = argv[index + 1];
+      if (next === "opencode" || next === "codex-cli") {
+        provider = next;
+        index += 1;
+        continue;
+      }
+
+      throw new Error("Expected --provider to be one of opencode, codex-cli.");
+    }
+
+    if (arg === "--package-manager") {
+      const next = argv[index + 1];
+      if (next === "npm" || next === "pnpm" || next === "bun") {
+        profile = profileForPackageManager(next);
+        index += 1;
+        continue;
+      }
+
+      throw new Error("Expected --package-manager to be one of npm, pnpm, bun.");
     }
 
     if (arg === "--profile") {
@@ -107,7 +162,85 @@ function parseTargetOptions(argv: string[]): { projectDir?: string; profile: Shi
     }
   }
 
-  return { projectDir, profile, force };
+  return { projectDir, profile, provider, force, yes };
+}
+
+function profileForPackageManager(packageManager: PackageManager): ShipperProfile {
+  switch (packageManager) {
+    case "npm":
+      return "node-npm";
+    case "pnpm":
+      return "node-pnpm";
+    case "bun":
+      return "bun";
+  }
+}
+
+async function promptInitOptions(
+  parsed: ReturnType<typeof parseTargetOptions>,
+  flags: ShipperCliFlags,
+): Promise<ReturnType<typeof parseTargetOptions>> {
+  const rl = createInterface({ input, output });
+  try {
+    const defaultProjectDir = parsed.projectDir ?? flags.projectDir ?? process.cwd();
+    const projectDir = answerOrDefault(
+      await rl.question(`Project directory (${defaultProjectDir}): `),
+      defaultProjectDir,
+    );
+    const detectedPackageManager = await detectPackageManager(projectDir);
+    const packageManager = parsePackageManager(
+      answerOrDefault(
+        await rl.question(`Package manager npm|pnpm|bun (${detectedPackageManager}): `),
+        detectedPackageManager,
+      ),
+      detectedPackageManager,
+    );
+    const provider = parseProvider(
+      answerOrDefault(
+        await rl.question(`Provider opencode|codex-cli (${parsed.provider ?? providerFlag(flags.provider) ?? "opencode"}): `),
+        parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
+      ),
+      parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
+    );
+
+    return {
+      ...parsed,
+      projectDir,
+      profile: profileForPackageManager(packageManager),
+      provider,
+    };
+  } finally {
+    rl.close();
+  }
+}
+
+function answerOrDefault(answer: string, fallback: string): string {
+  const trimmed = answer.trim();
+  return trimmed || fallback;
+}
+
+function parseProvider(value: string, fallback: ExecutorProviderId): ExecutorProviderId {
+  return value === "opencode" || value === "codex-cli" ? value : fallback;
+}
+
+function parsePackageManager(value: string, fallback: PackageManager): PackageManager {
+  return value === "npm" || value === "pnpm" || value === "bun" ? value : fallback;
+}
+
+async function detectPackageManager(projectDir: string): Promise<PackageManager> {
+  if (await fileExists(`${projectDir}/pnpm-lock.yaml`)) {
+    return "pnpm";
+  }
+  if (await fileExists(`${projectDir}/bun.lock`) || await fileExists(`${projectDir}/bun.lockb`)) {
+    return "bun";
+  }
+  return "npm";
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  return await access(path)
+    .then(() => true)
+    .catch(() => false);
 }
 
 function normalizeCommand(argv: string[]): { command: string; args: string[] } {

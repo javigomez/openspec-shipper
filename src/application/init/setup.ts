@@ -5,6 +5,7 @@ import {
   CONFIG_PATH,
   ENV_EXAMPLE_PATH,
   defaultShipperConfig,
+  type ExecutorProviderId,
   type ShipperProfile,
 } from "../../domain/config/shipper-config.js";
 
@@ -12,6 +13,7 @@ export type SetupConfig = {
   rootDir: string;
   projectDir: string;
   profile?: ShipperProfile;
+  provider?: ExecutorProviderId;
   force?: boolean;
 };
 
@@ -51,7 +53,11 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   ];
 
   const configPath = join(config.projectDir, CONFIG_PATH);
-  const configContent = `${JSON.stringify(defaultShipperConfig(profile), null, 2)}\n`;
+  const shipperConfig = defaultShipperConfig(profile);
+  if (config.provider) {
+    shipperConfig.executor.provider = config.provider;
+  }
+  const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
   installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample()));
 

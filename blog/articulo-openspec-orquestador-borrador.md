@@ -43,7 +43,8 @@ Y decidí automatizar esa parte.
 
 ---
 
-El resultado es el repositorio que acompaña a este artículo.
+El resultado es `openspec-shipper`, el paquete que acompaña a este
+artículo.
 
 No es un framework.
 
@@ -160,15 +161,61 @@ de Git, en los scripts de validación, en la configuración de OpenSpec y
 en pequeñas decisiones operativas como cuándo se puede abrir una PR o
 cuándo es seguro archivar un change.
 
-Así que el repositorio ha acabado convirtiéndose en algo más parecido a
-un kit instalable:
+Así que la distribución ha acabado cambiando de forma.
 
-- `target:init` prepara un repositorio con los comandos, agentes,
-  workflows, scripts y configuración base;
-- `target:doctor` comprueba que el repo tiene lo necesario antes de
-  gastar tokens;
-- `target:update` permite actualizar las plantillas sin pisar cambios
-  locales;
+La primera idea era publicar sólo el repositorio del runner. Pero eso
+dejaba demasiadas piezas fuera: quien lo probara tendría que copiar a
+mano workflows, comandos de OpenCode, reglas, scripts, configuración y
+variables de entorno.
+
+Ahora el camino principal es instalar un paquete npm dentro del repo
+target:
+
+```bash
+npm install -D openspec-shipper
+npx openspec-shipper init
+npx openspec-shipper doctor
+```
+
+Ese `init` prepara el repositorio con todo lo que necesita el flujo:
+
+- comandos, agentes y reglas de OpenCode;
+- workflows de GitHub;
+- scripts de validación;
+- configuración base;
+- una cola local en `.openspec-shipper/queue.md`;
+- un `.openspec-shipper/.env` propio del shipper.
+
+La cola, los logs y el estado vivo quedan en `.openspec-shipper/` y se
+ignoran en Git. No son código de producto. Son estado operacional.
+
+Eso permite algo importante: el `.env` de la aplicación sigue siendo de
+la aplicación. `openspec-shipper` no lo carga. Sólo lee su propio
+`.openspec-shipper/.env`, así que no mezcla secretos ni configuración
+del proyecto con la configuración del orquestador.
+
+El modo híbrido sigue existiendo. Si prefieres ejecutar la herramienta
+desde fuera del repo target puedes hacerlo pasando `--project` y
+`--queue`. Pero para la mayoría de personas el flujo normal será:
+
+```bash
+npx openspec-shipper queue add add-name-greeting
+npx openspec-shipper queue dry-run
+npx openspec-shipper queue next
+```
+
+También he cambiado la arquitectura interna para que OpenCode no sea una
+suposición escondida dentro del runner. En la v1, OpenCode es el provider
+estable. Pero el contrato deja una puerta abierta a otros ejecutores:
+Codex CLI, Claude Code o cualquier otro agente que pueda recibir una
+tarea, ejecutarla y devolver una señal clara de éxito o bloqueo.
+
+No quiero prometer más de lo que está probado: Codex CLI queda como
+provider experimental hasta validarlo manualmente en el repo de demo.
+Pero la dirección ya está marcada.
+
+El paquete mantiene las mismas ideas operativas:
+
 - el modo inicial es conservador: push y archive quedan desactivados
   hasta que una persona los habilita;
 - y hay un repo mínimo de demo con un `Hello, world!` y un change de
@@ -180,6 +227,12 @@ Creo que esa distinción importa.
 No es "clona este repo y ya está".
 
 Es "instala una capa de ejecución alrededor de tu repo".
+
+Para el GIF del artículo quiero enseñar el flujo completo sobre el repo
+de demo: clonar, instalar, inicializar, añadir tres changes a la cola,
+ver el `dry-run` y lanzar el primer `next`. La gracia no es enseñar magia.
+La gracia es enseñar que la coordinación que antes hacía yo a mano ahora
+queda escrita como una cola pequeña, visible y auditable.
 
 Si utilizas OpenSpec ---o cualquier flujo de desarrollo basado en
 especificaciones--- quizá te resulte útil como punto de partida. Si es

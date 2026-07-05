@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Ship OpenSpec changes through an agent-backed queue.",
   "bin": {
-    "openspec-shipper": "./dist/infrastructure/cli.js"
+    "openspec-shipper": "dist/infrastructure/cli.js"
   },
   "files": [
     "dist",

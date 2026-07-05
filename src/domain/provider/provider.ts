@@ -1,6 +1,4 @@
-import type { DeliverPhase, QueueTask } from "../queue/queue";
-import type { ShipperConfig } from "../config/shipper-config";
-
+import type { DeliverPhase, QueueTask } from "../queue/queue.js";
 export type ExecutorProviderId = "opencode" | "codex-cli";
 
 export type ProviderCommand = {
@@ -13,10 +11,23 @@ export type BuildCommandInput = {
   phase: DeliverPhase;
   task: QueueTask;
   projectDir: string;
-  config: Pick<
-    ShipperConfig,
-    "executor" | "opencodePrintLogs" | "opencodeLogLevel"
-  >;
+  config: ProviderRuntimeConfig;
+};
+
+export type ProviderRuntimeConfig = {
+  executor: {
+    provider: ExecutorProviderId;
+    opencode: {
+      bin: string;
+      model?: string;
+    };
+    codex: {
+      bin: string;
+      model?: string;
+    };
+  };
+  opencodePrintLogs?: boolean;
+  opencodeLogLevel?: string;
 };
 
 export type DoctorCheck = {

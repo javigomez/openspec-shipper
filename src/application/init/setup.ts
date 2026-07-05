@@ -6,7 +6,7 @@ import {
   ENV_EXAMPLE_PATH,
   defaultShipperConfig,
   type ShipperProfile,
-} from "../../domain/config/shipper-config";
+} from "../../domain/config/shipper-config.js";
 
 export type SetupConfig = {
   rootDir: string;

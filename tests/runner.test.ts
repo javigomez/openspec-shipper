@@ -544,7 +544,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     rootDir,
     projectDir: rootDir,
     queuePath,
-    stateDir: join(rootDir, ".orchester"),
+    stateDir: join(rootDir, ".openspec-shipper"),
     opencodeBin: "mock-opencode",
     opencodeStatsIntervalMs: 120_000,
     opencodeStatsTimeoutMs: 10_000,

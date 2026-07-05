@@ -4,7 +4,7 @@ context: |
   Project: describe this repository in one or two paragraphs.
   Architecture: document the boundaries agents must preserve.
   Testing: document the checks that prove a change is safe.
-  Orchester workflow source of truth: docs/agents/orchester-workflow.md.
+  OpenSpec Shipper workflow source of truth: docs/agents/openspec-shipper-workflow.md.
   OpenSpec planning and archive operations run from the clean root main checkout.
   Implementation work runs in worktrees/<change-name> on <type>/<change-name>.
 

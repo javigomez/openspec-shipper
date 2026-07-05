@@ -1,1 +1,1 @@
-export * from "./infrastructure/cli";
+export * from "./infrastructure/cli.js";

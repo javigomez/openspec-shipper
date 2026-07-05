@@ -61,8 +61,8 @@ commit, or push.
 For the selected change:
 
 1. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`.
-2. Before archiving, inspect `.orchester/config.json` when it exists. If it
-   contains `"enableArchive": false`, stop and report that Orchester archive
+2. Before archiving, inspect `.openspec-shipper/config.json` when it exists. If it
+   contains `"enableArchive": false`, stop and report that OpenSpec Shipper archive
    safety is disabled. Do not archive until a human enables it.
 3. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec archive <change-name> -y`.
 4. Inspect the diff and verify it only touches OpenSpec change/archive and

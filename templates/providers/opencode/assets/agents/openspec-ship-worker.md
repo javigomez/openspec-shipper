@@ -14,7 +14,7 @@ contains the guardrails for the orchestrator `ship` queue task.
 
 Use relative repository paths only. Never create scratch files in `/tmp`,
 `/var`, `$HOME`, or absolute external directories. For temporary verification
-copies, use a repo-local ignored directory such as `.orchester/tmp/` inside the
+copies, use a repo-local ignored directory such as `.openspec-shipper/tmp/` inside the
 selected worktree. If a command would request `external_directory` permission,
 stop and report the command instead.
 
@@ -80,8 +80,8 @@ For one eligible completed change:
 5. If final verification changes intended selected-change files, commit those
    changes with a Conventional Commit. Do not create empty commits.
 6. Run commitlint for any local commit that will be pushed.
-7. Before pushing, inspect `.orchester/config.json` when it exists. If it
-   contains `"enablePush": false`, stop and report that Orchester push safety is
+7. Before pushing, inspect `.openspec-shipper/config.json` when it exists. If it
+   contains `"enablePush": false`, stop and report that OpenSpec Shipper push safety is
    disabled. Do not push until a human enables it.
 8. Verify repo-local Git identity is configured with `git config user.name` and
    `git config user.email`.

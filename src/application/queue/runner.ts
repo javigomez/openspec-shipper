@@ -13,11 +13,11 @@ import {
   parseQueue,
   taskSlug,
   type QueueTask,
-} from "../../domain/queue/queue";
-import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider";
-import { DEFAULT_QUEUE_PATH, DEFAULT_STATE_DIR } from "../../domain/config/shipper-config";
-import { providerById } from "../../infrastructure/providers/registry";
-import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider";
+} from "../../domain/queue/queue.js";
+import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
+import { DEFAULT_QUEUE_PATH, DEFAULT_STATE_DIR } from "../../domain/config/shipper-config.js";
+import { providerById } from "../../infrastructure/providers/registry.js";
+import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
 
@@ -208,7 +208,7 @@ async function runSingleTaskWithLock(
   task: QueueTask,
   providerCommand: ProviderCommand,
 ): Promise<number> {
-  const lockPath = join(config.stateDir, "orchester.lock");
+  const lockPath = join(config.stateDir, "shipper.lock");
   const lock = await acquireLock(config, lockPath, task.rawCommand, "immediate");
   if (!lock.acquired) {
     return 1;
@@ -233,7 +233,7 @@ async function runSingleTaskWithLock(
 }
 
 async function runLoopWithLock(config: RunnerConfig): Promise<number> {
-  const lockPath = join(config.stateDir, "orchester.lock");
+  const lockPath = join(config.stateDir, "shipper.lock");
   const lock = await acquireLock(config, lockPath, "queue:run", "graceful");
   if (!lock.acquired) {
     return 1;
@@ -462,7 +462,7 @@ async function validateTaskPreflight(
     return {
       ok: false,
       commandPath,
-      reason: `OpenCode command file not found at ${commandPath}. Check PROJECT_DIR and command name.`,
+      reason: `OpenCode command file not found at ${commandPath}. Check OPENSPEC_SHIPPER_PROJECT_DIR and command name.`,
     };
   }
 
@@ -700,7 +700,7 @@ export async function spawnExecutor(
         return;
       }
 
-      const message = `\nOrchester task timed out after ${formatDuration(options.timeoutMs)}; terminating OpenCode.\n`;
+      const message = `\nOpenSpec Shipper task timed out after ${formatDuration(options.timeoutMs)}; terminating OpenCode.\n`;
       output = capOutput(`${output}${message}`);
       process.stderr.write(message);
       log.write(message);
@@ -769,7 +769,7 @@ export async function spawnExecutor(
 }
 
 export async function detectActiveOpenCodeProcesses(): Promise<string[]> {
-  if (process.env.ORCHESTER_ALLOW_ACTIVE_OPENCODE === "1") {
+  if (process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR === "1" || process.env.ORCHESTER_ALLOW_ACTIVE_OPENCODE === "1") {
     return [];
   }
 
@@ -989,7 +989,7 @@ function printBusyWait(
   if (state.checks === 1) {
     console.log(`Queue busy before spending tokens:\n${reason}`);
     console.log("The queue will not start another OpenCode worker while this process is active.");
-    console.log("Stop that process if it is stale, or set ORCHESTER_ALLOW_ACTIVE_OPENCODE=1 to override.");
+    console.log("Stop that process if it is stale, or set OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=1 to override.");
   } else {
     console.log(
       `Still busy after ${formatDuration(now - state.firstSeenAt)} (${state.checks} checks): same opencode process(es).`,

@@ -1,1 +1,1 @@
-export * from "./application/init/setup";
+export * from "./application/init/setup.js";

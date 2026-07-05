@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import { printDoctorReport, runDoctor } from "../application/doctor/doctor";
-import { isShipperProfile, type ShipperProfile } from "../domain/config/shipper-config";
-import { defaultConfig, runQueue, type RunnerMode } from "../application/queue/runner";
-import { installShipperKit } from "../application/init/setup";
-import { loadShipperEnv, type ShipperCliFlags } from "./env/load-shipper-env";
+import { printDoctorReport, runDoctor } from "../application/doctor/doctor.js";
+import { isShipperProfile, type ShipperProfile } from "../domain/config/shipper-config.js";
+import { defaultConfig, runQueue, type RunnerMode } from "../application/queue/runner.js";
+import { installShipperKit } from "../application/init/setup.js";
+import { loadShipperEnv, type ShipperCliFlags } from "./env/load-shipper-env.js";
 
 const QUEUE_MODES = new Set(["next", "run", "status", "dry-run", "stop", "stats"]);
 const ROOT_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
 export async function runCli(argv: string[]): Promise<void> {
-  const normalized = normalizeCommand(argv);
-  const global = parseGlobalFlags(normalized.args);
+  const global = parseGlobalFlags(argv);
+  const normalized = normalizeCommand(global.rest);
   await loadShipperEnv(global.flags);
 
   if (normalized.command === "setup-target" || normalized.command === "init" || normalized.command === "update") {
     const command = normalized.command;
-    const parsed = parseTargetOptions(global.rest);
+    const parsed = parseTargetOptions(normalized.args);
     const projectDir = parsed.projectDir ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
     if (!projectDir) {
-      console.error(`PROJECT_DIR is required, or pass it as \`${command} <path>\`.`);
+      console.error(`OPENSPEC_SHIPPER_PROJECT_DIR is required, or pass it as \`${command} <path>\`.`);
       process.exitCode = 2;
       return;
     }
@@ -39,18 +39,18 @@ export async function runCli(argv: string[]): Promise<void> {
   }
 
   if (normalized.command === "doctor") {
-    const projectDir = global.rest[0] ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
+    const projectDir = normalized.args[0] ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
     process.exitCode = printDoctorReport(await runDoctor(projectDir));
     return;
   }
 
   if (normalized.command === "add") {
-    const { queueAdd } = await import("../application/queue/queue-add");
-    process.exitCode = await queueAdd(defaultConfig(), global.rest);
+    const { queueAdd } = await import("../application/queue/queue-add.js");
+    process.exitCode = await queueAdd(defaultConfig(), normalized.args);
     return;
   }
 
-  const mode = parseMode([normalized.command, ...global.rest]);
+  const mode = parseMode([normalized.command, ...normalized.args]);
   if (!mode) {
     process.exitCode = 2;
     return;
@@ -58,6 +58,10 @@ export async function runCli(argv: string[]): Promise<void> {
 
   const exitCode = await runQueue(mode, defaultConfig());
   process.exitCode = exitCode;
+}
+
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  await runCli(process.argv.slice(2));
 }
 
 function parseMode(argv: string[]): RunnerMode | undefined {

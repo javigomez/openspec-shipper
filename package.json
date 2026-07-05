@@ -1,26 +1,37 @@
 {
-  "name": "ai-workflow-orchester",
-  "module": "index.ts",
+  "name": "openspec-shipper",
+  "version": "0.1.0",
+  "description": "Ship OpenSpec changes through an agent-backed queue.",
+  "bin": {
+    "openspec-shipper": "./dist/infrastructure/cli.js"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
-  "private": true,
+  "private": false,
   "scripts": {
-    "queue:next": "bun run index.ts next",
-    "queue:run": "bun run index.ts run",
-    "queue:status": "bun run index.ts status",
-    "queue:dry-run": "bun run index.ts dry-run",
-    "queue:stop": "bun run index.ts stop",
-    "queue:stats": "bun run index.ts stats",
+    "queue:next": "bun run index.ts queue next",
+    "queue:run": "bun run index.ts queue run",
+    "queue:status": "bun run index.ts queue status",
+    "queue:dry-run": "bun run index.ts queue dry-run",
+    "queue:stop": "bun run index.ts queue stop",
+    "queue:stats": "bun run index.ts queue stats",
     "target:setup": "bun run index.ts setup-target",
     "target:init": "bun run index.ts init",
     "target:update": "bun run index.ts update",
     "target:doctor": "bun run index.ts doctor",
-    "test": "bun test"
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "dotenv": "^17.4.2"
-  },
-  "peerDependencies": {
     "typescript": "^5"
   }
 }

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { normalizeChangeName, parseQueue } from "../../domain/queue/queue";
-import type { RunnerConfig } from "./runner";
+import { normalizeChangeName, parseQueue } from "../../domain/queue/queue.js";
+import type { RunnerConfig } from "./runner.js";
 
 export async function queueAdd(config: RunnerConfig, argv: string[]): Promise<number> {
   const change = normalizeChangeName(argv[0] ?? "");

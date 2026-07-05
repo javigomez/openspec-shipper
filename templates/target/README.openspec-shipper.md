@@ -1,23 +1,23 @@
-# Orchester Setup
+# OpenSpec Shipper Setup
 
-This repository has Orchester assets installed:
+This repository has OpenSpec Shipper assets installed:
 
-- `.orchester/config.json`
+- `.openspec-shipper/config.json`
 - `.opencode/commands`
 - `.opencode/agents`
 - `.opencode/rules`
 - `.github/workflows/open-pr-on-branch-push.yml`
 - `.github/workflows/pr-checks.yml`
 
-Run from the Orchester repository:
+Run from the target repository after installing the npm package:
 
 ```bash
-bun run target:doctor /absolute/path/to/this/repo
+npx openspec-shipper doctor
 ```
 
 Start conservatively with:
 
 ```bash
-bun run queue:dry-run
-bun run queue:next
+npx openspec-shipper queue dry-run
+npx openspec-shipper queue next
 ```

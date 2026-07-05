@@ -1,6 +1,6 @@
-import type { ExecutorProvider, ExecutorProviderId } from "../../domain/provider/provider";
-import { codexCliProvider } from "./codex-cli/provider";
-import { opencodeProvider } from "./opencode/provider";
+import type { ExecutorProvider, ExecutorProviderId } from "../../domain/provider/provider.js";
+import { codexCliProvider } from "./codex-cli/provider.js";
+import { opencodeProvider } from "./opencode/provider.js";
 
 const providers: Record<ExecutorProviderId, ExecutorProvider> = {
   opencode: opencodeProvider,

@@ -1,1 +1,1 @@
-export * from "./domain/queue/queue";
+export * from "./domain/queue/queue.js";

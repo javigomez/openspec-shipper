@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readShipperConfig, type ShipperConfig } from "../../domain/config/shipper-config";
+import { readShipperConfig, type ShipperConfig } from "../../domain/config/shipper-config.js";
 
 export type DoctorCheck = {
   name: string;

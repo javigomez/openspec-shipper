@@ -87,14 +87,14 @@ describe("queue parser", () => {
 
     const next = advanceDeliverTask(result.lines, task, {
       timestamp: "2026-06-25T12:00:00.000Z",
-      logPath: ".orchester/runs/apply.log",
+      logPath: ".openspec-shipper/runs/apply.log",
     });
 
     expect(next).toContain(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; advanced: 2026-06-25T12:00:00.000Z; log: .orchester/runs/apply.log -->",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; advanced: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
-      "![ship](https://img.shields.io/badge/ship-pending-blue) · _([log](.orchester/runs/apply.log))_",
+      "![ship](https://img.shields.io/badge/ship-pending-blue) · _([log](.openspec-shipper/runs/apply.log))_",
     );
   });
 
@@ -112,7 +112,7 @@ describe("queue parser", () => {
 
   test("ignores visual badges and log links when parsing commands", () => {
     const result = parseQueue(
-      "- [x] deliver test-10-migrate-tap-zone-layer-rntl <!-- done: 2026-06-25T19:22:32.954Z; log: .orchester/runs/deliver.log --> ![done](https://img.shields.io/badge/done-success-brightgreen) · _([log](.orchester/runs/deliver.log))_\n",
+      "- [x] deliver test-10-migrate-tap-zone-layer-rntl <!-- done: 2026-06-25T19:22:32.954Z; log: .openspec-shipper/runs/deliver.log --> ![done](https://img.shields.io/badge/done-success-brightgreen) · _([log](.openspec-shipper/runs/deliver.log))_\n",
     );
     const task = result.tasks[0]!;
 

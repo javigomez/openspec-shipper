@@ -1,1 +1,1 @@
-export * from "./domain/config/shipper-config";
+export * from "./domain/config/shipper-config.js";

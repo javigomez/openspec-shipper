@@ -1,5 +1,5 @@
-import { commandAcceptsChangeArgument, type DeliverPhase } from "../../../domain/queue/queue";
-import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider";
+import { commandAcceptsChangeArgument, type DeliverPhase } from "../../../domain/queue/queue.js";
+import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
 
 export const opencodeProvider: ExecutorProvider = {
   id: "opencode",

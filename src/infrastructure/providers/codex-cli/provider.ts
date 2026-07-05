@@ -1,4 +1,4 @@
-import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider";
+import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
 
 export const codexCliProvider: ExecutorProvider = {
   id: "codex-cli",

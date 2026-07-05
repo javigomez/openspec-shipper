@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ENV_PATH } from "../../domain/config/shipper-config";
+import { ENV_PATH } from "../../domain/config/shipper-config.js";
 
 export type ShipperCliFlags = {
   projectDir?: string;

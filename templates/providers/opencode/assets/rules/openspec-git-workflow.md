@@ -49,7 +49,7 @@ Rules:
 Use relative repository paths only. Do not write temporary files under `/tmp`,
 `/var`, `$HOME`, or any other absolute external directory. If a temporary copy
 is needed, create it inside the current repository checkout, for example
-`.orchester/tmp/` or `.opencode/tmp/`, and clean it up before committing.
+`.openspec-shipper/tmp/` or `.opencode/tmp/`, and clean it up before committing.
 
 If a tool asks for `external_directory` permission, stop and report the path as
 a blocker instead of retrying.

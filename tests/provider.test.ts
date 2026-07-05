@@ -12,7 +12,7 @@ const config = {
     },
     codex: {
       bin: "codex",
-      model: "gpt-5.1-codex",
+      model: "gpt-5.4",
     },
   },
   opencodePrintLogs: true,
@@ -74,7 +74,7 @@ describe("executor providers", () => {
       "never",
       "--model",
     ]);
-    expect(command.args).toContain("gpt-5.1-codex");
+    expect(command.args).toContain("gpt-5.4");
     expect(command.args.at(-1)).toContain("OpenSpec apply phase");
   });
 });

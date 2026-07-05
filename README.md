@@ -83,7 +83,7 @@ OPENSPEC_SHIPPER_PROVIDER=opencode
 OPENSPEC_SHIPPER_OPENCODE_BIN=opencode
 OPENSPEC_SHIPPER_OPENCODE_MODEL=opencode-go/deepseek-v4-pro
 OPENSPEC_SHIPPER_CODEX_BIN=codex
-OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.1-codex
+OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.4
 OPENSPEC_SHIPPER_PRINT_LOGS=1
 OPENSPEC_SHIPPER_LOG_LEVEL=ERROR
 OPENSPEC_SHIPPER_STATS=1
@@ -192,7 +192,7 @@ exists so the provider contract can be tested in the demo flow:
     "provider": "codex-cli",
     "codex": {
       "bin": "codex",
-      "model": "gpt-5.1-codex"
+      "model": "gpt-5.4"
     }
   }
 }

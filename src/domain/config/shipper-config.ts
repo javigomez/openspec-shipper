@@ -67,7 +67,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
       },
       codex: {
         bin: "codex",
-        model: "gpt-5.1-codex",
+        model: "gpt-5.4",
       },
     },
     github: {

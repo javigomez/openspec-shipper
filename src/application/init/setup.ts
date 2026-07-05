@@ -247,7 +247,7 @@ function defaultEnvExample(): string {
     "OPENSPEC_SHIPPER_OPENCODE_BIN=opencode",
     "OPENSPEC_SHIPPER_OPENCODE_MODEL=opencode-go/deepseek-v4-pro",
     "OPENSPEC_SHIPPER_CODEX_BIN=codex",
-    "OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.1-codex",
+    "OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.4",
     "OPENSPEC_SHIPPER_PRINT_LOGS=1",
     "OPENSPEC_SHIPPER_LOG_LEVEL=ERROR",
     "",

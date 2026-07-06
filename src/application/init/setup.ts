@@ -28,6 +28,13 @@ const TEMPLATE_DIR = "templates/providers/opencode/assets";
 const TARGET_DIR = ".opencode";
 const TARGET_TEMPLATE_DIR = "templates/target";
 const MANIFEST_PATH = ".openspec-shipper/installed.json";
+const SHIPPER_GITIGNORE_ENTRIES = [
+  ".openspec-shipper/.env",
+  ".openspec-shipper/queue.md",
+  ".openspec-shipper/runs/",
+  ".openspec-shipper/tmp/",
+  "worktrees/",
+];
 
 type Manifest = {
   version: 1;
@@ -65,20 +72,46 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   installed.push(await installGeneratedFile(config, "generated:shipper-queue-example", join(config.projectDir, ".openspec-shipper/queue.example.md"), defaultQueueExample()));
 
   const gitignorePath = join(config.projectDir, ".gitignore");
-  const gitignoreAppend = ["", "# Dependencies", "node_modules/", "", "# OpenSpec Shipper", ".openspec-shipper/.env", ".openspec-shipper/queue.md", ".openspec-shipper/runs/", ".openspec-shipper/tmp/", "worktrees/"].join("\n");
-  const currentGitignore = await readText(gitignorePath);
-  if (!currentGitignore) {
-    installed.push(await installGeneratedFile(config, "generated:gitignore", gitignorePath, `${gitignoreAppend.trimStart()}\n`));
-  } else if (!currentGitignore.includes("worktrees/") || !currentGitignore.includes(".openspec-shipper/runs/")) {
-    await writeFile(gitignorePath, `${currentGitignore.replace(/\s*$/, "\n")}${gitignoreAppend}\n`);
-    installed.push({ source: "generated:gitignore", target: gitignorePath, status: "updated" });
-  } else {
-    installed.push({ source: "generated:gitignore", target: gitignorePath, status: "unchanged" });
-  }
+  installed.push(await ensureShipperGitignore(config, gitignorePath));
 
   installed.push(await updatePackageJson(config));
 
   return installed;
+}
+
+async function ensureShipperGitignore(config: SetupConfig, gitignorePath: string): Promise<InstalledFile> {
+  const currentGitignore = await readText(gitignorePath);
+  const nextGitignore = shipperGitignoreContent(currentGitignore);
+
+  if (currentGitignore === nextGitignore) {
+    return { source: "generated:gitignore", target: gitignorePath, status: "unchanged" };
+  }
+
+  await writeFile(gitignorePath, nextGitignore);
+  return { source: "generated:gitignore", target: gitignorePath, status: currentGitignore ? "updated" : "installed" };
+}
+
+function shipperGitignoreContent(currentGitignore: string | undefined): string {
+  const current = currentGitignore ?? "";
+  const missingEntries = SHIPPER_GITIGNORE_ENTRIES.filter((entry) => !gitignoreContainsEntry(current, entry));
+  if (missingEntries.length === 0) {
+    return current;
+  }
+
+  if (current.includes("# OpenSpec Shipper")) {
+    return `${current.replace(/\s*$/, "\n")}${missingEntries.join("\n")}\n`;
+  }
+
+  const block = ["# OpenSpec Shipper", ...missingEntries].join("\n");
+  const prefix = current ? `${current.replace(/\s*$/, "\n\n")}` : "";
+  return `${prefix}${block}\n`;
+}
+
+function gitignoreContainsEntry(content: string, entry: string): boolean {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => line === entry);
 }
 
 export const installOrchesterKit = installShipperKit;

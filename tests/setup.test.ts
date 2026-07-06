@@ -22,8 +22,15 @@ describe("target setup", () => {
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/openspec-config.example.yaml"), "utf8")).toContain("OpenSpec Shipper workflow source");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.md"), "utf8")).toBe("# OpenSpec Shipper Queue\n\n");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.example.md"), "utf8")).toBe("# OpenSpec Changes to ship\n\n- [ ] deliver CHANGE_NAME\n");
-    expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("worktrees/");
-    expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toContain("node_modules/");
+    expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toBe([
+      "# OpenSpec Shipper",
+      ".openspec-shipper/.env",
+      ".openspec-shipper/queue.md",
+      ".openspec-shipper/runs/",
+      ".openspec-shipper/tmp/",
+      "worktrees/",
+      "",
+    ].join("\n"));
     const packageJson = JSON.parse(await readFile(join(harness.projectDir, "package.json"), "utf8"));
     expect(packageJson.scripts["openspec:cli"]).toBe("env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec");
     expect(packageJson.devDependencies["@fission-ai/openspec"]).toBe("^1.2.0");
@@ -66,6 +73,27 @@ describe("target setup", () => {
 
     expect(result.find((file) => file.target === queuePath)?.status).toBe("unchanged");
     expect(await readFile(queuePath, "utf8")).toBe("- [ ] deliver add-name-greeting\n");
+  });
+
+  test("adds only missing shipper gitignore entries", async () => {
+    const harness = await createHarness();
+    const gitignorePath = join(harness.projectDir, ".gitignore");
+    await writeFile(gitignorePath, ["dist/", "", "# OpenSpec Shipper", ".openspec-shipper/.env", "worktrees/", ""].join("\n"));
+
+    const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
+
+    expect(result.find((file) => file.target === gitignorePath)?.status).toBe("updated");
+    expect(await readFile(gitignorePath, "utf8")).toBe([
+      "dist/",
+      "",
+      "# OpenSpec Shipper",
+      ".openspec-shipper/.env",
+      "worktrees/",
+      ".openspec-shipper/queue.md",
+      ".openspec-shipper/runs/",
+      ".openspec-shipper/tmp/",
+      "",
+    ].join("\n"));
   });
 });
 

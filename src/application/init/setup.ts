@@ -62,6 +62,7 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
   installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample()));
   installed.push(await ensureQueueFile(config.projectDir));
+  installed.push(await installGeneratedFile(config, "generated:shipper-queue-example", join(config.projectDir, ".openspec-shipper/queue.example.md"), defaultQueueExample()));
 
   const gitignorePath = join(config.projectDir, ".gitignore");
   const gitignoreAppend = ["", "# Dependencies", "node_modules/", "", "# OpenSpec Shipper", ".openspec-shipper/.env", ".openspec-shipper/queue.md", ".openspec-shipper/runs/", ".openspec-shipper/tmp/", "worktrees/"].join("\n");
@@ -250,6 +251,17 @@ function defaultEnvExample(): string {
     "OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.4",
     "OPENSPEC_SHIPPER_PRINT_LOGS=1",
     "OPENSPEC_SHIPPER_LOG_LEVEL=ERROR",
+    "",
+  ].join("\n");
+}
+
+function defaultQueueExample(): string {
+  return [
+    "# OpenSpec Shipper Queue",
+    "",
+    "- [ ] deliver add-name-greeting",
+    "- [ ] deliver add-spanish-greeting",
+    "- [ ] deliver add-shouting-greeting <!-- depends_on: add-spanish-greeting -->",
     "",
   ].join("\n");
 }

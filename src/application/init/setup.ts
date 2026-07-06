@@ -257,11 +257,9 @@ function defaultEnvExample(): string {
 
 function defaultQueueExample(): string {
   return [
-    "# OpenSpec Shipper Queue",
+    "# OpenSpec Changes to ship",
     "",
-    "- [ ] deliver add-name-greeting",
-    "- [ ] deliver add-spanish-greeting",
-    "- [ ] deliver add-shouting-greeting <!-- depends_on: add-spanish-greeting -->",
+    "- [ ] deliver CHANGE_NAME",
     "",
   ].join("\n");
 }

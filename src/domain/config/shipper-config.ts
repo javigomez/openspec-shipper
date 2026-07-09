@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -109,6 +110,18 @@ export async function readShipperConfig(projectDir: string): Promise<ShipperConf
   return migrateConfig(JSON.parse(raw) as Partial<ShipperConfig>);
 }
 
+export function readShipperConfigSync(projectDir: string): ShipperConfig | undefined {
+  try {
+    return migrateConfig(JSON.parse(readFileSync(join(projectDir, CONFIG_PATH), "utf8")) as Partial<ShipperConfig>);
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
 export async function writeShipperConfig(projectDir: string, config: ShipperConfig): Promise<void> {
   await writeFile(join(projectDir, CONFIG_PATH), `${JSON.stringify(config, null, 2)}\n`);
 }
@@ -131,6 +144,7 @@ export function isShipperProfile(value: string): value is ShipperProfile {
 
 export const defaultOrchesterConfig = defaultShipperConfig;
 export const readOrchesterConfig = readShipperConfig;
+export const readOrchesterConfigSync = readShipperConfigSync;
 export const writeOrchesterConfig = writeShipperConfig;
 export const isOrchesterProfile = isShipperProfile;
 export type OrchesterConfig = ShipperConfig;

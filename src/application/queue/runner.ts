@@ -16,7 +16,11 @@ import {
   type QueueTask,
 } from "../../domain/queue/queue.js";
 import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
-import { DEFAULT_QUEUE_PATH, DEFAULT_STATE_DIR } from "../../domain/config/shipper-config.js";
+import {
+  DEFAULT_QUEUE_PATH,
+  DEFAULT_STATE_DIR,
+  readShipperConfigSync,
+} from "../../domain/config/shipper-config.js";
 import { providerById } from "../../infrastructure/providers/registry.js";
 import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
@@ -100,6 +104,7 @@ let activeChildProcess: ReturnType<typeof spawn> | undefined;
 export function defaultConfig(): RunnerConfig {
   const rootDir = ROOT_DIR;
   const projectDir = process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.env.PROJECT_DIR ?? discoverProjectDirSync();
+  const shipperConfig = readShipperConfigSync(projectDir);
   const stateDir = process.env.OPENSPEC_SHIPPER_STATE_DIR ?? join(projectDir, DEFAULT_STATE_DIR);
 
   return {
@@ -107,11 +112,11 @@ export function defaultConfig(): RunnerConfig {
     projectDir,
     queuePath: process.env.OPENSPEC_SHIPPER_QUEUE_PATH ?? process.env.QUEUE_PATH ?? join(projectDir, DEFAULT_QUEUE_PATH),
     stateDir,
-    providerId: (process.env.OPENSPEC_SHIPPER_PROVIDER as ExecutorProviderId | undefined) ?? "opencode",
-    opencodeBin: process.env.OPENSPEC_SHIPPER_OPENCODE_BIN ?? process.env.OPENCODE_BIN ?? "opencode",
-    opencodeModel: optionalEnv("OPENSPEC_SHIPPER_OPENCODE_MODEL") ?? optionalEnv("OPENCODE_MODEL"),
-    codexBin: process.env.OPENSPEC_SHIPPER_CODEX_BIN ?? "codex",
-    codexModel: optionalEnv("OPENSPEC_SHIPPER_CODEX_MODEL"),
+    providerId: (process.env.OPENSPEC_SHIPPER_PROVIDER as ExecutorProviderId | undefined) ?? shipperConfig?.executor.provider ?? "opencode",
+    opencodeBin: process.env.OPENSPEC_SHIPPER_OPENCODE_BIN ?? process.env.OPENCODE_BIN ?? shipperConfig?.executor.opencode.bin ?? "opencode",
+    opencodeModel: optionalEnv("OPENSPEC_SHIPPER_OPENCODE_MODEL") ?? optionalEnv("OPENCODE_MODEL") ?? shipperConfig?.executor.opencode.model,
+    codexBin: process.env.OPENSPEC_SHIPPER_CODEX_BIN ?? shipperConfig?.executor.codex.bin ?? "codex",
+    codexModel: optionalEnv("OPENSPEC_SHIPPER_CODEX_MODEL") ?? shipperConfig?.executor.codex.model,
     opencodePrintLogs: (process.env.OPENSPEC_SHIPPER_PRINT_LOGS ?? process.env.OPENCODE_PRINT_LOGS) === "1",
     opencodeLogLevel: optionalEnv("OPENSPEC_SHIPPER_LOG_LEVEL") ?? optionalEnv("OPENCODE_LOG_LEVEL"),
     opencodeStats: (process.env.OPENSPEC_SHIPPER_STATS ?? process.env.OPENCODE_STATS) === "1",

@@ -28,6 +28,79 @@ describe("runner", () => {
     }
   });
 
+  test("default config loads executor settings from shipper config json", async () => {
+    const previousCwd = process.cwd();
+    const projectDir = await realpath(await mkdtemp(join(tmpdir(), "shipper-config-")));
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(
+      join(projectDir, ".openspec-shipper/config.json"),
+      JSON.stringify({
+        executor: {
+          provider: "opencode",
+          opencode: {
+            bin: "custom-opencode",
+            model: "opencode-go/deepseek-v4-pro",
+          },
+          codex: {
+            bin: "codex",
+            model: "gpt-5.4",
+          },
+        },
+      }),
+    );
+
+    delete process.env.OPENSPEC_SHIPPER_PROJECT_DIR;
+    delete process.env.OPENSPEC_SHIPPER_PROVIDER;
+    delete process.env.OPENSPEC_SHIPPER_OPENCODE_BIN;
+    delete process.env.OPENSPEC_SHIPPER_OPENCODE_MODEL;
+    delete process.env.PROJECT_DIR;
+    delete process.env.OPENCODE_BIN;
+    delete process.env.OPENCODE_MODEL;
+    process.chdir(projectDir);
+    try {
+      const config = defaultConfig();
+
+      expect(config.providerId).toBe("opencode");
+      expect(config.opencodeBin).toBe("custom-opencode");
+      expect(config.opencodeModel).toBe("opencode-go/deepseek-v4-pro");
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  test("environment executor settings override shipper config json", async () => {
+    const previousCwd = process.cwd();
+    const projectDir = await realpath(await mkdtemp(join(tmpdir(), "shipper-config-")));
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(
+      join(projectDir, ".openspec-shipper/config.json"),
+      JSON.stringify({
+        executor: {
+          opencode: {
+            bin: "config-opencode",
+            model: "opencode-go/deepseek-v4-pro",
+          },
+        },
+      }),
+    );
+
+    delete process.env.OPENSPEC_SHIPPER_PROJECT_DIR;
+    delete process.env.PROJECT_DIR;
+    process.env.OPENSPEC_SHIPPER_OPENCODE_BIN = "env-opencode";
+    process.env.OPENSPEC_SHIPPER_OPENCODE_MODEL = "opencode-go/env-model";
+    process.chdir(projectDir);
+    try {
+      const config = defaultConfig();
+
+      expect(config.opencodeBin).toBe("env-opencode");
+      expect(config.opencodeModel).toBe("opencode-go/env-model");
+    } finally {
+      delete process.env.OPENSPEC_SHIPPER_OPENCODE_BIN;
+      delete process.env.OPENSPEC_SHIPPER_OPENCODE_MODEL;
+      process.chdir(previousCwd);
+    }
+  });
+
   test("does not execute when the queue has a blocked task", async () => {
     const harness = await createHarness("- [!] ship <!-- blocked: earlier -->\n- [ ] sync\n");
     let called = false;

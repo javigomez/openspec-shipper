@@ -16,7 +16,9 @@ describe("target setup", () => {
 
     expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-apply-worktree.md"))).toBe(true);
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
-    expect(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8")).toContain('"profile": "node-npm"');
+    const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
+    expect(shipperConfig.profile).toBe("node-npm");
+    expect(shipperConfig.safety).toEqual({ enablePush: true, enableArchive: true });
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8")).toContain("OpenSpec Shipper assets installed");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/openspec-config.example.yaml"), "utf8")).toContain("OpenSpec Shipper workflow source");

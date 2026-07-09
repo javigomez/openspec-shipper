@@ -86,8 +86,8 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
       validateProposal: `${run} openspec:validate-proposal --`,
     },
     safety: {
-      enablePush: false,
-      enableArchive: false,
+      enablePush: true,
+      enableArchive: true,
     },
   };
 }

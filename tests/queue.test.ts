@@ -7,6 +7,7 @@ import {
   findBlockedTasks,
   findFirstRunnableTask,
   findWaitingTasks,
+  markTaskRunning,
   normalizeChangeName,
   openCodeCommandName,
   parseQueue,
@@ -94,8 +95,28 @@ describe("queue parser", () => {
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; advanced: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
-      "![ship](https://img.shields.io/badge/ship-pending-blue) · _([log](.openspec-shipper/runs/apply.log))_",
+      "![ship ready](https://img.shields.io/badge/ship-ready-blue) · _([log](.openspec-shipper/runs/apply.log))_",
     );
+  });
+
+  test("marks a deliver task as running without changing its queue status", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting\n");
+    const task = result.tasks[0]!;
+
+    const next = markTaskRunning(result.lines, task, {
+      timestamp: "2026-07-09T16:22:20.003Z",
+      logPath: ".openspec-shipper/runs/apply.log",
+    });
+
+    expect(next).toContain(
+      "- [ ] deliver add-name-greeting <!-- phase: apply; running: 2026-07-09T16:22:20.003Z; log: .openspec-shipper/runs/apply.log -->",
+    );
+    expect(next).toContain(
+      "![apply running](https://img.shields.io/badge/apply-running-yellow) · _([log](.openspec-shipper/runs/apply.log))_",
+    );
+    const parsed = parseQueue(next).tasks[0]!;
+    expect(parsed.status).toBe("pending");
+    expect(deliverPhase(parsed)).toBe("apply");
   });
 
   test("finds the first runnable task after waiting dependencies", () => {

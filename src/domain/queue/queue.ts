@@ -180,6 +180,28 @@ export function markTask(
   return ensureTrailingNewline(nextLines.join("\n"));
 }
 
+export function markTaskRunning(
+  lines: string[],
+  task: QueueTask,
+  details: { timestamp: string; logPath?: string },
+): string {
+  const phase = task.action === "deliver" ? deliverPhase(task) : undefined;
+  const detailParts = [
+    phase ? `phase: ${phase}` : undefined,
+    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    `running: ${details.timestamp}`,
+    details.logPath ? `log: ${details.logPath}` : undefined,
+  ].filter(Boolean);
+
+  const nextLines = [...lines];
+  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+    status: "running",
+    phase,
+    logPath: details.logPath,
+  });
+  return ensureTrailingNewline(nextLines.join("\n"));
+}
+
 export function advanceDeliverTask(
   lines: string[],
   task: QueueTask,
@@ -299,14 +321,14 @@ function formatTaskLine(
   marker: " " | "x" | "!",
   rawCommand: string,
   detailParts: Array<string | undefined>,
-  visual: { status: Exclude<TaskStatus, "pending"> | "pending"; phase?: DeliverPhase; logPath?: string },
+  visual: { status: Exclude<TaskStatus, "pending"> | "pending" | "running"; phase?: DeliverPhase; logPath?: string },
 ): string {
   const metadata = detailParts.length > 0 ? ` <!-- ${detailParts.join("; ")} -->` : "";
   return `- [${marker}] ${rawCommand}${metadata}${formatVisualDecoration(visual)}`;
 }
 
 function formatVisualDecoration(visual: {
-  status: Exclude<TaskStatus, "pending"> | "pending";
+  status: Exclude<TaskStatus, "pending"> | "pending" | "running";
   phase?: DeliverPhase;
   logPath?: string;
 }): string {
@@ -315,7 +337,10 @@ function formatVisualDecoration(visual: {
   return ` ${badge}${log}`;
 }
 
-function badgeForVisual(visual: { status: Exclude<TaskStatus, "pending"> | "pending"; phase?: DeliverPhase }): string {
+function badgeForVisual(visual: {
+  status: Exclude<TaskStatus, "pending"> | "pending" | "running";
+  phase?: DeliverPhase;
+}): string {
   if (visual.status === "done") {
     return "![done](https://img.shields.io/badge/done-success-brightgreen)";
   }
@@ -324,8 +349,21 @@ function badgeForVisual(visual: { status: Exclude<TaskStatus, "pending"> | "pend
     return "![blocked](https://img.shields.io/badge/blocked-error-red)";
   }
 
+  if (visual.status === "running") {
+    const phase = visual.phase ?? "task";
+    return `![${phase} running](https://img.shields.io/badge/${phase}-running-yellow)`;
+  }
+
   const phase = visual.phase ?? "pending";
-  return `![${phase}](https://img.shields.io/badge/${phase}-pending-blue)`;
+  if (phase === "waiting_for_merge") {
+    return "![waiting for merge](https://img.shields.io/badge/waiting_for_merge-needs_merge-orange)";
+  }
+
+  if (phase === "pending") {
+    return "![pending](https://img.shields.io/badge/pending-ready-lightgrey)";
+  }
+
+  return `![${phase} ready](https://img.shields.io/badge/${phase}-ready-blue)`;
 }
 
 function sanitizeComment(value: string): string {

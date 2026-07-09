@@ -10,6 +10,7 @@ import {
   findFirstRunnableTask,
   findWaitingTasks,
   markTask,
+  markTaskRunning,
   parseQueue,
   taskSlug,
   type QueueTask,
@@ -506,6 +507,13 @@ async function executeTask(
   console.log(`Env PWD: ${providerCommand.cwd}`);
   console.log(`Log: ${relative(config.rootDir, logPath)}`);
 
+  const relativeLogPath = relative(config.rootDir, logPath);
+  const runningContent = markTaskRunning(lines, task, {
+    timestamp,
+    logPath: relativeLogPath,
+  });
+  await writeFile(config.queuePath, runningContent);
+
   const result = await executor(providerCommand.command, providerCommand.args, {
     cwd: providerCommand.cwd,
     logPath,
@@ -521,7 +529,7 @@ async function executeTask(
   if (result.exitCode === 0 && !failureSignal) {
     const nextContent = advanceDeliverTask(lines, task, {
       timestamp,
-      logPath: relative(config.rootDir, logPath),
+      logPath: relativeLogPath,
     });
     await writeFile(config.queuePath, nextContent);
     console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
@@ -533,7 +541,7 @@ async function executeTask(
   const nextContent = markTask(lines, task, "blocked", {
     timestamp,
     reason,
-    logPath: relative(config.rootDir, logPath),
+    logPath: relativeLogPath,
   });
   await writeFile(config.queuePath, nextContent);
   console.error(`[${new Date().toISOString()}] blocked: ${reason}`);

@@ -184,6 +184,24 @@ describe("runner", () => {
     expect(queue).toContain("phase: ship");
   });
 
+  test("marks a task as running before invoking the executor", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    let queueDuringExecution = "";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => {
+        queueDuringExecution = await readFile(harness.queuePath, "utf8");
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(queueDuringExecution).toContain("phase: apply");
+    expect(queueDuringExecution).toContain("running: 2026-06-17T12:00:00.000Z");
+    expect(queueDuringExecution).toContain("![apply running](https://img.shields.io/badge/apply-running-yellow)");
+  });
+
   test("runs the current deliver phase", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship -->\n",

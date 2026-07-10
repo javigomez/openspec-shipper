@@ -54,6 +54,7 @@ export type RunnerConfig = {
   executor?: Executor;
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
+  pullRequestDetector?: PullRequestDetector;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -89,6 +90,7 @@ export type ExecutorResult = {
 
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
+export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type Sleep = (ms: number) => Promise<void>;
 
 const DEFAULT_LOOP_DELAY_MS = 120_000;
@@ -538,6 +540,20 @@ async function executeTask(
 
   const failureSignal = provider(config).detectFailureSignal(result.output);
   if (result.exitCode === 0 && !failureSignal) {
+    const postSuccessBlocker = await validateTaskAfterSuccess(config, task);
+    if (postSuccessBlocker) {
+      const nextContent = markTask(lines, task, "blocked", {
+        timestamp: (config.now?.() ?? new Date()).toISOString(),
+        reason: postSuccessBlocker,
+        logPath: relativeLogPath,
+        checkedAt: activity.checkedAt,
+        startedAt,
+      });
+      await writeFile(config.queuePath, nextContent);
+      console.error(`[${new Date().toISOString()}] blocked: ${postSuccessBlocker}`);
+      return 1;
+    }
+
     const nextContent = advanceDeliverTask(lines, task, {
       timestamp: (config.now?.() ?? new Date()).toISOString(),
       logPath: relativeLogPath,
@@ -561,6 +577,21 @@ async function executeTask(
   await writeFile(config.queuePath, nextContent);
   console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
   return 1;
+}
+
+async function validateTaskAfterSuccess(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
+  if (task.action !== "deliver" || deliverPhase(task) !== "ship" || !task.change) {
+    return undefined;
+  }
+
+  const branch = detectChangeBranch(config.projectDir, task.change);
+  const detector = config.pullRequestDetector ?? detectOpenPullRequest;
+  const pullRequest = await detector(config.projectDir, branch);
+  if (pullRequest) {
+    return undefined;
+  }
+
+  return `No open pull request exists for ${branch}; ship did not reach waiting-for-merge.`;
 }
 
 async function loadQueue(queuePath: string) {
@@ -846,6 +877,50 @@ export async function detectGitRemoteOrigin(projectDir: string): Promise<string 
   }
 
   return result.stdout.trim() || undefined;
+}
+
+export function detectChangeBranch(projectDir: string, changeName: string): string {
+  const worktreeBranch = spawnSync("git", ["-C", join(projectDir, "worktrees", changeName), "branch", "--show-current"], {
+    encoding: "utf8",
+  });
+  const branchFromWorktree = worktreeBranch.status === 0 ? worktreeBranch.stdout.trim() : "";
+  if (branchFromWorktree) {
+    return branchFromWorktree;
+  }
+
+  const branches = spawnSync("git", ["-C", projectDir, "for-each-ref", "--format=%(refname:short)", "refs/heads"], {
+    encoding: "utf8",
+  });
+  if (branches.status === 0) {
+    const branch = branches.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.endsWith(`/${changeName}`));
+    if (branch) {
+      return branch;
+    }
+  }
+
+  return `feat/${changeName}`;
+}
+
+export async function detectOpenPullRequest(projectDir: string, branch: string): Promise<string | undefined> {
+  const result = spawnSync("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--limit", "1"], {
+    cwd: projectDir,
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as Array<{ url?: unknown }>;
+    const url = parsed[0]?.url;
+    return typeof url === "string" && url.length > 0 ? url : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function describeProcess(pid: string): string {

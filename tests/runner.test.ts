@@ -302,6 +302,28 @@ describe("runner", () => {
     expect(queue).toContain("phase: waiting_for_merge");
   });
 
+  test("blocks deliver ship phase when no pull request exists after success", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+    let checkedBranch = "";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      pullRequestDetector: async (_projectDir, branch) => {
+        checkedBranch = branch;
+        return undefined;
+      },
+      executor: cleanExecutor,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(checkedBranch).toBe("feat/add-name-greeting");
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("No open pull request exists for feat/add-name-greeting");
+    expect(queue).not.toContain("waiting_for_merge");
+  });
+
   test("marks a deliver task done after archive succeeds", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: archive -->\n",
@@ -754,6 +776,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     maxBlockedTasks: 0,
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
+    pullRequestDetector: async () => "https://github.com/example/project/pull/1",
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };
 

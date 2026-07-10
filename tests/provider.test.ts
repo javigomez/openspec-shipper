@@ -77,4 +77,10 @@ describe("executor providers", () => {
     expect(command.args).toContain("gpt-5.4");
     expect(command.args.at(-1)).toContain("OpenSpec apply phase");
   });
+
+  test("OpenCode provider treats missing pull requests as a ship failure", () => {
+    expect(opencodeProvider.detectFailureSignal("No pull request exists yet — branch-push automation should create it.")).toBe(
+      "Ship worker did not find an open pull request",
+    );
+  });
 });

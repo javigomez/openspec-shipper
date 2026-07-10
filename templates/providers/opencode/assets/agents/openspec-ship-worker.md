@@ -85,6 +85,10 @@ For one eligible completed change:
 8. Verify repo-local Git identity is configured with `git config user.name` and
    `git config user.email`.
 9. Push the selected branch to origin.
+10. After pushing, verify that an open pull request exists for the selected
+    branch when `gh` is available. If no pull request exists, report a blocker
+    with the exact message `No pull request exists` and stop. Do not report the
+    ship cycle as complete in that case.
 
 This worker MUST NOT run `openspec archive`. It also MUST NOT call `gh pr
 create`, GitHub connector PR APIs, or any other manual PR creation path. If the

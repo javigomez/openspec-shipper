@@ -129,8 +129,8 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 5. Commit final verification changes if needed.
 6. Validate commit messages.
 7. Push the branch.
-8. Stop after a successful push. If configured, GitHub Actions opens or reuses
-   the PR.
+8. After push, verify that an open PR exists when `gh` is available. If no PR
+   exists, stop and report `No pull request exists` as a blocker.
 9. Do not call `gh pr create` or any other manual PR creation path from the
    ship worker.
 

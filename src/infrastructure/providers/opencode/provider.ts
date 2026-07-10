@@ -60,6 +60,7 @@ export function detectFailureSignal(output: string): string | undefined {
     [/command not found:\s*openspec/i, "OpenSpec CLI was not available"],
     [/auto-rejecting/i, "OpenCode auto-rejected a permission request"],
     [/permission requested/i, "OpenCode requested permission in non-interactive mode"],
+    [/\bNo pull request exists\b/i, "Ship worker did not find an open pull request"],
     [/\bArchive blocked\b/i, "OpenSpec archive worker reported a blocker"],
     [/\bnot archive-ready\b/i, "OpenSpec archive worker reported a blocker"],
     [/\b(worker reported a blocker|task is blocked|cannot continue without)\b/i, "Worker reported a blocker"],

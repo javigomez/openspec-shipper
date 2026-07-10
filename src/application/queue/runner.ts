@@ -10,6 +10,7 @@ import {
   findFirstRunnableTask,
   findWaitingTasks,
   markTask,
+  markTaskChecking,
   markTaskRunning,
   parseQueue,
   taskSlug,
@@ -224,6 +225,8 @@ async function runSingleTaskWithLock(
   }
 
   try {
+    await markTaskAsChecking(config, lines, task);
+
     const preflight = await blockOnFailedPreflight(config, lines, task);
     if (preflight.blocked) {
       return 1;
@@ -294,6 +297,8 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
         console.log("Queue complete: no pending tasks.");
         return 0;
       }
+
+      await markTaskAsChecking(config, queue.lines, pendingTask);
 
       const preflight = await blockOnFailedPreflight(config, queue.lines, pendingTask);
       if (preflight.blocked) {
@@ -556,6 +561,11 @@ async function executeTask(
 async function loadQueue(queuePath: string) {
   const content = await readFile(queuePath, "utf8");
   return parseQueue(content);
+}
+
+async function markTaskAsChecking(config: RunnerConfig, lines: string[], task: QueueTask): Promise<void> {
+  const timestamp = (config.now?.() ?? new Date()).toISOString();
+  await writeFile(config.queuePath, markTaskChecking(lines, task, { timestamp }));
 }
 
 async function blockTask(

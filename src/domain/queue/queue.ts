@@ -180,6 +180,26 @@ export function markTask(
   return ensureTrailingNewline(nextLines.join("\n"));
 }
 
+export function markTaskChecking(
+  lines: string[],
+  task: QueueTask,
+  details: { timestamp: string },
+): string {
+  const phase = task.action === "deliver" ? deliverPhase(task) : undefined;
+  const detailParts = [
+    phase ? `phase: ${phase}` : undefined,
+    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    `checking: ${details.timestamp}`,
+  ].filter(Boolean);
+
+  const nextLines = [...lines];
+  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+    status: "checking",
+    phase,
+  });
+  return ensureTrailingNewline(nextLines.join("\n"));
+}
+
 export function markTaskRunning(
   lines: string[],
   task: QueueTask,
@@ -321,14 +341,14 @@ function formatTaskLine(
   marker: " " | "x" | "!",
   rawCommand: string,
   detailParts: Array<string | undefined>,
-  visual: { status: Exclude<TaskStatus, "pending"> | "pending" | "running"; phase?: DeliverPhase; logPath?: string },
+  visual: { status: Exclude<TaskStatus, "pending"> | "pending" | "checking" | "running"; phase?: DeliverPhase; logPath?: string },
 ): string {
   const metadata = detailParts.length > 0 ? ` <!-- ${detailParts.join("; ")} -->` : "";
   return `- [${marker}] ${rawCommand}${metadata}${formatVisualDecoration(visual)}`;
 }
 
 function formatVisualDecoration(visual: {
-  status: Exclude<TaskStatus, "pending"> | "pending" | "running";
+  status: Exclude<TaskStatus, "pending"> | "pending" | "checking" | "running";
   phase?: DeliverPhase;
   logPath?: string;
 }): string {
@@ -338,7 +358,7 @@ function formatVisualDecoration(visual: {
 }
 
 function badgeForVisual(visual: {
-  status: Exclude<TaskStatus, "pending"> | "pending" | "running";
+  status: Exclude<TaskStatus, "pending"> | "pending" | "checking" | "running";
   phase?: DeliverPhase;
 }): string {
   if (visual.status === "done") {
@@ -352,6 +372,11 @@ function badgeForVisual(visual: {
   if (visual.status === "running") {
     const phase = visual.phase ?? "task";
     return `![${phase} running](https://img.shields.io/badge/${phase}-running-yellow)`;
+  }
+
+  if (visual.status === "checking") {
+    const phase = visual.phase ?? "task";
+    return `![${phase} checking](https://img.shields.io/badge/${phase}-checking-yellow)`;
   }
 
   const phase = visual.phase ?? "pending";

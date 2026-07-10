@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import {
   CONFIG_PATH,
@@ -71,6 +71,8 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample()));
   installed.push(await ensureQueueFile(config.projectDir));
   installed.push(await installGeneratedFile(config, "generated:shipper-queue-example", join(config.projectDir, ".openspec-shipper/queue.example.md"), defaultQueueExample()));
+  installed.push(await ensureStateDirectory(config.projectDir, ".openspec-shipper/runs"));
+  installed.push(await ensureStateDirectory(config.projectDir, ".openspec-shipper/tmp"));
 
   const gitignorePath = join(config.projectDir, ".gitignore");
   installed.push(await ensureShipperGitignore(config, gitignorePath));
@@ -229,6 +231,26 @@ async function ensureQueueFile(projectDir: string): Promise<InstalledFile> {
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, "# OpenSpec Shipper Queue\n\n");
   return { source: "generated:shipper-queue", target, status: "installed" };
+}
+
+async function ensureStateDirectory(projectDir: string, relativePath: string): Promise<InstalledFile> {
+  const target = join(projectDir, relativePath);
+  const currentStat = await stat(target).catch((error: unknown) => {
+    if (isNotFoundError(error)) {
+      return undefined;
+    }
+
+    throw error;
+  });
+  if (currentStat?.isDirectory()) {
+    return { source: `generated:${relativePath}`, target, status: "unchanged" };
+  }
+  if (currentStat) {
+    return { source: `generated:${relativePath}`, target, status: "drifted" };
+  }
+
+  await mkdir(target, { recursive: true });
+  return { source: `generated:${relativePath}`, target, status: "installed" };
 }
 
 function hash(value: string): string {

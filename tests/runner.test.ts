@@ -527,7 +527,7 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
-  test("next mode does not mutate the queue when opencode is already active", async () => {
+  test("next mode marks the task as checking before detecting active opencode", async () => {
     const harness = await createHarness("- [ ] ship\n");
     let called = false;
 
@@ -543,7 +543,8 @@ describe("runner", () => {
     expect(exitCode).toBe(1);
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toBe("- [ ] ship\n");
+    expect(queue).toContain("- [ ] ship <!-- checking: 2026-06-17T12:00:00.000Z -->");
+    expect(queue).toContain("![task checking](https://img.shields.io/badge/task-checking-yellow)");
   });
 
   test("run mode processes pending tasks until the queue is complete", async () => {
@@ -671,7 +672,8 @@ describe("runner", () => {
     expect(called).toBe(false);
     expect(sleeps).toEqual([1_000]);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toBe("- [ ] sync\n");
+    expect(queue).toContain("- [ ] sync <!-- checking: 2026-06-17T12:00:00.000Z -->");
+    expect(queue).toContain("![task checking](https://img.shields.io/badge/task-checking-yellow)");
   });
 });
 

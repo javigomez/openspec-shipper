@@ -7,6 +7,7 @@ import {
   findBlockedTasks,
   findFirstRunnableTask,
   findWaitingTasks,
+  markTaskChecking,
   markTaskRunning,
   normalizeChangeName,
   openCodeCommandName,
@@ -113,6 +114,25 @@ describe("queue parser", () => {
     );
     expect(next).toContain(
       "![apply running](https://img.shields.io/badge/apply-running-yellow) · _([log](.openspec-shipper/runs/apply.log))_",
+    );
+    const parsed = parseQueue(next).tasks[0]!;
+    expect(parsed.status).toBe("pending");
+    expect(deliverPhase(parsed)).toBe("apply");
+  });
+
+  test("marks a deliver task as checking without changing its queue status", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting\n");
+    const task = result.tasks[0]!;
+
+    const next = markTaskChecking(result.lines, task, {
+      timestamp: "2026-07-10T08:15:00.000Z",
+    });
+
+    expect(next).toContain(
+      "- [ ] deliver add-name-greeting <!-- phase: apply; checking: 2026-07-10T08:15:00.000Z -->",
+    );
+    expect(next).toContain(
+      "![apply checking](https://img.shields.io/badge/apply-checking-yellow)",
     );
     const parsed = parseQueue(next).tasks[0]!;
     expect(parsed.status).toBe("pending");

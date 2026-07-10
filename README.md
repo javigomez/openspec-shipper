@@ -92,6 +92,7 @@ OPENSPEC_SHIPPER_STATS=1
 `init` adds these ignored entries:
 
 ```gitignore
+# OpenSpec Shipper local state
 .openspec-shipper/.env
 .openspec-shipper/queue.md
 .openspec-shipper/runs/
@@ -125,9 +126,9 @@ npx openspec-shipper init --profile node-npm
 - `.openspec-shipper/config.json` and `.openspec-shipper/.env.example`
 - `.openspec-shipper/README.md` and `.openspec-shipper/queue.example.md`
 - `.openspec-shipper/openspec-config.example.yaml` as optional OpenSpec config guidance
+- `.openspec-shipper/scripts/` with shipper-owned validation helpers
 - `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
 - GitHub workflow for auto PR creation after branch push
-- branch/OpenSpec validation helper scripts
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees
 

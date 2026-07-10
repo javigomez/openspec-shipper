@@ -22,10 +22,12 @@ describe("target setup", () => {
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8")).toContain("OpenSpec Shipper assets installed");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/openspec-config.example.yaml"), "utf8")).toContain("OpenSpec Shipper workflow source");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/scripts/validate-branch-name.mjs"), "utf8")).toContain("Invalid branch name");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/scripts/validate-openspec-proposal.mjs"), "utf8")).toContain("openspec:validate-proposal");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.md"), "utf8")).toBe("# OpenSpec Shipper Queue\n\n");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.example.md"), "utf8")).toBe("# OpenSpec Changes to ship\n\n- [ ] deliver CHANGE_NAME\n");
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toBe([
-      "# OpenSpec Shipper",
+      "# OpenSpec Shipper local state",
       ".openspec-shipper/.env",
       ".openspec-shipper/queue.md",
       ".openspec-shipper/runs/",
@@ -35,6 +37,8 @@ describe("target setup", () => {
     ].join("\n"));
     const packageJson = JSON.parse(await readFile(join(harness.projectDir, "package.json"), "utf8"));
     expect(packageJson.scripts["openspec:cli"]).toBe("env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec");
+    expect(packageJson.scripts["openspec:validate-proposal"]).toBe("node .openspec-shipper/scripts/validate-openspec-proposal.mjs");
+    expect(packageJson.scripts["lint:branch"]).toBe("node .openspec-shipper/scripts/validate-branch-name.mjs");
     expect(packageJson.devDependencies["@fission-ai/openspec"]).toBe("^1.2.0");
   });
 

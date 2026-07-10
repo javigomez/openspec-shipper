@@ -28,6 +28,7 @@ const TEMPLATE_DIR = "templates/providers/opencode/assets";
 const TARGET_DIR = ".opencode";
 const TARGET_TEMPLATE_DIR = "templates/target";
 const MANIFEST_PATH = ".openspec-shipper/installed.json";
+const SHIPPER_GITIGNORE_HEADER = "# OpenSpec Shipper local state";
 const SHIPPER_GITIGNORE_ENTRIES = [
   ".openspec-shipper/.env",
   ".openspec-shipper/queue.md",
@@ -102,7 +103,7 @@ function shipperGitignoreContent(currentGitignore: string | undefined): string {
     return `${current.replace(/\s*$/, "\n")}${missingEntries.join("\n")}\n`;
   }
 
-  const block = ["# OpenSpec Shipper", ...missingEntries].join("\n");
+  const block = [SHIPPER_GITIGNORE_HEADER, ...missingEntries].join("\n");
   const prefix = current ? `${current.replace(/\s*$/, "\n\n")}` : "";
   return `${prefix}${block}\n`;
 }
@@ -261,8 +262,8 @@ async function updatePackageJson(config: SetupConfig): Promise<InstalledFile> {
 function defaultScripts(): Record<string, string> {
   return {
     "openspec:cli": "env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec",
-    "openspec:validate-proposal": "node scripts/validate-openspec-proposal.mjs",
-    "lint:branch": "node scripts/validate-branch-name.mjs",
+    "openspec:validate-proposal": "node .openspec-shipper/scripts/validate-openspec-proposal.mjs",
+    "lint:branch": "node .openspec-shipper/scripts/validate-branch-name.mjs",
     "lint:commits": "commitlint --from origin/main --to HEAD",
   };
 }

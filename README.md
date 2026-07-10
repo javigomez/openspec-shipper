@@ -215,7 +215,7 @@ Default local mode runs inside the target repo:
 ```bash
 cd /path/to/target-repo
 npx openspec-shipper queue dry-run
-npx openspec-shipper queue next
+npx openspec-shipper queue run
 ```
 
 External mode is still supported:
@@ -252,7 +252,7 @@ npx openspec-shipper queue add add-spanish-greeting --depends-on add-name-greeti
 npx openspec-shipper queue add add-shouting-greeting --depends-on add-spanish-greeting
 npx openspec-shipper queue status
 npx openspec-shipper queue dry-run
-npx openspec-shipper queue next
+npx openspec-shipper queue run
 ```
 
 For local tarball testing before publish:

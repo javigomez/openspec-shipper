@@ -225,7 +225,7 @@ async function runSingleTaskWithLock(
   }
 
   try {
-    await markTaskAsChecking(config, lines, task);
+    const checkedAt = await markTaskAsChecking(config, lines, task);
 
     const preflight = await blockOnFailedPreflight(config, lines, task);
     if (preflight.blocked) {
@@ -238,7 +238,7 @@ async function runSingleTaskWithLock(
       return 1;
     }
 
-    return await executeTask(config, lines, task, providerCommand);
+    return await executeTask(config, lines, task, providerCommand, { checkedAt });
   } finally {
     await lock.release();
   }
@@ -298,7 +298,7 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
         return 0;
       }
 
-      await markTaskAsChecking(config, queue.lines, pendingTask);
+      const checkedAt = await markTaskAsChecking(config, queue.lines, pendingTask);
 
       const preflight = await blockOnFailedPreflight(config, queue.lines, pendingTask);
       if (preflight.blocked) {
@@ -324,7 +324,7 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
       }
 
       busyState = undefined;
-      const exitCode = await executeTask(config, queue.lines, pendingTask, buildConfiguredProviderCommand(config, pendingTask));
+      const exitCode = await executeTask(config, queue.lines, pendingTask, buildConfiguredProviderCommand(config, pendingTask), { checkedAt });
       if (exitCode !== 0) {
         const nextQueue = await loadQueue(config.queuePath);
         const nextBlockedTasks = findBlockedTasks(nextQueue.tasks);
@@ -506,12 +506,13 @@ async function executeTask(
   lines: string[],
   task: QueueTask,
   providerCommand: ProviderCommand,
+  activity: { checkedAt?: string } = {},
 ): Promise<number> {
-  const timestamp = (config.now?.() ?? new Date()).toISOString();
-  const logPath = await createRunLogPath(config, task, timestamp);
+  const startedAt = (config.now?.() ?? new Date()).toISOString();
+  const logPath = await createRunLogPath(config, task, startedAt);
   const executor = config.executor ?? spawnExecutor;
 
-  console.log(`[${timestamp}] running: ${task.rawCommand}`);
+  console.log(`[${startedAt}] running: ${task.rawCommand}`);
   console.log(`Command: ${formatCommand(providerCommand.command, providerCommand.args)}`);
   console.log(`Cwd: ${providerCommand.cwd}`);
   console.log(`Env PWD: ${providerCommand.cwd}`);
@@ -519,7 +520,7 @@ async function executeTask(
 
   const relativeLogPath = relative(config.rootDir, logPath);
   const runningContent = markTaskRunning(lines, task, {
-    timestamp,
+    timestamp: startedAt,
     logPath: relativeLogPath,
   });
   await writeFile(config.queuePath, runningContent);
@@ -538,8 +539,10 @@ async function executeTask(
   const failureSignal = provider(config).detectFailureSignal(result.output);
   if (result.exitCode === 0 && !failureSignal) {
     const nextContent = advanceDeliverTask(lines, task, {
-      timestamp,
+      timestamp: (config.now?.() ?? new Date()).toISOString(),
       logPath: relativeLogPath,
+      checkedAt: activity.checkedAt,
+      startedAt,
     });
     await writeFile(config.queuePath, nextContent);
     console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
@@ -549,9 +552,11 @@ async function executeTask(
   const reason =
     failureSignal ?? (result.exitCode === null ? result.output : `command exited with code ${result.exitCode}`);
   const nextContent = markTask(lines, task, "blocked", {
-    timestamp,
+    timestamp: (config.now?.() ?? new Date()).toISOString(),
     reason,
     logPath: relativeLogPath,
+    checkedAt: activity.checkedAt,
+    startedAt,
   });
   await writeFile(config.queuePath, nextContent);
   console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
@@ -563,9 +568,10 @@ async function loadQueue(queuePath: string) {
   return parseQueue(content);
 }
 
-async function markTaskAsChecking(config: RunnerConfig, lines: string[], task: QueueTask): Promise<void> {
+async function markTaskAsChecking(config: RunnerConfig, lines: string[], task: QueueTask): Promise<string> {
   const timestamp = (config.now?.() ?? new Date()).toISOString();
   await writeFile(config.queuePath, markTaskChecking(lines, task, { timestamp }));
+  return timestamp;
 }
 
 async function blockTask(

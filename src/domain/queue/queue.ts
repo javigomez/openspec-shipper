@@ -160,13 +160,15 @@ export function markTask(
   lines: string[],
   task: QueueTask,
   status: Exclude<TaskStatus, "pending">,
-  details: { timestamp: string; logPath?: string; reason?: string },
+  details: { timestamp: string; logPath?: string; reason?: string; checkedAt?: string; startedAt?: string },
 ): string {
   const marker = status === "done" ? "x" : "!";
   const detailParts = [
     task.action === "deliver" && status === "blocked" ? `phase: ${deliverPhase(task)}` : undefined,
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
     status === "done" ? `done: ${details.timestamp}` : `blocked: ${details.timestamp}`,
+    details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
+    details.startedAt ? `started: ${details.startedAt}` : undefined,
     details.reason ? `reason: ${sanitizeComment(details.reason)}` : undefined,
     details.logPath ? `log: ${details.logPath}` : undefined,
   ].filter(Boolean);
@@ -225,7 +227,7 @@ export function markTaskRunning(
 export function advanceDeliverTask(
   lines: string[],
   task: QueueTask,
-  details: { timestamp: string; logPath?: string },
+  details: { timestamp: string; logPath?: string; checkedAt?: string; startedAt?: string },
 ): string {
   if (task.action !== "deliver") {
     return markTask(lines, task, "done", details);
@@ -242,6 +244,8 @@ export function advanceDeliverTask(
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
     `phase: ${nextPhase}`,
     `advanced: ${details.timestamp}`,
+    details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
+    details.startedAt ? `started: ${details.startedAt}` : undefined,
     details.logPath ? `log: ${details.logPath}` : undefined,
   ].filter(Boolean);
   nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {

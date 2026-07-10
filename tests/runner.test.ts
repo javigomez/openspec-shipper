@@ -255,6 +255,8 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
     expect(queue).toContain("phase: ship");
+    expect(queue).toContain("checked: 2026-06-17T12:00:00.000Z");
+    expect(queue).toContain("started: 2026-06-17T12:00:00.000Z");
   });
 
   test("marks a task as running before invoking the executor", async () => {

@@ -89,11 +89,13 @@ describe("queue parser", () => {
 
     const next = advanceDeliverTask(result.lines, task, {
       timestamp: "2026-06-25T12:00:00.000Z",
+      checkedAt: "2026-06-25T11:59:58.000Z",
+      startedAt: "2026-06-25T12:00:00.000Z",
       logPath: ".openspec-shipper/runs/apply.log",
     });
 
     expect(next).toContain(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; advanced: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; advanced: 2026-06-25T12:00:00.000Z; checked: 2026-06-25T11:59:58.000Z; started: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
       "![ship ready](https://img.shields.io/badge/ship-ready-blue) · _([log](.openspec-shipper/runs/apply.log))_",

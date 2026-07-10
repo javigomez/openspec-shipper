@@ -609,6 +609,47 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
+  test("blocks apply before execution when main is dirty and no claim exists", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      gitStatusDetector: async () => [" M package.json", "?? .opencode/"],
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase: apply");
+    expect(queue).toContain("no existing worktree or branch for add-name-greeting");
+  });
+
+  test("allows apply with dirty main when the change worktree already exists", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    await mkdir(join(harness.rootDir, "worktrees/add-name-greeting"), { recursive: true });
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      gitStatusDetector: async () => [" M package.json", "?? .opencode/"],
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(called).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: ship");
+  });
+
   test("next mode marks the task as checking before detecting active opencode", async () => {
     const harness = await createHarness("- [ ] ship\n");
     let called = false;
@@ -796,6 +837,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     maxBlockedTasks: 0,
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
+    gitStatusDetector: async () => [],
     pullRequestDetector: async () => "https://github.com/example/project/pull/1",
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };

@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, rmSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -54,6 +54,7 @@ export type RunnerConfig = {
   executor?: Executor;
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
+  gitStatusDetector?: GitStatusDetector;
   pullRequestDetector?: PullRequestDetector;
   sleep?: Sleep;
   now?: () => Date;
@@ -90,6 +91,7 @@ export type ExecutorResult = {
 
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
+export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type Sleep = (ms: number) => Promise<void>;
 
@@ -475,6 +477,15 @@ async function validateTaskPreflight(
     };
   }
 
+  const dirtyApplyBlocker = await validateApplyCanCreateWorktree(config, task);
+  if (dirtyApplyBlocker) {
+    return {
+      ok: false,
+      commandPath,
+      reason: dirtyApplyBlocker,
+    };
+  }
+
   if (provider(config).id !== "opencode") {
     return { ok: true, commandPath: "(provider does not use OpenCode command files)" };
   }
@@ -500,6 +511,33 @@ async function validateTaskPreflight(
 
 async function gitRemoteOrigin(config: RunnerConfig): Promise<string | undefined> {
   const detector = config.gitRemoteDetector ?? detectGitRemoteOrigin;
+  return await detector(config.projectDir);
+}
+
+async function validateApplyCanCreateWorktree(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
+  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  if (phase !== "apply" || !task.change) {
+    return undefined;
+  }
+
+  if (await changeHasExistingLocalClaim(config.projectDir, task.change)) {
+    return undefined;
+  }
+
+  const status = await gitStatus(config);
+  if (status.length === 0) {
+    return undefined;
+  }
+
+  return [
+    `Main checkout has uncommitted changes and no existing worktree or branch for ${task.change}.`,
+    "Commit or stash the changes on main before creating a new worktree.",
+    `Dirty paths: ${formatDirtyStatus(status)}.`,
+  ].join(" ");
+}
+
+async function gitStatus(config: RunnerConfig): Promise<string[]> {
+  const detector = config.gitStatusDetector ?? detectGitStatus;
   return await detector(config.projectDir);
 }
 
@@ -879,6 +917,43 @@ export async function detectGitRemoteOrigin(projectDir: string): Promise<string 
   return result.stdout.trim() || undefined;
 }
 
+export async function detectGitStatus(projectDir: string): Promise<string[]> {
+  const result = spawnSync("git", ["-C", projectDir, "status", "--short"], { encoding: "utf8" });
+  if (result.status !== 0) {
+    return [];
+  }
+
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+}
+
+async function changeHasExistingLocalClaim(projectDir: string, changeName: string): Promise<boolean> {
+  if (await pathExists(join(projectDir, "worktrees", changeName))) {
+    return true;
+  }
+
+  const branches = spawnSync("git", ["-C", projectDir, "for-each-ref", "--format=%(refname:short)", "refs/heads"], {
+    encoding: "utf8",
+  });
+  if (branches.status !== 0) {
+    return false;
+  }
+
+  return branches.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => line === changeName || line.endsWith(`/${changeName}`));
+}
+
+function formatDirtyStatus(status: string[]): string {
+  const maxEntries = 6;
+  const shown = status.slice(0, maxEntries).join(", ");
+  const remaining = status.length - maxEntries;
+  return remaining > 0 ? `${shown}, and ${remaining} more` : shown;
+}
+
 export function detectChangeBranch(projectDir: string, changeName: string): string {
   const worktreeBranch = spawnSync("git", ["-C", join(projectDir, "worktrees", changeName), "branch", "--show-current"], {
     encoding: "utf8",
@@ -1202,6 +1277,15 @@ function isNotFoundError(error: unknown): boolean {
 async function fileExists(path: string): Promise<boolean> {
   try {
     await readFile(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
     return true;
   } catch {
     return false;

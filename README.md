@@ -132,6 +132,17 @@ npx openspec-shipper init --profile node-npm
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees
 
+Commit the installed project assets on `main` before running the queue. The
+apply worker creates feature worktrees from `HEAD`; if `main` is dirty after
+`init`, the new worktree would miss the freshly installed scripts, workflows,
+provider commands, and package changes. Local queue state remains ignored.
+
+```bash
+git status --short
+git add <installed files you want to track>
+git commit -m "chore: install openspec shipper"
+```
+
 `update` refreshes installed assets using `.openspec-shipper/installed.json`.
 Locally changed files are reported as `drifted` instead of overwritten; use
 `--force` only when replacing local edits intentionally.

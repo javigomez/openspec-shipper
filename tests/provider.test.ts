@@ -84,6 +84,12 @@ describe("executor providers", () => {
     );
   });
 
+  test("OpenCode provider treats blocked sentinel lines as failures", () => {
+    expect(opencodeProvider.detectFailureSignal("All checks passed\nOPENSPEC_SHIPPER_BLOCKED: no open pull request exists")).toBe(
+      "Worker reported a blocker: no open pull request exists",
+    );
+  });
+
   test("OpenCode provider treats worker blocked summaries as failures", () => {
     expect(opencodeProvider.detectFailureSignal("## Blocked: `add-name-greeting` is not push-ready")).toBe(
       "Worker reported a blocker",

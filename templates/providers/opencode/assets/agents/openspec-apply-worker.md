@@ -18,6 +18,18 @@ validation.
 Immediately say what you are checking, including whether this is a targeted
 change run or a general queue discovery run. Do not wait silently.
 
+## Blocker Contract
+
+If you cannot complete this phase, you MUST include exactly one final line:
+
+```text
+OPENSPEC_SHIPPER_BLOCKED: <short reason>
+```
+
+Use this line for missing tools, missing permissions, failed checks, dirty
+state, ineligible changes, unsafe git state, or anything requiring human
+action. Do not include this line when the phase completes successfully.
+
 ## Discovery Commands
 
 Always run these from the repository root:
@@ -134,4 +146,5 @@ depends on another OpenSpec change, such as RNTL infrastructure, and that
 dependency is not present on the selected checkout, stop and report the
 prerequisite as a blocker.
 
-If blocked, report the exact blocker and leave incomplete tasks unchecked.
+If blocked, report the exact blocker, include the `OPENSPEC_SHIPPER_BLOCKED:`
+final line, and leave incomplete tasks unchecked.

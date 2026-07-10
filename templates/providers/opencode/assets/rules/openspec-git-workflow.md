@@ -54,6 +54,15 @@ is needed, create it inside the current repository checkout, for example
 If a tool asks for `external_directory` permission, stop and report the path as
 a blocker instead of retrying.
 
+When any worker cannot complete its phase, it must end with exactly one machine
+readable blocker line:
+
+```text
+OPENSPEC_SHIPPER_BLOCKED: <short reason>
+```
+
+Do not include that line after successful phases.
+
 ## Conventional Commits
 
 Use loose Conventional Commits:
@@ -130,7 +139,8 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 6. Validate commit messages.
 7. Push the branch.
 8. After push, verify that an open PR exists when `gh` is available. If no PR
-   exists, stop and report `No pull request exists` as a blocker.
+   exists, stop and end with
+   `OPENSPEC_SHIPPER_BLOCKED: no open pull request exists for <branch>`.
 9. Do not call `gh pr create` or any other manual PR creation path from the
    ship worker.
 

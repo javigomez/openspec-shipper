@@ -20,6 +20,8 @@ Goals:
 Important:
 
 - Follow the specialized `openspec-main-sync-worker` agent instructions.
+- If blocked, end with exactly one
+  `OPENSPEC_SHIPPER_BLOCKED: <short reason>` line.
 - Do not edit product code.
 - Do not edit OpenSpec files.
 - Do not create worktrees, commits unrelated to main sync, pull requests, or

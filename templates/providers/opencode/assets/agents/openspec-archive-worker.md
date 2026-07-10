@@ -17,6 +17,19 @@ contains the guardrails for the orchestrator `archive` queue task.
 Immediately say what you are checking, then inspect the root checkout. Do not
 wait silently.
 
+## Blocker Contract
+
+If you cannot complete this phase, you MUST include exactly one final line:
+
+```text
+OPENSPEC_SHIPPER_BLOCKED: <short reason>
+```
+
+Use this line for missing tools, missing permissions, failed checks, dirty
+state, ineligible changes, unsafe git state, failed archive pushes, or anything
+requiring human action. Do not include this line when the phase completes
+successfully.
+
 ## Boundaries
 
 This worker archives changes after their implementation PRs have merged into
@@ -78,5 +91,5 @@ branch with `git branch -d`. Never force-delete local branches or delete remote
 branches.
 
 If archive, commit, final fetch/rebase, or push fails, do not clean local
-implementation artifacts. Report the exact command and output so a later run or
-human can resume.
+implementation artifacts. Report the exact command and output, include the
+`OPENSPEC_SHIPPER_BLOCKED:` final line, so a later run or human can resume.

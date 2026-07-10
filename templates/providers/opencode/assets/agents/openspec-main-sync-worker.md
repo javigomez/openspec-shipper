@@ -18,6 +18,18 @@ contains the guardrails for the orchestrator `sync` queue task.
 Immediately say what you are checking, then inspect the root checkout. Do not
 wait silently.
 
+## Blocker Contract
+
+If you cannot complete this phase, you MUST include exactly one final line:
+
+```text
+OPENSPEC_SHIPPER_BLOCKED: <short reason>
+```
+
+Use this line for missing tools, missing permissions, failed Git commands,
+dirty state, unsafe git state, or anything requiring human action. Do not
+include this line when the phase completes successfully.
+
 ## Boundaries
 
 This worker MUST NOT edit product code, edit OpenSpec files, run `openspec
@@ -56,12 +68,13 @@ Apply exactly one case:
   the checkout is clean and the remaining local-only commits are
   proposal/archive/maintenance commits, then run `git push origin main`.
 
-If rebase conflicts, stop and report the conflicted files. Do not create a merge
-commit on `main`.
+If rebase conflicts, stop, report the conflicted files, and include the
+`OPENSPEC_SHIPPER_BLOCKED:` final line. Do not create a merge commit on `main`.
 
 If fetch, pull, or push fails because SSH, DNS, keychain, or network access is
 unavailable, retry once outside the sandbox when possible. If it still fails,
-stop and report the exact failing command.
+stop, report the exact failing command, and include the
+`OPENSPEC_SHIPPER_BLOCKED:` final line.
 
 Do not use `--no-verify` unless the human explicitly asks for a one-off
 emergency bypass.

@@ -471,6 +471,25 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
+  test("blocks deliver ship phase when the worker emits the blocked sentinel", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => ({
+        exitCode: 0,
+        output: "Pushed branch\nOPENSPEC_SHIPPER_BLOCKED: no open pull request exists for feat/add-name-greeting",
+      }),
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("no open pull request exists for feat/add-name-greeting");
+    expect(queue).not.toContain("waiting_for_merge");
+  });
+
   test("marks the first pending task blocked when the executor cannot start", async () => {
     const harness = await createHarness("- [ ] sync\n");
 

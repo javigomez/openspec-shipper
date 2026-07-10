@@ -23,6 +23,18 @@ stop and report the command instead.
 Immediately say what you are checking, then run cheap local discovery. Do not
 wait silently.
 
+## Blocker Contract
+
+If you cannot complete this phase, you MUST include exactly one final line:
+
+```text
+OPENSPEC_SHIPPER_BLOCKED: <short reason>
+```
+
+Use this line for missing tools, missing permissions, failed checks, missing
+pull requests, ineligible changes, unsafe git state, or anything requiring
+human action. Do not include this line when the phase completes successfully.
+
 ## Discovery Commands
 
 Run from the repository root:
@@ -86,9 +98,9 @@ For one eligible completed change:
    `git config user.email`.
 9. Push the selected branch to origin.
 10. After pushing, verify that an open pull request exists for the selected
-    branch when `gh` is available. If no pull request exists, report a blocker
-    with the exact message `No pull request exists` and stop. Do not report the
-    ship cycle as complete in that case.
+    branch when `gh` is available. If no pull request exists, stop and end with
+    `OPENSPEC_SHIPPER_BLOCKED: no open pull request exists for <branch>`. Do
+    not report the ship cycle as complete in that case.
 
 This worker MUST NOT run `openspec archive`. It also MUST NOT call `gh pr
 create`, GitHub connector PR APIs, or any other manual PR creation path. If the
@@ -101,5 +113,6 @@ follow-up fixes, or human review. Cleanup belongs to the archive phase after the
 implementation has merged and the OpenSpec archive push has succeeded. Never
 force-delete local branches from the ship worker.
 
-If blocked, report the exact command and output. Keep any local commit intact so
-a later run or human can resume.
+If blocked, report the exact command and output, include the
+`OPENSPEC_SHIPPER_BLOCKED:` final line, and keep any local commit intact so a
+later run or human can resume.

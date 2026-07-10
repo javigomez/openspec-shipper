@@ -29,6 +29,8 @@ Important:
   If that exact change is not eligible, stop and report the blocker instead of
   selecting another change.
 - Follow the specialized `openspec-ship-worker` agent instructions.
+- If blocked, end with exactly one
+  `OPENSPEC_SHIPPER_BLOCKED: <short reason>` line.
 - Do not archive changes in this command.
 - Do not create pull requests manually in this command.
 - Do not process more than one completed worktree in a single run.

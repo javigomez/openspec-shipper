@@ -52,6 +52,11 @@ export function openCodeCommandName(phase: DeliverPhase): string {
 }
 
 export function detectFailureSignal(output: string): string | undefined {
+  const blocked = output.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
+  if (blocked?.[1]) {
+    return `Worker reported a blocker: ${blocked[1].trim()}`;
+  }
+
   const patterns: Array<[RegExp, string]> = [
     [/UnknownError/i, "OpenCode returned UnknownError"],
     [/Unexpected server error/i, "OpenCode returned an unexpected server error"],

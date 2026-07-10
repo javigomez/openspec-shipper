@@ -28,6 +28,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
+    "release-patch": "node scripts/release-patch.mjs",
     "test": "bun test",
     "test:coverage": "bun test --coverage"
   },

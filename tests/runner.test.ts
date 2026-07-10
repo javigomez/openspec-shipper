@@ -277,6 +277,26 @@ describe("runner", () => {
     expect(queueDuringExecution).toContain("![apply running](https://img.shields.io/badge/apply-running-yellow)");
   });
 
+  test("writes log links relative to the queue file", async () => {
+    const harness = await createHarness("");
+    const queuePath = join(harness.config.stateDir, "queue.md");
+    await mkdir(harness.config.stateDir, { recursive: true });
+    await writeFile(queuePath, "- [ ] sync\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      rootDir: join(harness.rootDir, "node_modules/openspec-shipper"),
+      queuePath,
+      executor: cleanExecutor,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(queuePath, "utf8");
+    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-sync.log");
+    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-sync.log))_");
+    expect(queue).not.toContain("../../.openspec-shipper");
+  });
+
   test("runs the current deliver phase", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship -->\n",

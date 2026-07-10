@@ -518,9 +518,9 @@ async function executeTask(
   console.log(`Command: ${formatCommand(providerCommand.command, providerCommand.args)}`);
   console.log(`Cwd: ${providerCommand.cwd}`);
   console.log(`Env PWD: ${providerCommand.cwd}`);
-  console.log(`Log: ${relative(config.rootDir, logPath)}`);
+  console.log(`Log: ${toMarkdownPath(relative(config.projectDir, logPath))}`);
 
-  const relativeLogPath = relative(config.rootDir, logPath);
+  const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
   const runningContent = markTaskRunning(lines, task, {
     timestamp: startedAt,
     logPath: relativeLogPath,
@@ -1003,6 +1003,10 @@ function shellQuote(value: string): string {
 
 function formatCommand(command: string, args: string[]): string {
   return [command, ...args].map(shellQuote).join(" ");
+}
+
+function toMarkdownPath(path: string): string {
+  return path.split("\\").join("/");
 }
 
 function buildStatsOptions(config: RunnerConfig): StatsOptions | undefined {

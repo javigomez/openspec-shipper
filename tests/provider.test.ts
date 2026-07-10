@@ -83,4 +83,13 @@ describe("executor providers", () => {
       "Ship worker did not find an open pull request",
     );
   });
+
+  test("OpenCode provider treats worker blocked summaries as failures", () => {
+    expect(opencodeProvider.detectFailureSignal("## Blocked: `add-name-greeting` is not push-ready")).toBe(
+      "Worker reported a blocker",
+    );
+    expect(opencodeProvider.detectFailureSignal("The target change is not eligible for push.")).toBe(
+      "Worker reported a blocker",
+    );
+  });
 });

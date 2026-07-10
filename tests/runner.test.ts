@@ -452,6 +452,25 @@ describe("runner", () => {
     expect(queue).toContain("unexpected server error");
   });
 
+  test("blocks deliver ship phase when the worker reports a push blocker", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: async () => ({
+        exitCode: 0,
+        output: "## Blocked: `add-name-greeting` is not push-ready\nNo worktree has been created.",
+      }),
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("Worker reported a blocker");
+    expect(queue).not.toContain("waiting_for_merge");
+  });
+
   test("marks the first pending task blocked when the executor cannot start", async () => {
     const harness = await createHarness("- [ ] sync\n");
 

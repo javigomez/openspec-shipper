@@ -32,6 +32,8 @@ const SHIPPER_GITIGNORE_HEADER = "# OpenSpec Shipper local state";
 const SHIPPER_GITIGNORE_ENTRIES = [
   ".openspec-shipper/.env",
   ".openspec-shipper/queue.md",
+  ".openspec-shipper/shipper.lock",
+  ".openspec-shipper/stop",
   ".openspec-shipper/runs/",
   ".openspec-shipper/tmp/",
   "worktrees/",

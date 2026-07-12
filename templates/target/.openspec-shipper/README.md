@@ -32,6 +32,8 @@ Local queue state remains ignored and should not be committed:
 
 - `.openspec-shipper/.env`
 - `.openspec-shipper/queue.md`
+- `.openspec-shipper/shipper.lock`
+- `.openspec-shipper/stop`
 - `.openspec-shipper/runs/`
 - `.openspec-shipper/tmp/`
 - `worktrees/`

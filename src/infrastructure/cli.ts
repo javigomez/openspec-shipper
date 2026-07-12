@@ -44,7 +44,7 @@ export async function runCli(argv: string[]): Promise<void> {
     console.log("");
     console.log("Next steps:");
     console.log("  Review and commit the installed files on main before running the queue.");
-    console.log("  Do not commit .openspec-shipper/.env, queue.md, runs/, tmp/, or worktrees/.");
+    console.log("  Do not commit .openspec-shipper/.env, queue.md, shipper.lock, stop, runs/, tmp/, or worktrees/.");
     console.log("  git status --short");
     console.log("  git add <installed files you want to track>");
     console.log("  git commit -m \"chore: install openspec shipper\"");

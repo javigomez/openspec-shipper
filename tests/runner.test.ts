@@ -630,6 +630,25 @@ describe("runner", () => {
     expect(queue).toContain("no existing worktree or branch for add-name-greeting");
   });
 
+  test("ignores shipper runtime files when checking dirty main", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      gitStatusDetector: async () => ["?? .openspec-shipper/shipper.lock"],
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(called).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: ship");
+  });
+
   test("allows apply with dirty main when the change worktree already exists", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     await mkdir(join(harness.rootDir, "worktrees/add-name-greeting"), { recursive: true });

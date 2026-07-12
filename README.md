@@ -95,6 +95,8 @@ OPENSPEC_SHIPPER_STATS=1
 # OpenSpec Shipper local state
 .openspec-shipper/.env
 .openspec-shipper/queue.md
+.openspec-shipper/shipper.lock
+.openspec-shipper/stop
 .openspec-shipper/runs/
 .openspec-shipper/tmp/
 worktrees/

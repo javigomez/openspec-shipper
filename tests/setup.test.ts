@@ -20,7 +20,9 @@ describe("target setup", () => {
     expect(shipperConfig.profile).toBe("node-npm");
     expect(shipperConfig.safety).toEqual({ enablePush: true, enableArchive: true });
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
-    expect(await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8")).toContain("OpenSpec Shipper assets installed");
+    const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");
+    expect(installedReadme).toContain("Required After Init");
+    expect(installedReadme).toContain("git commit -m \"chore: install openspec shipper\"");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/openspec-config.example.yaml"), "utf8")).toContain("OpenSpec Shipper workflow source");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/scripts/validate-branch-name.mjs"), "utf8")).toContain("Invalid branch name");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/scripts/validate-openspec-proposal.mjs"), "utf8")).toContain("openspec:validate-proposal");

@@ -1,6 +1,6 @@
 {
   "name": "openspec-shipper",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Ship OpenSpec changes through an agent-backed queue.",
   "license": "MIT",
   "bin": {

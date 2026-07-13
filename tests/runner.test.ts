@@ -239,6 +239,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      pullRequestDetector: async () => "https://github.com/example/project/pull/1",
       executor: async (_command, args) => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
@@ -302,9 +303,15 @@ describe("runner", () => {
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship -->\n",
     );
     let receivedArgs: string[] = [];
+    let prChecks = 0;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("test-20-migrate-notebook-access-button-rntl"),
+      pullRequestDetector: async () => {
+        prChecks += 1;
+        return prChecks > 1 ? "https://github.com/example/project/pull/1" : undefined;
+      },
       executor: async (_command, args) => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
@@ -328,6 +335,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       pullRequestDetector: async (_projectDir, branch) => {
         checkedBranch = branch;
         return undefined;
@@ -428,6 +436,55 @@ describe("runner", () => {
     expect(queue).toContain("![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)");
   });
 
+  test("reconstructs waiting-for-merge from a bare deliver task when a PR is open", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
+      pullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+      executor: async () => {
+        throw new Error("reconcile should not run a worker for an open PR");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_merge");
+  });
+
+  test("reconstructs waiting-for-pr from a bare deliver task when only the remote branch exists", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
+      pullRequestDetector: async () => undefined,
+      executor: async () => {
+        throw new Error("reconcile should not run a worker while waiting for PR creation");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_pr");
+  });
+
+  test("reconstructs ship from a bare deliver task when local implementation tasks are complete", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+
+    const exitCode = await runQueue("dry-run", {
+      ...harness.config,
+      localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      tasksCompleteDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: ship");
+  });
+
   test("passes OpenCode log flags before the command", async () => {
     const harness = await createHarness("- [ ] sync\n");
     let receivedArgs: string[] = [];
@@ -518,6 +575,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       executor: async () => ({
         exitCode: 0,
         output: "## Blocked: `add-name-greeting` is not push-ready\nNo worktree has been created.",
@@ -537,6 +595,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       executor: async () => ({
         exitCode: 0,
         output: "Pushed branch\nOPENSPEC_SHIPPER_BLOCKED: no open pull request exists for feat/add-name-greeting",
@@ -592,6 +651,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       gitRemoteDetector: async () => undefined,
       executor: async () => {
         called = true;
@@ -612,6 +672,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       gitRemoteDetector: async () => undefined,
       executor: async () => {
         called = true;
@@ -841,6 +902,13 @@ describe("runner", () => {
 
 const cleanExecutor: Executor = async () => ({ exitCode: 0, output: "done" });
 
+function implementedChangeEvidence(changeName: string): Partial<RunnerConfig> {
+  return {
+    localClaimDetector: async (_projectDir, candidate) => candidate === changeName,
+    tasksCompleteDetector: async (_projectDir, candidate) => candidate === changeName,
+  };
+}
+
 async function createHarness(queueContent: string, options: { createCommandFiles?: boolean } = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), "orchester-test-"));
   const queuePath = join(rootDir, "queue.md");
@@ -877,7 +945,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
     gitStatusDetector: async () => [],
-    pullRequestDetector: async () => "https://github.com/example/project/pull/1",
+    pullRequestDetector: async () => undefined,
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };
 

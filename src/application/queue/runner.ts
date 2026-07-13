@@ -17,6 +17,9 @@ import {
   taskSlug,
   type QueueTask,
 } from "../../domain/queue/queue.js";
+import { reconcileDeliveryTask } from "../../domain/delivery/reconcile.js";
+import { phaseDefinition } from "../../domain/delivery/phases/index.js";
+import type { DeliveryEvidence } from "../../domain/delivery/phase.js";
 import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
 import {
   DEFAULT_QUEUE_PATH,
@@ -56,7 +59,10 @@ export type RunnerConfig = {
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
   gitStatusDetector?: GitStatusDetector;
+  localClaimDetector?: LocalClaimDetector;
+  remoteBranchDetector?: RemoteBranchDetector;
   pullRequestDetector?: PullRequestDetector;
+  tasksCompleteDetector?: TasksCompleteDetector;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -93,7 +99,10 @@ export type ExecutorResult = {
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
 export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
+export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type RemoteBranchDetector = (projectDir: string, branch: string) => Promise<boolean>;
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
+export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type Sleep = (ms: number) => Promise<void>;
 
 const DEFAULT_LOOP_DELAY_MS = 120_000;
@@ -159,7 +168,7 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
     return printOpenCodeStats(config);
   }
 
-  const queue = await refreshExternalWaitingStates(config, await loadQueue(config.queuePath));
+  const queue = await reconcileQueue(config, await loadQueue(config.queuePath));
 
   if (queue.errors.length > 0) {
     console.error("Queue has invalid tasks:");
@@ -282,7 +291,7 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
         return 0;
       }
 
-      const queue = await refreshExternalWaitingStates(config, await loadQueue(config.queuePath));
+      const queue = await reconcileQueue(config, await loadQueue(config.queuePath));
       if (queue.errors.length > 0) {
         console.error("Queue has invalid tasks:");
         for (const error of queue.errors) {
@@ -636,14 +645,21 @@ async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promis
   const branch = detectChangeBranch(config.projectDir, task.change);
   const detector = config.pullRequestDetector ?? detectOpenPullRequest;
   const pullRequest = await detector(config.projectDir, branch);
-  if (pullRequest) {
-    return "waiting_for_merge";
-  }
-
-  return "waiting_for_pr";
+  const evidence: DeliveryEvidence = {
+    changeName: task.change,
+    declaredPhase: "ship",
+    hasLocalClaim: true,
+    hasRemoteBranch: true,
+    hasOpenPullRequest: Boolean(pullRequest),
+    tasksComplete: true,
+  };
+  const decision = phaseDefinition("ship").postChecks(evidence);
+  return decision.kind === "transition" && (decision.phase === "waiting_for_pr" || decision.phase === "waiting_for_merge")
+    ? decision.phase
+    : undefined;
 }
 
-async function refreshExternalWaitingStates(
+async function reconcileQueue(
   config: RunnerConfig,
   queue: Awaited<ReturnType<typeof loadQueue>>,
 ): Promise<Awaited<ReturnType<typeof loadQueue>>> {
@@ -651,14 +667,7 @@ async function refreshExternalWaitingStates(
   let changed = false;
 
   for (const task of queue.tasks) {
-    if (task.status !== "pending" || task.action !== "deliver" || deliverPhase(task) !== "waiting_for_pr" || !task.change) {
-      continue;
-    }
-
-    const branch = detectChangeBranch(config.projectDir, task.change);
-    const detector = config.pullRequestDetector ?? detectOpenPullRequest;
-    const pullRequest = await detector(config.projectDir, branch);
-    if (!pullRequest) {
+    if (task.status !== "pending" || task.action !== "deliver" || !task.change) {
       continue;
     }
 
@@ -668,10 +677,20 @@ async function refreshExternalWaitingStates(
       continue;
     }
 
-    content = advanceDeliverTaskToPhase(currentQueue.lines, currentTask, "waiting_for_merge", {
-      timestamp: (config.now?.() ?? new Date()).toISOString(),
-    });
-    changed = true;
+    const evidence = await collectDeliveryEvidence(config, currentTask);
+    const decision = reconcileDeliveryTask(currentTask, evidence);
+    if (decision.kind === "transition" && decision.phase !== deliverPhase(currentTask)) {
+      content = advanceDeliverTaskToPhase(currentQueue.lines, currentTask, decision.phase, {
+        timestamp: (config.now?.() ?? new Date()).toISOString(),
+      });
+      changed = true;
+    } else if (decision.kind === "blocked") {
+      content = markTask(currentQueue.lines, currentTask, "blocked", {
+        timestamp: (config.now?.() ?? new Date()).toISOString(),
+        reason: decision.reason,
+      });
+      changed = true;
+    }
   }
 
   if (!changed) {
@@ -680,6 +699,42 @@ async function refreshExternalWaitingStates(
 
   await writeFile(config.queuePath, content);
   return await loadQueue(config.queuePath);
+}
+
+async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): Promise<DeliveryEvidence> {
+  const changeName = task.change;
+  if (!changeName) {
+    throw new Error("Cannot collect delivery evidence for a task without a change name");
+  }
+
+  const branch = detectChangeBranch(config.projectDir, changeName);
+  const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
+  const remoteBranchDetector = config.remoteBranchDetector ?? detectRemoteBranch;
+  const pullRequestDetector = config.pullRequestDetector ?? detectOpenPullRequest;
+  const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
+
+  const [hasLocalClaim, hasRemoteBranch, tasksComplete] = await Promise.all([
+    localClaimDetector(config.projectDir, changeName),
+    remoteBranchDetector(config.projectDir, branch),
+    tasksCompleteDetector(config.projectDir, changeName),
+  ]);
+  const declaredPhase = deliverPhase(task);
+  const shouldCheckPullRequest =
+    hasLocalClaim ||
+    hasRemoteBranch ||
+    declaredPhase === "ship" ||
+    declaredPhase === "waiting_for_pr" ||
+    declaredPhase === "waiting_for_merge";
+  const openPullRequest = shouldCheckPullRequest ? await pullRequestDetector(config.projectDir, branch) : undefined;
+
+  return {
+    changeName,
+    declaredPhase,
+    hasLocalClaim,
+    hasRemoteBranch,
+    hasOpenPullRequest: Boolean(openPullRequest),
+    tasksComplete,
+  };
 }
 
 async function loadQueue(queuePath: string) {
@@ -995,6 +1050,47 @@ async function changeHasExistingLocalClaim(projectDir: string, changeName: strin
     .split(/\r?\n/)
     .map((line) => line.trim())
     .some((line) => line === changeName || line.endsWith(`/${changeName}`));
+}
+
+async function detectRemoteBranch(projectDir: string, branch: string): Promise<boolean> {
+  const localRef = spawnSync("git", ["-C", projectDir, "show-ref", "--verify", `refs/remotes/origin/${branch}`], {
+    encoding: "utf8",
+  });
+  if (localRef.status === 0) {
+    return true;
+  }
+
+  const remoteRef = spawnSync("git", ["-C", projectDir, "ls-remote", "--heads", "origin", branch], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  return remoteRef.status === 0 && remoteRef.stdout.trim().length > 0;
+}
+
+async function detectTasksComplete(projectDir: string, changeName: string): Promise<boolean> {
+  const tasksPath =
+    (await firstExistingPath([
+      join(projectDir, "worktrees", changeName, "openspec", "changes", changeName, "tasks.md"),
+      join(projectDir, "openspec", "changes", changeName, "tasks.md"),
+    ])) ?? "";
+  if (!tasksPath) {
+    return false;
+  }
+
+  const content = await readFile(tasksPath, "utf8").catch(() => "");
+  const totalTasks = (content.match(/^[ \t]*- \[[ xX]\]/gm) ?? []).length;
+  const incompleteTasks = (content.match(/^[ \t]*- \[ \]/gm) ?? []).length;
+  return totalTasks > 0 && incompleteTasks === 0;
+}
+
+async function firstExistingPath(paths: string[]): Promise<string | undefined> {
+  for (const path of paths) {
+    if (await pathExists(path)) {
+      return path;
+    }
+  }
+
+  return undefined;
 }
 
 function formatDirtyStatus(status: string[]): string {

@@ -3,6 +3,10 @@ import { execute, ready, transition, type DeliveryPhaseDefinition } from "../pha
 export const applyPhase: DeliveryPhaseDefinition = {
   phase: "apply",
   preChecks(evidence) {
+    if (evidence.hasMergedPullRequest) {
+      return transition("sync", "pull request is merged");
+    }
+
     if (evidence.hasOpenPullRequest) {
       return transition("waiting_for_merge", "open pull request exists");
     }

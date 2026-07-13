@@ -3,6 +3,10 @@ import { blocked, execute, ready, transition, type DeliveryPhaseDefinition } fro
 export const shipPhase: DeliveryPhaseDefinition = {
   phase: "ship",
   preChecks(evidence) {
+    if (evidence.hasMergedPullRequest) {
+      return transition("sync", "pull request is merged");
+    }
+
     if (evidence.hasOpenPullRequest) {
       return transition("waiting_for_merge", "open pull request exists");
     }
@@ -25,6 +29,10 @@ export const shipPhase: DeliveryPhaseDefinition = {
     return execute("ship");
   },
   postChecks(evidence) {
+    if (evidence.hasMergedPullRequest) {
+      return transition("sync", "pull request is merged");
+    }
+
     return evidence.hasOpenPullRequest
       ? transition("waiting_for_merge", "open pull request exists")
       : transition("waiting_for_pr", "ship pushed branch and PR creation is external");

@@ -62,6 +62,7 @@ export type RunnerConfig = {
   localClaimDetector?: LocalClaimDetector;
   remoteBranchDetector?: RemoteBranchDetector;
   pullRequestDetector?: PullRequestDetector;
+  mergedPullRequestDetector?: MergedPullRequestDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
   sleep?: Sleep;
   now?: () => Date;
@@ -102,6 +103,7 @@ export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
 export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type RemoteBranchDetector = (projectDir: string, branch: string) => Promise<boolean>;
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
+export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type Sleep = (ms: number) => Promise<void>;
 
@@ -651,6 +653,7 @@ async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promis
     hasLocalClaim: true,
     hasRemoteBranch: true,
     hasOpenPullRequest: Boolean(pullRequest),
+    hasMergedPullRequest: false,
     tasksComplete: true,
   };
   const decision = phaseDefinition("ship").postChecks(evidence);
@@ -711,6 +714,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
   const remoteBranchDetector = config.remoteBranchDetector ?? detectRemoteBranch;
   const pullRequestDetector = config.pullRequestDetector ?? detectOpenPullRequest;
+  const mergedPullRequestDetector = config.mergedPullRequestDetector ?? detectMergedPullRequest;
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
 
   const [hasLocalClaim, hasRemoteBranch, tasksComplete] = await Promise.all([
@@ -725,7 +729,12 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     declaredPhase === "ship" ||
     declaredPhase === "waiting_for_pr" ||
     declaredPhase === "waiting_for_merge";
-  const openPullRequest = shouldCheckPullRequest ? await pullRequestDetector(config.projectDir, branch) : undefined;
+  const [openPullRequest, mergedPullRequest] = shouldCheckPullRequest
+    ? await Promise.all([
+        pullRequestDetector(config.projectDir, branch),
+        mergedPullRequestDetector(config.projectDir, branch),
+      ])
+    : [undefined, undefined];
 
   return {
     changeName,
@@ -733,6 +742,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     hasLocalClaim,
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
+    hasMergedPullRequest: Boolean(mergedPullRequest),
     tasksComplete,
   };
 }
@@ -1139,6 +1149,29 @@ export async function detectOpenPullRequest(projectDir: string, branch: string):
     env: childEnvForCwd(projectDir),
     encoding: "utf8",
   });
+  if (result.status !== 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as Array<{ url?: unknown }>;
+    const url = parsed[0]?.url;
+    return typeof url === "string" && url.length > 0 ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function detectMergedPullRequest(projectDir: string, branch: string): Promise<string | undefined> {
+  const result = spawnSync(
+    "gh",
+    ["pr", "list", "--head", branch, "--state", "merged", "--json", "url", "--limit", "1"],
+    {
+      cwd: projectDir,
+      env: childEnvForCwd(projectDir),
+      encoding: "utf8",
+    },
+  );
   if (result.status !== 0) {
     return undefined;
   }

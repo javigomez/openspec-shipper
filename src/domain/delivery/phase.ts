@@ -6,6 +6,7 @@ export type DeliveryEvidence = {
   hasLocalClaim: boolean;
   hasRemoteBranch: boolean;
   hasOpenPullRequest: boolean;
+  hasMergedPullRequest: boolean;
   tasksComplete: boolean;
 };
 

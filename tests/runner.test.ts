@@ -439,6 +439,22 @@ describe("runner", () => {
     expect(queue).toContain("![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)");
   });
 
+  test("refreshes waiting-for-merge tasks to sync when the PR is merged", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: waiting_for_merge -->\n");
+
+    const exitCode = await runQueue("dry-run", {
+      ...harness.config,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: sync");
+    expect(queue).toContain("![sync ready](https://img.shields.io/badge/sync-ready-blue)");
+  });
+
   test("reconstructs waiting-for-merge from a bare deliver task when a PR is open", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
 
@@ -455,6 +471,22 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: waiting_for_merge");
+  });
+
+  test("reconstructs sync from a bare deliver task when the PR is already merged", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+
+    const exitCode = await runQueue("dry-run", {
+      ...harness.config,
+      remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: sync");
   });
 
   test("reconstructs waiting-for-pr from a bare deliver task when only the remote branch exists", async () => {

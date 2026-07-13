@@ -17,6 +17,17 @@ There is no `postinstall` mutation. `init` is the command that installs project
 assets, and it writes state only under `.openspec-shipper/` plus provider assets
 such as `.opencode/`.
 
+## Requirements
+
+- `git`
+- `gh`, authenticated with GitHub CLI
+- OpenCode for the stable v1 provider
+- The package manager configured during `init`
+
+`gh` is used by the runner to reconcile PR state before spending tokens. That is
+how `waiting_for_pr` becomes `waiting_for_merge`, and how `waiting_for_merge`
+becomes `sync` after a PR has been merged.
+
 ## Commands
 
 ```bash
@@ -177,8 +188,9 @@ Queue format:
 apply -> ship -> waiting_for_merge -> sync -> archive
 ```
 
-`waiting_for_merge` is intentionally not runnable. After the PR merges, move
-the task to `phase: sync` so the shipper can sync `main` and archive safely.
+`waiting_for_merge` is intentionally not runnable. The runner uses `gh` to
+notice when the PR has merged and then reconciles the task to `phase: sync`, so
+the shipper can sync `main` and archive safely.
 
 ## Providers
 

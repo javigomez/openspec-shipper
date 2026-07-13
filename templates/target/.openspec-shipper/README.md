@@ -59,6 +59,16 @@ Allow GitHub Actions to create and approve pull requests
 If this is disabled, `ship` can push the branch but GitHub will reject the
 workflow that opens the PR.
 
+OpenSpec Shipper also requires the GitHub CLI for PR state reconciliation:
+
+```bash
+gh auth status
+```
+
+The runner uses `gh` to detect when the auto-PR has been created and when it has
+merged, so `waiting_for_pr` and `waiting_for_merge` can advance without asking
+the AI executor to guess.
+
 ```bash
 npx openspec-shipper doctor
 ```

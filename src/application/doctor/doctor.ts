@@ -30,6 +30,8 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
 
   checks.push(checkCommand("git", ["rev-parse", "--is-inside-work-tree"], projectDir, "Git repository detected"));
   checks.push(checkCommand("git", ["rev-parse", "--verify", config?.baseBranch ?? "main"], projectDir, "Base branch exists"));
+  checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for PR state reconciliation"));
+  checks.push(checkGitHubCliAuth(projectDir));
   checks.push(checkCommand(config?.executor.opencode.bin ?? "opencode", ["--version"], projectDir, "OpenCode CLI is available"));
   checks.push(checkCommand(packageManagerCommand(config), ["--version"], projectDir, "Configured package manager is available"));
 
@@ -105,16 +107,11 @@ function checkCommand(command: string, args: string[], cwd: string, successMessa
 }
 
 function checkGitHubActionsPullRequestPermission(projectDir: string): DoctorCheck {
-  const remote = spawnSync("git", ["remote", "get-url", "origin"], {
-    cwd: projectDir,
-    encoding: "utf8",
-    timeout: 10_000,
-  });
-  if (remote.status !== 0) {
+  const repository = detectGitHubRepository(projectDir);
+  if (repository === "missing") {
     return warning("github actions PR permission", "Cannot verify auto-PR permission because git remote origin is missing");
   }
 
-  const repository = parseGitHubRepository(remote.stdout.trim());
   if (!repository) {
     return warning("github actions PR permission", "Cannot verify auto-PR permission because origin is not a GitHub repo URL");
   }
@@ -152,6 +149,32 @@ function checkGitHubActionsPullRequestPermission(projectDir: string): DoctorChec
   } catch {
     return warning("github actions PR permission", "Cannot parse gh api workflow permission response");
   }
+}
+
+function checkGitHubCliAuth(projectDir: string): DoctorCheck {
+  const repository = detectGitHubRepository(projectDir);
+  if (repository === "missing") {
+    return warning("gh auth", "Cannot verify GitHub CLI authentication because git remote origin is missing");
+  }
+
+  if (!repository) {
+    return warning("gh auth", "Cannot verify GitHub CLI authentication because origin is not a GitHub repo URL");
+  }
+
+  return checkCommand("gh", ["auth", "status"], projectDir, "GitHub CLI is authenticated");
+}
+
+function detectGitHubRepository(projectDir: string): { owner: string; repo: string } | undefined | "missing" {
+  const remote = spawnSync("git", ["remote", "get-url", "origin"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (remote.status !== 0) {
+    return "missing";
+  }
+
+  return parseGitHubRepository(remote.stdout.trim());
 }
 
 function parseGitHubRepository(remoteUrl: string): { owner: string; repo: string } | undefined {

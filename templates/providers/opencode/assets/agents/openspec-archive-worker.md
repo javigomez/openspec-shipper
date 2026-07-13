@@ -59,6 +59,24 @@ If invocation arguments name a target change, inspect only that change. If it is
 not archive-ready, stop and report the exact blocker instead of selecting
 another completed change.
 
+If invocation arguments name a target change and
+`openspec/changes/<change-name>/` is missing, check whether the change was
+already archived before reporting a blocker:
+
+- Look for `openspec/changes/archive/*-<change-name>/`.
+- If exactly one archived directory exists, treat the OpenSpec archive step as
+  already complete and continue with the post-archive cleanup rules below.
+- Do not run `openspec archive <change-name>` again.
+- Do not create an archive commit when there is no archive/spec diff to commit.
+- If the main checkout is clean and up to date, safely remove any clean
+  `worktrees/<change-name>` worktree and delete the corresponding local branch
+  with `git branch -d` when they exist. Missing worktree or branch is a
+  successful no-op.
+- Exit successfully after this cleanup path. Do not emit
+  `OPENSPEC_SHIPPER_BLOCKED`.
+- If more than one archived directory matches, or the archived directory is
+  missing required files, stop and report the exact blocker.
+
 Select exactly one archive candidate. A valid candidate has:
 
 - `proposal.md`

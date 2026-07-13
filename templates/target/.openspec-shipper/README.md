@@ -113,6 +113,10 @@ open a pull request. After the PR merges, the queue can continue through `sync`
 and `archive`. The archive phase also cleans up local implementation worktrees
 and branches when it is safe.
 
+Archive is idempotent: if a change has already moved under
+`openspec/changes/archive/`, the worker treats the archive step as complete and
+continues with safe local cleanup.
+
 If a task blocks, fix the cause described in the log, then change `[!]` to
 `[ ]` in `.openspec-shipper/queue.md` and run the queue again. The shipper will
 remove the retry hint under the task and reconcile the correct phase before it

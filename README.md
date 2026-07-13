@@ -208,6 +208,11 @@ After fixing the cause, change only `[!]` to `[ ]`. The next queue command will
 remove the hint, reconcile the task from repository evidence, and retry or move
 it to the correct phase.
 
+The `archive` phase is idempotent. If the active change directory is already
+gone but the change exists under `openspec/changes/archive/*-<change-name>/`,
+the archive worker treats the OpenSpec archive as complete and continues with
+safe local cleanup.
+
 ## Providers
 
 ### OpenCode

@@ -28,6 +28,10 @@ queue. The apply worker creates feature worktrees from `HEAD`; if `main` is
 dirty after `init`, the new worktree would miss the freshly installed scripts,
 workflows, provider commands, and package changes.
 
+`openspec-shipper doctor` checks this and fails when `main` has non-runtime
+changes. Ignored runtime files such as `.openspec-shipper/queue.md`, logs, lock
+files, and `worktrees/` are allowed.
+
 Local queue state remains ignored and should not be committed:
 
 - `.openspec-shipper/.env`

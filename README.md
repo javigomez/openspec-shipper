@@ -28,6 +28,11 @@ such as `.opencode/`.
 how `waiting_for_pr` becomes `waiting_for_merge`, and how `waiting_for_merge`
 becomes `sync` after a PR has been merged.
 
+Before running the queue, `main` should be clean except for ignored shipper
+runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
+`worktrees/`. `doctor` fails when it sees non-runtime changes because apply
+workers create feature worktrees from the main checkout.
+
 ## Commands
 
 ```bash

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import { readShipperConfig, type ShipperConfig } from "../../domain/config/shipper-config.js";
 
 export type DoctorCheck = {
@@ -30,6 +31,7 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
 
   checks.push(checkCommand("git", ["rev-parse", "--is-inside-work-tree"], projectDir, "Git repository detected"));
   checks.push(checkCommand("git", ["rev-parse", "--verify", config?.baseBranch ?? "main"], projectDir, "Base branch exists"));
+  checks.push(checkWorkingTreeClean(projectDir));
   checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for PR state reconciliation"));
   checks.push(checkGitHubCliAuth(projectDir));
   checks.push(checkCommand(config?.executor.opencode.bin ?? "opencode", ["--version"], projectDir, "OpenCode CLI is available"));
@@ -104,6 +106,40 @@ function checkCommand(command: string, args: string[], cwd: string, successMessa
   }
 
   return ok(command, successMessage);
+}
+
+export function checkWorkingTreeClean(projectDir: string): DoctorCheck {
+  const result = spawnSync("git", ["status", "--short"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (result.error) {
+    return error("working tree", result.error.message);
+  }
+
+  if (result.status !== 0) {
+    return error("working tree", firstLine(result.stderr || result.stdout) ?? `git status exited with code ${result.status}`);
+  }
+
+  const dirty = filterLocalStateStatus(
+    result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter(Boolean),
+  );
+  if (dirty.length === 0) {
+    return ok("working tree", "No non-runtime changes in the main checkout");
+  }
+
+  return error(
+    "working tree",
+    [
+      "Main checkout has uncommitted non-runtime changes.",
+      "Commit or stash them before running the queue.",
+      `Dirty paths: ${formatDirtyStatus(dirty)}.`,
+    ].join(" "),
+  );
 }
 
 function checkGitHubActionsPullRequestPermission(projectDir: string): DoctorCheck {
@@ -233,6 +269,13 @@ function warning(name: string, message: string): DoctorCheck {
 
 function error(name: string, message: string): DoctorCheck {
   return { name, ok: false, message, severity: "error" };
+}
+
+function formatDirtyStatus(status: string[]): string {
+  const maxEntries = 6;
+  const shown = status.slice(0, maxEntries).join(", ");
+  const remaining = status.length - maxEntries;
+  return remaining > 0 ? `${shown}, and ${remaining} more` : shown;
 }
 
 function firstLine(value: string): string | undefined {

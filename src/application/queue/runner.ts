@@ -22,6 +22,7 @@ import { reconcileDeliveryTask } from "../../domain/delivery/reconcile.js";
 import { phaseDefinition } from "../../domain/delivery/phases/index.js";
 import type { DeliveryEvidence } from "../../domain/delivery/phase.js";
 import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
+import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import {
   DEFAULT_QUEUE_PATH,
   DEFAULT_STATE_DIR,
@@ -117,17 +118,6 @@ const DEFAULT_STATS_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 10_000;
 const SIGINT_DUPLICATE_GRACE_MS = 1_500;
 const ROOT_DIR = fileURLToPath(new URL("../../..", import.meta.url));
-const LOCAL_STATE_PATHS = [
-  ".openspec-shipper/.env",
-  ".openspec-shipper/queue.md",
-  ".openspec-shipper/shipper.lock",
-  ".openspec-shipper/stop",
-];
-const LOCAL_STATE_PREFIXES = [
-  ".openspec-shipper/runs/",
-  ".openspec-shipper/tmp/",
-  "worktrees/",
-];
 let activeChildProcess: ReturnType<typeof spawn> | undefined;
 
 export function defaultConfig(): RunnerConfig {
@@ -548,7 +538,7 @@ async function validateApplyCanCreateWorktree(config: RunnerConfig, task: QueueT
     return undefined;
   }
 
-  const status = (await gitStatus(config)).filter((line) => !isLocalStateStatus(line));
+  const status = filterLocalStateStatus(await gitStatus(config));
   if (status.length === 0) {
     return undefined;
   }
@@ -1115,14 +1105,6 @@ function formatDirtyStatus(status: string[]): string {
   const shown = status.slice(0, maxEntries).join(", ");
   const remaining = status.length - maxEntries;
   return remaining > 0 ? `${shown}, and ${remaining} more` : shown;
-}
-
-function isLocalStateStatus(statusLine: string): boolean {
-  const normalized = statusLine.replace(/\\/g, "/");
-  return (
-    LOCAL_STATE_PATHS.some((path) => normalized.includes(path)) ||
-    LOCAL_STATE_PREFIXES.some((path) => normalized.includes(path))
-  );
 }
 
 export function detectChangeBranch(projectDir: string, changeName: string): string {

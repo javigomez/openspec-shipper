@@ -19,6 +19,10 @@ export const applyPhase: DeliveryPhaseDefinition = {
       return transition("ship", "local implementation is complete");
     }
 
+    if (!evidence.hasLocalClaim) {
+      return transition("prepare", "no local implementation branch or worktree exists");
+    }
+
     return ready("apply");
   },
   run() {

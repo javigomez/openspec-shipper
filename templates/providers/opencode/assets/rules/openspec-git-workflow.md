@@ -8,6 +8,8 @@ execution surface for agents.
 - `main` is the canonical OpenSpec planning and archive checkout.
 - Create, continue, list, status, sync, validate proposal artifacts, and
   archive OpenSpec changes on `main`.
+- The shipper runner prepares deterministic worktrees before model-driven
+  implementation starts.
 - Only apply/implementation work runs in the selected change worktree.
 - Never edit product code for an OpenSpec change directly on `main`.
 - Pull requests are created after implementation, before archive.
@@ -113,11 +115,11 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 5. If your repo adds a stricter proposal wrapper, run that wrapper here.
 6. Commit complete proposal artifacts on `main`.
 
-## Apply Phase
+## Prepare Phase
 
-1. Run discovery from root `main`.
+1. Run from root `main`.
 2. Verify `main` is clean. If it is dirty, keep discovery on the local
-   snapshot and skip `git pull --ff-only`.
+   snapshot and stop before creating a new worktree.
 3. Pull with `git pull --ff-only` when network is available and `main` is
    clean.
 4. List active OpenSpec changes.
@@ -125,9 +127,18 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 6. Skip changes with an existing open PR.
 7. Continue an existing branch/worktree when present.
 8. Create `worktrees/<change-name>` only when no claim exists.
-9. Implement one selected change.
-10. Mark tasks complete only when actually implemented and validated.
-11. Commit progress with a valid Conventional Commit.
+9. Do not edit product code and do not mark OpenSpec tasks complete.
+
+## Apply Phase
+
+1. Run discovery from root `main`.
+2. Verify the selected `worktrees/<change-name>` already exists.
+3. Never create branches or worktrees in apply; the native `prepare` phase owns
+   that setup.
+4. Enter the selected worktree.
+5. Implement one selected change.
+6. Mark tasks complete only when actually implemented and validated.
+7. Commit progress with a valid Conventional Commit.
 
 ## Push Phase
 

@@ -21,7 +21,7 @@ const config = {
 
 describe("executor providers", () => {
   test("OpenCode provider builds the current apply command", () => {
-    const task = parseQueue("- [ ] deliver add-name-greeting\n").tasks[0]!;
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: apply -->\n").tasks[0]!;
 
     const command = opencodeProvider.buildCommand({
       phase: "apply",

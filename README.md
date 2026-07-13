@@ -30,8 +30,8 @@ becomes `sync` after a PR has been merged.
 
 Before running the queue, `main` should be clean except for ignored shipper
 runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
-`worktrees/`. `doctor` fails when it sees non-runtime changes because apply
-workers create feature worktrees from the main checkout.
+`worktrees/`. `doctor` fails when it sees non-runtime changes because the native
+`prepare` phase creates feature worktrees from the main checkout.
 
 ## Commands
 
@@ -155,7 +155,7 @@ belongs to the application. A repo-local usage guide is installed at
 `.openspec-shipper/README.md`.
 
 Commit the installed project assets on `main` before running the queue. The
-apply worker creates feature worktrees from `HEAD`; if `main` is dirty after
+native `prepare` phase creates feature worktrees from `HEAD`; if `main` is dirty after
 `init`, the new worktree would miss the freshly installed scripts, workflows,
 provider commands, and package changes. Local queue state remains ignored.
 
@@ -190,8 +190,13 @@ Queue format:
 `deliver` advances through:
 
 ```text
-apply -> ship -> waiting_for_merge -> sync -> archive -> cleanup
+prepare -> apply -> ship -> waiting_for_pr -> waiting_for_merge -> sync -> archive -> cleanup
 ```
+
+`prepare` is native runner logic: it creates or reconnects
+`worktrees/<change-name>` and the deterministic implementation branch before
+any AI executor is called. `apply` then spends model tokens only on
+implementation inside that prepared workspace.
 
 `waiting_for_merge` is intentionally not runnable. The runner uses `gh` to
 notice when the PR has merged and then reconciles the task to `phase: sync`, so
@@ -210,7 +215,8 @@ merged PR -> sync
 open PR -> waiting_for_merge
 remote branch -> waiting_for_pr
 local work complete -> ship
-active change or local work -> apply
+local work incomplete -> apply
+active change without local work -> prepare
 nothing found -> blocked
 ```
 

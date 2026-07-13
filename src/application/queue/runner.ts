@@ -68,6 +68,7 @@ export type RunnerConfig = {
   pullRequestDetector?: PullRequestDetector;
   mergedPullRequestDetector?: MergedPullRequestDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
+  prepareWorkspace?: PrepareWorkspace;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -111,6 +112,13 @@ export type RemoteBranchDetector = (projectDir: string, branch: string) => Promi
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
+export type PrepareWorkspaceInput = {
+  projectDir: string;
+  changeName: string;
+  branch: string;
+  worktreeDir: string;
+};
 export type Sleep = (ms: number) => Promise<void>;
 
 const DEFAULT_LOOP_DELAY_MS = 120_000;
@@ -207,13 +215,17 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
     return 0;
   }
 
-  const providerCommand = buildConfiguredProviderCommand(config, pendingTask);
-
   if (mode === "dry-run") {
     console.log(`Next task: ${pendingTask.rawCommand}`);
-    console.log(`Command: ${formatCommand(providerCommand.command, providerCommand.args)}`);
-    console.log(`Cwd: ${providerCommand.cwd}`);
-    if (config.opencodeStats) {
+    if (isNativeTask(pendingTask)) {
+      console.log(`Native: ${describeNativeTask(pendingTask)}`);
+      console.log(`Cwd: ${config.projectDir}`);
+    } else {
+      const providerCommand = buildConfiguredProviderCommand(config, pendingTask);
+      console.log(`Command: ${formatCommand(providerCommand.command, providerCommand.args)}`);
+      console.log(`Cwd: ${providerCommand.cwd}`);
+    }
+    if (!isNativeTask(pendingTask) && config.opencodeStats) {
       console.log(`Stats: ${formatStatsPolling(config)}`);
     }
     const preflight = await validateTaskPreflight(config, pendingTask);
@@ -231,14 +243,13 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
     return await runLoopWithLock(config);
   }
 
-  return await runSingleTaskWithLock(config, queue.lines, pendingTask, providerCommand);
+  return await runSingleTaskWithLock(config, queue.lines, pendingTask);
 }
 
 async function runSingleTaskWithLock(
   config: RunnerConfig,
   lines: string[],
   task: QueueTask,
-  providerCommand: ProviderCommand,
 ): Promise<number> {
   const lockPath = join(config.stateDir, "shipper.lock");
   const lock = await acquireLock(config, lockPath, task.rawCommand, "immediate");
@@ -254,13 +265,17 @@ async function runSingleTaskWithLock(
       return 1;
     }
 
-    const processCheck = await checkActiveOpenCode(config);
-    if (processCheck.busy) {
-      console.error(`Queue busy before spending tokens: ${processCheck.reason}`);
-      return 1;
+    if (!isNativeTask(task)) {
+      const processCheck = await checkActiveOpenCode(config);
+      if (processCheck.busy) {
+        console.error(`Queue busy before spending tokens: ${processCheck.reason}`);
+        return 1;
+      }
     }
 
-    return await executeTask(config, lines, task, providerCommand, { checkedAt });
+    return isNativeTask(task)
+      ? await executeNativeTask(config, lines, task, { checkedAt })
+      : await executeTask(config, lines, task, buildConfiguredProviderCommand(config, task), { checkedAt });
   } finally {
     await lock.release();
   }
@@ -335,18 +350,22 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
         continue;
       }
 
-      const processCheck = await checkActiveOpenCode(config);
-      if (processCheck.busy) {
-        busyState = printBusyWait(processCheck.reason, busyState, config.busyDelayMs);
-        if (await waitOrStop(config, sleep, config.busyDelayMs)) {
-          console.log("Queue stop requested. Exiting while waiting for active OpenCode process.");
-          return 0;
+      if (!isNativeTask(pendingTask)) {
+        const processCheck = await checkActiveOpenCode(config);
+        if (processCheck.busy) {
+          busyState = printBusyWait(processCheck.reason, busyState, config.busyDelayMs);
+          if (await waitOrStop(config, sleep, config.busyDelayMs)) {
+            console.log("Queue stop requested. Exiting while waiting for active OpenCode process.");
+            return 0;
+          }
+          continue;
         }
-        continue;
       }
 
       busyState = undefined;
-      const exitCode = await executeTask(config, queue.lines, pendingTask, buildConfiguredProviderCommand(config, pendingTask), { checkedAt });
+      const exitCode = isNativeTask(pendingTask)
+        ? await executeNativeTask(config, queue.lines, pendingTask, { checkedAt })
+        : await executeTask(config, queue.lines, pendingTask, buildConfiguredProviderCommand(config, pendingTask), { checkedAt });
       if (exitCode !== 0) {
         const nextQueue = await loadQueue(config.queuePath);
         const nextBlockedTasks = findBlockedTasks(nextQueue.tasks);
@@ -483,24 +502,22 @@ async function validateTaskPreflight(
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
   const commandName = openCodeCommandName(phase);
   const commandPath =
-    provider(config).id === "opencode"
+    phase === "prepare"
+      ? "(native prepare phase)"
+      : provider(config).id === "opencode"
       ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
       : "(provider does not use OpenCode command files)";
+
+  if (phase === "prepare") {
+    const prepareBlocker = await validatePrepareCanCreateWorktree(config, task);
+    return prepareBlocker ? { ok: false, commandPath, reason: prepareBlocker } : { ok: true, commandPath };
+  }
 
   if (phase === "ship" && !(await gitRemoteOrigin(config))) {
     return {
       ok: false,
       commandPath,
       reason: "Git remote origin is not configured; cannot push branch or open PR.",
-    };
-  }
-
-  const dirtyApplyBlocker = await validateApplyCanCreateWorktree(config, task);
-  if (dirtyApplyBlocker) {
-    return {
-      ok: false,
-      commandPath,
-      reason: dirtyApplyBlocker,
     };
   }
 
@@ -532,13 +549,19 @@ async function gitRemoteOrigin(config: RunnerConfig): Promise<string | undefined
   return await detector(config.projectDir);
 }
 
-async function validateApplyCanCreateWorktree(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
+async function validatePrepareCanCreateWorktree(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  if (phase !== "apply" || !task.change) {
+  if (phase !== "prepare" || !task.change) {
     return undefined;
   }
 
-  if (await changeHasExistingLocalClaim(config.projectDir, task.change)) {
+  const activeChangeDetector = config.activeChangeDetector ?? detectActiveChange;
+  if (!(await activeChangeDetector(config.projectDir, task.change))) {
+    return `OpenSpec change ${task.change} is missing at openspec/changes/${task.change}; cannot prepare a worktree.`;
+  }
+
+  const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
+  if (await localClaimDetector(config.projectDir, task.change)) {
     return undefined;
   }
 
@@ -776,6 +799,86 @@ async function blockTask(
   const timestamp = (config.now?.() ?? new Date()).toISOString();
   const nextContent = markTask(lines, task, "blocked", { timestamp, reason });
   await writeFile(queuePath, nextContent);
+}
+
+function isNativeTask(task: QueueTask): boolean {
+  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  return phase === "prepare";
+}
+
+function describeNativeTask(task: QueueTask): string {
+  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  if (phase === "prepare" && task.change) {
+    return `prepare worktree for ${task.change}`;
+  }
+
+  return `${phase} phase`;
+}
+
+async function executeNativeTask(
+  config: RunnerConfig,
+  lines: string[],
+  task: QueueTask,
+  activity: { checkedAt?: string } = {},
+): Promise<number> {
+  const startedAt = (config.now?.() ?? new Date()).toISOString();
+  const logPath = await createRunLogPath(config, task, startedAt);
+  const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
+
+  console.log(`[${startedAt}] running: ${task.rawCommand}`);
+  console.log(`Native: ${describeNativeTask(task)}`);
+  console.log(`Cwd: ${config.projectDir}`);
+  console.log(`Log: ${toMarkdownPath(relative(config.projectDir, logPath))}`);
+
+  const runningContent = markTaskRunning(lines, task, {
+    timestamp: startedAt,
+    logPath: relativeLogPath,
+  });
+  await writeFile(config.queuePath, runningContent);
+
+  try {
+    const output = await runNativeTask(config, task);
+    await writeFile(logPath, output);
+    const nextContent = advanceDeliverTask(lines, task, {
+      timestamp: (config.now?.() ?? new Date()).toISOString(),
+      logPath: relativeLogPath,
+      checkedAt: activity.checkedAt,
+      startedAt,
+    });
+    await writeFile(config.queuePath, nextContent);
+    console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
+    return 0;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await writeFile(logPath, `${reason}\n`);
+    const nextContent = markTask(lines, task, "blocked", {
+      timestamp: (config.now?.() ?? new Date()).toISOString(),
+      reason,
+      logPath: relativeLogPath,
+      checkedAt: activity.checkedAt,
+      startedAt,
+    });
+    await writeFile(config.queuePath, nextContent);
+    console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+    return 1;
+  }
+}
+
+async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<string> {
+  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  if (phase !== "prepare" || !task.change) {
+    throw new Error(`Native runner does not support ${phase}`);
+  }
+
+  const preparer = config.prepareWorkspace ?? prepareWorkspace;
+  const branch = detectChangeBranch(config.projectDir, task.change);
+  const worktreeDir = join(config.projectDir, "worktrees", task.change);
+  return await preparer({
+    projectDir: config.projectDir,
+    changeName: task.change,
+    branch,
+    worktreeDir,
+  });
 }
 
 async function createRunLogPath(config: RunnerConfig, task: QueueTask, timestamp: string) {
@@ -1050,6 +1153,61 @@ export async function detectGitStatus(projectDir: string): Promise<string[]> {
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter(Boolean);
+}
+
+async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
+  const messages = [
+    `Preparing ${input.changeName}`,
+    `Project: ${input.projectDir}`,
+    `Branch: ${input.branch}`,
+    `Worktree: ${input.worktreeDir}`,
+  ];
+
+  if (await pathExists(input.worktreeDir)) {
+    messages.push("Worktree already exists; leaving it in place.");
+    return `${messages.join("\n")}\n`;
+  }
+
+  const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
+  if (currentBranch !== "main") {
+    throw new Error(`Prepare must run from main; current branch is ${currentBranch || "(detached)"}.`);
+  }
+
+  await mkdir(dirname(input.worktreeDir), { recursive: true });
+  if (localBranchExists(input.projectDir, input.branch)) {
+    messages.push(runGit(input.projectDir, ["worktree", "add", input.worktreeDir, input.branch]).trim());
+    messages.push("Linked existing implementation branch to a worktree.");
+    return `${messages.filter(Boolean).join("\n")}\n`;
+  }
+
+  messages.push(runGit(input.projectDir, ["worktree", "add", "-b", input.branch, input.worktreeDir, "HEAD"]).trim());
+  messages.push("Created implementation branch and worktree.");
+  return `${messages.filter(Boolean).join("\n")}\n`;
+}
+
+function localBranchExists(projectDir: string, branch: string): boolean {
+  const result = spawnSync("git", ["-C", projectDir, "show-ref", "--verify", `refs/heads/${branch}`], {
+    encoding: "utf8",
+  });
+  return result.status === 0;
+}
+
+function runGit(projectDir: string, args: string[]): string {
+  const result = spawnSync("git", ["-C", projectDir, ...args], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    const detail = firstNonEmptyLine(result.stderr || result.stdout) ?? `git ${args.join(" ")} exited with code ${result.status}`;
+    throw new Error(detail);
+  }
+
+  return result.stdout;
 }
 
 async function changeHasExistingLocalClaim(projectDir: string, changeName: string): Promise<boolean> {

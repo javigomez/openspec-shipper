@@ -1,5 +1,5 @@
 ---
-description: Claims and applies one ready OpenSpec change in its deterministic worktree
+description: Applies one prepared OpenSpec change in its deterministic worktree
 mode: primary
 temperature: 0.1
 ---
@@ -43,8 +43,8 @@ git status --short
 If the current branch is not `main`, stop and report that the apply queue must
 be discovered from the root `main` checkout.
 
-If `main` is dirty, keep discovery on the local snapshot and skip
-`git pull --ff-only`. Do not create or edit a worktree from dirty `main`.
+If `main` is dirty, do not edit it. Continue only inside the already prepared
+change worktree. Do not run `git pull --ff-only` from a dirty `main`.
 
 Use relative repository paths only. Never invent or type absolute paths under
 `/Users/...`; if an absolute path is needed, derive it from `pwd` first. If a
@@ -66,7 +66,8 @@ test -f openspec/changes/<change-name>/design.md
 test -f openspec/changes/<change-name>/tasks.md
 find openspec/changes/<change-name>/specs -name spec.md -print
 OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 npm run openspec:cli -- validate <change-name>
-find worktrees -maxdepth 4 -path "*/openspec/changes/<change-name>/tasks.md" -print 2>/dev/null
+test -d worktrees/<change-name>
+test -f worktrees/<change-name>/openspec/changes/<change-name>/tasks.md
 ```
 
 If the targeted change is not eligible, stop and report the exact blocker. Do
@@ -93,10 +94,11 @@ A ready change has:
 - a passing
   `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 npm run openspec:cli -- validate <change-name>`
 - at least one unchecked task in `tasks.md`
+- an already prepared `worktrees/<change-name>` worktree
 
-Also inspect existing `worktrees/*/openspec/changes/*/tasks.md` for legacy
-worktrees. If a change exists only in a worktree, treat that worktree as the
-authoritative place to continue the change.
+If a change exists only in a worktree, treat that worktree as the authoritative
+place to continue the change only when the root `main` checkout confirms that
+the change has not already been archived.
 
 Skip changes that already have an open PR when `gh` can confirm it. If `gh` is
 unavailable, use local branch and worktree state as the claim lock.
@@ -115,9 +117,13 @@ Use the deterministic branch from the project workflow:
 <type>/<change-name>
 ```
 
-Continue an existing branch or worktree before creating a new one. Create a new
-worktree only if no local branch, remote branch, existing worktree, or open PR
-already claims the change.
+The apply phase never creates branches or worktrees. That is the shipper
+runner's native `prepare` phase. If `worktrees/<change-name>` is missing, stop
+with:
+
+```text
+OPENSPEC_SHIPPER_BLOCKED: prepared worktree missing for <change-name>
+```
 
 ## Apply Rules
 

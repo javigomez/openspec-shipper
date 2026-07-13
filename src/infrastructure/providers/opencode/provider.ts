@@ -38,6 +38,8 @@ export const opencodeProvider: ExecutorProvider = {
 
 export function openCodeCommandName(phase: DeliverPhase): string {
   switch (phase) {
+    case "prepare":
+      return "openspec-prepare-worktree";
     case "apply":
       return "openspec-apply-worktree";
     case "ship":

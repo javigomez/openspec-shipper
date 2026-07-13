@@ -240,6 +240,7 @@ describe("runner", () => {
   test("advances a deliver task to the next phase on success", async () => {
     const harness = await createHarness("- [ ] deliver test-20-migrate-notebook-access-button-rntl\n");
     let receivedArgs: string[] = [];
+    let preparedChange = "";
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -247,38 +248,38 @@ describe("runner", () => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
       },
+      prepareWorkspace: async (input) => {
+        preparedChange = input.changeName;
+        return "prepared\n";
+      },
     });
 
     expect(exitCode).toBe(0);
-    expect(receivedArgs).toEqual([
-      "run",
-      "--command",
-      "openspec-apply-worktree",
-      "test-20-migrate-notebook-access-button-rntl",
-    ]);
+    expect(receivedArgs).toEqual([]);
+    expect(preparedChange).toBe("test-20-migrate-notebook-access-button-rntl");
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: apply");
     expect(queue).toContain("checked: 2026-06-17T12:00:00.000Z");
     expect(queue).toContain("started: 2026-06-17T12:00:00.000Z");
   });
 
-  test("marks a task as running before invoking the executor", async () => {
+  test("marks a native prepare task as running before preparing the workspace", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let queueDuringExecution = "";
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      executor: async () => {
+      prepareWorkspace: async () => {
         queueDuringExecution = await readFile(harness.queuePath, "utf8");
-        return { exitCode: 0, output: "done" };
+        return "prepared\n";
       },
     });
 
     expect(exitCode).toBe(0);
-    expect(queueDuringExecution).toContain("phase: apply");
+    expect(queueDuringExecution).toContain("phase: prepare");
     expect(queueDuringExecution).toContain("running: 2026-06-17T12:00:00.000Z");
-    expect(queueDuringExecution).toContain("![apply running](https://img.shields.io/badge/apply-running-yellow)");
+    expect(queueDuringExecution).toContain("![prepare running](https://img.shields.io/badge/prepare-running-yellow)");
   });
 
   test("writes log links relative to the queue file", async () => {
@@ -395,6 +396,7 @@ describe("runner", () => {
       ].join("\n"),
     );
     let receivedArgs: string[] = [];
+    let preparedChange = "";
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -402,14 +404,19 @@ describe("runner", () => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
       },
+      prepareWorkspace: async (input) => {
+        preparedChange = input.changeName;
+        return "prepared\n";
+      },
     });
 
     expect(exitCode).toBe(0);
-    expect(receivedArgs).toEqual(["run", "--command", "openspec-apply-worktree", "change-c"]);
+    expect(receivedArgs).toEqual([]);
+    expect(preparedChange).toBe("change-c");
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver change-b <!-- depends_on: change-a -->");
     expect(queue).toContain("- [ ] deliver change-c");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: apply");
   });
 
   test("skips deliver tasks waiting for merge", async () => {
@@ -420,6 +427,7 @@ describe("runner", () => {
       ].join("\n"),
     );
     let receivedArgs: string[] = [];
+    let preparedChange = "";
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -427,14 +435,19 @@ describe("runner", () => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
       },
+      prepareWorkspace: async (input) => {
+        preparedChange = input.changeName;
+        return "prepared\n";
+      },
     });
 
     expect(exitCode).toBe(0);
-    expect(receivedArgs).toEqual(["run", "--command", "openspec-apply-worktree", "change-c"]);
+    expect(receivedArgs).toEqual([]);
+    expect(preparedChange).toBe("change-c");
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver change-b <!-- phase: waiting_for_merge -->");
     expect(queue).toContain("- [ ] deliver change-c");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: apply");
   });
 
   test("refreshes waiting-for-pr tasks before deciding the queue is waiting", async () => {
@@ -793,6 +806,17 @@ describe("runner", () => {
     expect(queue).toContain("OpenCode command file not found");
   });
 
+  test("dry-runs native prepare without requiring an OpenCode command file", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n", { createCommandFiles: false });
+
+    const exitCode = await runQueue("dry-run", harness.config);
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).not.toContain("OpenCode command file not found");
+  });
+
   test("blocks ship before execution when git remote origin is missing", async () => {
     const harness = await createHarness("- [ ] ship\n");
     let called = false;
@@ -837,7 +861,7 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
-  test("blocks apply before execution when main is dirty and no claim exists", async () => {
+  test("blocks prepare before execution when main is dirty and no claim exists", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let called = false;
 
@@ -854,27 +878,33 @@ describe("runner", () => {
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: apply");
+    expect(queue).toContain("phase: prepare");
     expect(queue).toContain("no existing worktree or branch for add-name-greeting");
   });
 
   test("ignores shipper runtime files when checking dirty main", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
-    let called = false;
+    let executorCalled = false;
+    let prepareCalled = false;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
       gitStatusDetector: async () => ["?? .openspec-shipper/shipper.lock"],
       executor: async () => {
-        called = true;
+        executorCalled = true;
         return { exitCode: 0, output: "done" };
+      },
+      prepareWorkspace: async () => {
+        prepareCalled = true;
+        return "prepared\n";
       },
     });
 
     expect(exitCode).toBe(0);
-    expect(called).toBe(true);
+    expect(executorCalled).toBe(false);
+    expect(prepareCalled).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: apply");
   });
 
   test("allows apply with dirty main when the change worktree already exists", async () => {
@@ -1096,6 +1126,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     gitStatusDetector: async () => [],
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
+    prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };
 

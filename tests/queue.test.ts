@@ -98,10 +98,10 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; advanced: 2026-06-25T12:00:00.000Z; checked: 2026-06-25T11:59:58.000Z; started: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: apply; advanced: 2026-06-25T12:00:00.000Z; checked: 2026-06-25T11:59:58.000Z; started: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
-      "![ship ready](https://img.shields.io/badge/ship-ready-blue) · _([log](.openspec-shipper/runs/apply.log))_",
+      "![apply ready](https://img.shields.io/badge/apply-ready-blue) · _([log](.openspec-shipper/runs/apply.log))_",
     );
   });
 
@@ -156,14 +156,14 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain(
-      "- [ ] deliver add-name-greeting <!-- phase: apply; running: 2026-07-09T16:22:20.003Z; log: .openspec-shipper/runs/apply.log -->",
+      "- [ ] deliver add-name-greeting <!-- phase: prepare; running: 2026-07-09T16:22:20.003Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
-      "![apply running](https://img.shields.io/badge/apply-running-yellow) · _([log](.openspec-shipper/runs/apply.log))_",
+      "![prepare running](https://img.shields.io/badge/prepare-running-yellow) · _([log](.openspec-shipper/runs/apply.log))_",
     );
     const parsed = parseQueue(next).tasks[0]!;
     expect(parsed.status).toBe("pending");
-    expect(deliverPhase(parsed)).toBe("apply");
+    expect(deliverPhase(parsed)).toBe("prepare");
   });
 
   test("marks a deliver task as checking without changing its queue status", () => {
@@ -175,14 +175,14 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain(
-      "- [ ] deliver add-name-greeting <!-- phase: apply; checking: 2026-07-10T08:15:00.000Z -->",
+      "- [ ] deliver add-name-greeting <!-- phase: prepare; checking: 2026-07-10T08:15:00.000Z -->",
     );
     expect(next).toContain(
-      "![apply checking](https://img.shields.io/badge/apply-checking-yellow)",
+      "![prepare checking](https://img.shields.io/badge/prepare-checking-yellow)",
     );
     const parsed = parseQueue(next).tasks[0]!;
     expect(parsed.status).toBe("pending");
-    expect(deliverPhase(parsed)).toBe("apply");
+    expect(deliverPhase(parsed)).toBe("prepare");
   });
 
   test("adds a human retry hint when a task is blocked", () => {

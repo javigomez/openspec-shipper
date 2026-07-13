@@ -91,11 +91,15 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("ship", "local implementation is complete");
   }
 
+  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "apply")) {
+    return transitionInference("prepare", "active OpenSpec change exists without a prepared workspace");
+  }
+
   if (evidence.hasActiveChange || evidence.hasLocalClaim) {
     return { kind: "unchanged" };
   }
 
-  return evidence.declaredPhase === "apply"
+  return phasePrecedesOrMatches(evidence.declaredPhase, "apply")
     ? {
         kind: "blocked",
         phase: evidence.declaredPhase,
@@ -121,21 +125,27 @@ function phasePrecedes(left: DeliverPhase, right: DeliverPhase): boolean {
   return phaseRank(left) < phaseRank(right);
 }
 
+function phasePrecedesOrMatches(left: DeliverPhase, right: DeliverPhase): boolean {
+  return phaseRank(left) <= phaseRank(right);
+}
+
 function phaseRank(phase: DeliverPhase): number {
   switch (phase) {
     case "apply":
+      return 1;
+    case "prepare":
       return 0;
     case "ship":
-      return 1;
-    case "waiting_for_pr":
       return 2;
-    case "waiting_for_merge":
+    case "waiting_for_pr":
       return 3;
-    case "sync":
+    case "waiting_for_merge":
       return 4;
-    case "archive":
+    case "sync":
       return 5;
-    case "cleanup":
+    case "archive":
       return 6;
+    case "cleanup":
+      return 7;
   }
 }

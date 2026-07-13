@@ -1,8 +1,8 @@
 export type TaskStatus = "pending" | "done" | "blocked";
 
-export type QueueAction = "apply" | "ship" | "sync" | "archive" | "cleanup" | "deliver";
+export type QueueAction = "prepare" | "apply" | "ship" | "sync" | "archive" | "cleanup" | "deliver";
 
-export type DeliverPhase = "apply" | "ship" | "waiting_for_pr" | "waiting_for_merge" | "sync" | "archive" | "cleanup";
+export type DeliverPhase = "prepare" | "apply" | "ship" | "waiting_for_pr" | "waiting_for_merge" | "sync" | "archive" | "cleanup";
 
 export type QueueTask = {
   lineIndex: number;
@@ -25,7 +25,7 @@ const COMMENT_PATTERN = /<!--(.*?)-->/;
 const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*_\(\[log]\([^)]+\)\)_)?\s*$/;
 const CHANGE_PREFIX_PATTERN = /^openspec\/changes\//;
 const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const DELIVER_PHASES: DeliverPhase[] = ["apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive", "cleanup"];
+const DELIVER_PHASES: DeliverPhase[] = ["prepare", "apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive", "cleanup"];
 export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 
 export function parseQueue(content: string): QueueParseResult {
@@ -73,7 +73,7 @@ export function parseTaskCommand(command: string): ParseTaskCommandResult {
     return { ok: false, error: "empty queue task" };
   }
 
-  if (action === "apply" || action === "deliver") {
+  if (action === "prepare" || action === "apply" || action === "deliver") {
     if (parts.length !== 2) {
       return { ok: false, error: `\`${action}\` tasks must be \`${action} <change-name>\`` };
     }
@@ -96,7 +96,7 @@ export function parseTaskCommand(command: string): ParseTaskCommandResult {
 
   return {
     ok: false,
-    error: `unknown task action \`${action}\`; expected apply, ship, sync, archive, or cleanup`,
+    error: `unknown task action \`${action}\`; expected prepare, apply, ship, sync, archive, or cleanup`,
   };
 }
 
@@ -136,6 +136,8 @@ export function openCodeCommandName(task: QueueTask): string {
   const action = task.action === "deliver" ? deliverPhase(task) : task.action;
 
   switch (action) {
+    case "prepare":
+      return "openspec-prepare-worktree";
     case "apply":
       return "openspec-apply-worktree";
     case "ship":
@@ -307,7 +309,7 @@ export function removeRetryHintsForUnblockedTasks(content: string): string {
 }
 
 export function deliverPhase(task: QueueTask): DeliverPhase {
-  return task.phase ?? "apply";
+  return task.phase ?? "prepare";
 }
 
 export function detectFailureSignal(output: string): string | undefined {
@@ -376,7 +378,7 @@ function taskIsRunnable(task: QueueTask, tasks: QueueTask[]): boolean {
 }
 
 export function commandAcceptsChangeArgument(task: QueueTask): boolean {
-  if (task.action === "apply") {
+  if (task.action === "prepare" || task.action === "apply") {
     return true;
   }
 
@@ -384,7 +386,7 @@ export function commandAcceptsChangeArgument(task: QueueTask): boolean {
     return false;
   }
 
-  return !["sync", "waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
+  return !["prepare", "sync", "waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
 }
 
 function isDeliverPhase(value: string): value is DeliverPhase {

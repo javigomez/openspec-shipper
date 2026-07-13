@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { defaultConfig, runQueue, type Executor, type RunnerConfig } from "../src/runner";
+import { silenceConsoleDuringTests } from "./test-console";
+
+silenceConsoleDuringTests();
 
 describe("runner", () => {
   test("default config discovers the shipper project root from a nested directory", async () => {

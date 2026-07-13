@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { queueAdd } from "../src/application/queue/queue-add";
 import type { RunnerConfig } from "../src/runner";
+import { silenceConsoleDuringTests } from "./test-console";
+
+silenceConsoleDuringTests();
 
 describe("queue add", () => {
   test("creates a queue and avoids duplicate changes", async () => {

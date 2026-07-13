@@ -3,6 +3,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "../src/infrastructure/cli.js";
+import { silenceConsoleDuringTests } from "./test-console";
+
+silenceConsoleDuringTests();
 
 const envKeys = [
   "OPENSPEC_SHIPPER_PROJECT_DIR",

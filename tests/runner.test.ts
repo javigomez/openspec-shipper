@@ -356,9 +356,26 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
-  test("marks a deliver task done after archive succeeds", async () => {
+  test("advances a deliver task to cleanup after archive succeeds", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: archive -->\n",
+    );
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      executor: cleanExecutor,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
+    expect(queue).toContain("phase: cleanup");
+    expect(queue).toContain("![cleanup ready](https://img.shields.io/badge/cleanup-ready-blue)");
+  });
+
+  test("marks a deliver task done after cleanup succeeds", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: cleanup -->\n",
     );
 
     const exitCode = await runQueue("next", {
@@ -981,6 +998,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
         "openspec-ship-worktree",
         "openspec-main-sync",
         "openspec-archive-merged",
+        "openspec-cleanup-worktree",
       ].map((commandName) => writeFile(join(commandDir, `${commandName}.md`), "")),
     );
   }

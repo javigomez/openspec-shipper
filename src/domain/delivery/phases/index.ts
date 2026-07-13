@@ -1,4 +1,5 @@
 import { archivePhase } from "./archive.js";
+import { cleanupPhase } from "./cleanup.js";
 import { applyPhase } from "./apply.js";
 import { shipPhase } from "./ship.js";
 import { syncPhase } from "./sync.js";
@@ -14,6 +15,7 @@ export const deliveryPhases: Record<DeliverPhase, DeliveryPhaseDefinition> = {
   waiting_for_merge: waitingForMergePhase,
   sync: syncPhase,
   archive: archivePhase,
+  cleanup: cleanupPhase,
 };
 
 export function phaseDefinition(phase: DeliverPhase): DeliveryPhaseDefinition {

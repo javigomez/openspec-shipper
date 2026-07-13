@@ -158,6 +158,16 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 10. Fetch/rebase before push to avoid divergence.
 11. Push `main`.
 12. If push fails, stop with at most one local archive commit.
+13. Do not clean local worktrees or branches in this phase.
+
+## Cleanup Phase
+
+1. Run only from root `main`.
+2. Verify the target change exists under `openspec/changes/archive/`.
+3. Remove only clean local `worktrees/<change-name>` worktrees.
+4. Delete only merged local implementation branches with `git branch -d`.
+5. Never force-delete local branches and never delete remote branches.
+6. Missing worktree or branch is a successful no-op.
 
 ## Main Sync Phase
 

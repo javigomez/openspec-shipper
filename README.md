@@ -190,12 +190,12 @@ Queue format:
 `deliver` advances through:
 
 ```text
-apply -> ship -> waiting_for_merge -> sync -> archive
+apply -> ship -> waiting_for_merge -> sync -> archive -> cleanup
 ```
 
 `waiting_for_merge` is intentionally not runnable. The runner uses `gh` to
 notice when the PR has merged and then reconciles the task to `phase: sync`, so
-the shipper can sync `main` and archive safely.
+the shipper can sync `main`, archive safely, and clean local artifacts.
 
 When a task blocks, the queue includes a human retry hint below it:
 
@@ -208,10 +208,12 @@ After fixing the cause, change only `[!]` to `[ ]`. The next queue command will
 remove the hint, reconcile the task from repository evidence, and retry or move
 it to the correct phase.
 
-The `archive` phase is idempotent. If the active change directory is already
-gone but the change exists under `openspec/changes/archive/*-<change-name>/`,
-the archive worker treats the OpenSpec archive as complete and continues with
-safe local cleanup.
+The `archive` phase is OpenSpec-native: it validates, runs
+`openspec archive <change-name> -y`, commits, and pushes the archive/spec diff on
+`main`. The `cleanup` phase is OpenSpec Shipper housekeeping: it removes a clean
+local `worktrees/<change-name>` worktree and deletes the merged local branch with
+`git branch -d` when safe. If there is nothing left to clean, cleanup succeeds as
+a no-op.
 
 ## Providers
 
@@ -225,6 +227,7 @@ opencode run --command openspec-apply-worktree <change>
 opencode run --command openspec-ship-worktree <change>
 opencode run --command openspec-main-sync
 opencode run --command openspec-archive-merged <change>
+opencode run --command openspec-cleanup-worktree <change>
 ```
 
 With config enabled, it also adds:

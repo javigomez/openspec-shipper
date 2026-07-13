@@ -16,6 +16,7 @@ const REQUIRED_COMMANDS = [
   ".opencode/commands/openspec-ship-worktree.md",
   ".opencode/commands/openspec-main-sync.md",
   ".opencode/commands/openspec-archive-merged.md",
+  ".opencode/commands/openspec-cleanup-worktree.md",
 ];
 
 const REQUIRED_PACKAGE_SCRIPTS = [

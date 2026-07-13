@@ -59,21 +59,17 @@ If invocation arguments name a target change, inspect only that change. If it is
 not archive-ready, stop and report the exact blocker instead of selecting
 another completed change.
 
-If invocation arguments name a target change and
-`openspec/changes/<change-name>/` is missing, check whether the change was
-already archived before reporting a blocker:
+If invocation arguments name a target change and `openspec/changes/<change-name>/`
+is missing, check whether the change was already archived before reporting a
+blocker:
 
 - Look for `openspec/changes/archive/*-<change-name>/`.
 - If exactly one archived directory exists, treat the OpenSpec archive step as
-  already complete and continue with the post-archive cleanup rules below.
+  already complete and exit successfully.
 - Do not run `openspec archive <change-name>` again.
 - Do not create an archive commit when there is no archive/spec diff to commit.
-- If the main checkout is clean and up to date, safely remove any clean
-  `worktrees/<change-name>` worktree and delete the corresponding local branch
-  with `git branch -d` when they exist. Missing worktree or branch is a
-  successful no-op.
-- Exit successfully after this cleanup path. Do not emit
-  `OPENSPEC_SHIPPER_BLOCKED`.
+- Do not clean local worktrees or branches; that belongs to the cleanup phase.
+- Do not emit `OPENSPEC_SHIPPER_BLOCKED`.
 - If more than one archived directory matches, or the archived directory is
   missing required files, stop and report the exact blocker.
 
@@ -103,11 +99,9 @@ For the selected change:
 7. Fetch/rebase against `origin/main` once before pushing.
 8. Push `main`.
 
-After push succeeds, clean local implementation artifacts only when safe: remove
-a clean `worktrees/<change-name>` worktree and delete the corresponding local
-branch with `git branch -d`. Never force-delete local branches or delete remote
-branches.
+After push succeeds, do not clean local implementation artifacts. The cleanup
+phase owns local worktree and branch removal.
 
-If archive, commit, final fetch/rebase, or push fails, do not clean local
-implementation artifacts. Report the exact command and output, include the
-`OPENSPEC_SHIPPER_BLOCKED:` final line, so a later run or human can resume.
+If archive, commit, final fetch/rebase, or push fails, report the exact command
+and output, include the `OPENSPEC_SHIPPER_BLOCKED:` final line, so a later run
+or human can resume.

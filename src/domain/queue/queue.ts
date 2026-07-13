@@ -1,8 +1,8 @@
 export type TaskStatus = "pending" | "done" | "blocked";
 
-export type QueueAction = "apply" | "ship" | "sync" | "archive" | "deliver";
+export type QueueAction = "apply" | "ship" | "sync" | "archive" | "cleanup" | "deliver";
 
-export type DeliverPhase = "apply" | "ship" | "waiting_for_pr" | "waiting_for_merge" | "sync" | "archive";
+export type DeliverPhase = "apply" | "ship" | "waiting_for_pr" | "waiting_for_merge" | "sync" | "archive" | "cleanup";
 
 export type QueueTask = {
   lineIndex: number;
@@ -25,7 +25,7 @@ const COMMENT_PATTERN = /<!--(.*?)-->/;
 const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*_\(\[log]\([^)]+\)\)_)?\s*$/;
 const CHANGE_PREFIX_PATTERN = /^openspec\/changes\//;
 const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const DELIVER_PHASES: DeliverPhase[] = ["apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive"];
+const DELIVER_PHASES: DeliverPhase[] = ["apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive", "cleanup"];
 export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 
 export function parseQueue(content: string): QueueParseResult {
@@ -86,7 +86,7 @@ export function parseTaskCommand(command: string): ParseTaskCommandResult {
     return { ok: true, task: { action, change } };
   }
 
-  if (action === "ship" || action === "sync" || action === "archive") {
+  if (action === "ship" || action === "sync" || action === "archive" || action === "cleanup") {
     if (parts.length !== 1) {
       return { ok: false, error: `\`${action}\` tasks do not accept arguments` };
     }
@@ -96,7 +96,7 @@ export function parseTaskCommand(command: string): ParseTaskCommandResult {
 
   return {
     ok: false,
-    error: `unknown task action \`${action}\`; expected apply, ship, sync, or archive`,
+    error: `unknown task action \`${action}\`; expected apply, ship, sync, archive, or cleanup`,
   };
 }
 
@@ -144,6 +144,8 @@ export function openCodeCommandName(task: QueueTask): string {
       return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
+    case "cleanup":
+      return "openspec-cleanup-worktree";
     case "waiting_for_pr":
       return "openspec-main-sync";
     case "waiting_for_merge":
@@ -235,7 +237,7 @@ export function advanceDeliverTask(
   }
 
   const phase = deliverPhase(task);
-  if (phase === "archive") {
+  if (phase === "cleanup") {
     return markTask(lines, task, "done", details);
   }
 

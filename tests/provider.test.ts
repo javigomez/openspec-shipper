@@ -47,6 +47,20 @@ describe("executor providers", () => {
     });
   });
 
+  test("OpenCode provider builds cleanup command with the target change", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup -->\n").tasks[0]!;
+
+    const command = opencodeProvider.buildCommand({
+      phase: "cleanup",
+      task,
+      projectDir: "/repo",
+      config,
+    });
+
+    expect(command.args).toContain("openspec-cleanup-worktree");
+    expect(command.args.at(-1)).toBe("add-name-greeting");
+  });
+
   test("Codex CLI provider builds an experimental exec command", () => {
     const task = parseQueue("- [ ] deliver add-name-greeting\n").tasks[0]!;
 

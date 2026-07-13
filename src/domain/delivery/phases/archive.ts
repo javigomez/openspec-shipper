@@ -1,4 +1,4 @@
-import { execute, ready, type DeliveryPhaseDefinition } from "../phase.js";
+import { execute, ready, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
 export const archivePhase: DeliveryPhaseDefinition = {
   phase: "archive",
@@ -9,6 +9,6 @@ export const archivePhase: DeliveryPhaseDefinition = {
     return execute("archive");
   },
   postChecks() {
-    return ready("archive");
+    return transition("cleanup", "archive completed");
   },
 };

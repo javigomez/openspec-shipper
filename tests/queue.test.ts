@@ -120,6 +120,32 @@ describe("queue parser", () => {
     expect(findFirstRunnableTask([parsed])).toBeUndefined();
   });
 
+  test("advances archive to cleanup before marking deliver done", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+    const task = result.tasks[0]!;
+
+    const next = advanceDeliverTask(result.lines, task, {
+      timestamp: "2026-07-13T12:00:00.000Z",
+    });
+
+    expect(next).toContain("phase: cleanup");
+    expect(next).toContain("![cleanup ready](https://img.shields.io/badge/cleanup-ready-blue)");
+    const parsed = parseQueue(next).tasks[0]!;
+    expect(deliverPhase(parsed)).toBe("cleanup");
+  });
+
+  test("marks deliver done after cleanup", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup -->\n");
+    const task = result.tasks[0]!;
+
+    const next = advanceDeliverTask(result.lines, task, {
+      timestamp: "2026-07-13T12:00:00.000Z",
+    });
+
+    expect(next).toContain("- [x] deliver add-name-greeting");
+    expect(next).toContain("![cleanup done](https://img.shields.io/badge/cleanup-done-brightgreen)");
+  });
+
   test("marks a deliver task as running without changing its queue status", () => {
     const result = parseQueue("- [ ] deliver add-name-greeting\n");
     const task = result.tasks[0]!;

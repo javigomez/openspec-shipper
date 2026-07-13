@@ -46,6 +46,8 @@ export function openCodeCommandName(phase: DeliverPhase): string {
       return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
+    case "cleanup":
+      return "openspec-cleanup-worktree";
     case "waiting_for_pr":
       return "openspec-main-sync";
     case "waiting_for_merge":
@@ -73,6 +75,8 @@ export function detectFailureSignal(output: string): string | undefined {
     [/\bnot eligible for push\b/i, "Worker reported a blocker"],
     [/\bArchive blocked\b/i, "OpenSpec archive worker reported a blocker"],
     [/\bnot archive-ready\b/i, "OpenSpec archive worker reported a blocker"],
+    [/\bCleanup blocked\b/i, "OpenSpec cleanup worker reported a blocker"],
+    [/\bnot cleanup-ready\b/i, "OpenSpec cleanup worker reported a blocker"],
     [/\b(worker reported a blocker|task is blocked|cannot continue without)\b/i, "Worker reported a blocker"],
   ];
 

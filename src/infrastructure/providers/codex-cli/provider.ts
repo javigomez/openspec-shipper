@@ -43,7 +43,7 @@ function buildCodexPrompt(input: BuildCommandInput): string {
   return [
     `Run the OpenSpec ${input.phase} phase${change}.`,
     "Follow AGENTS.md and the repository OpenSpec workflow.",
-    "Use main for planning, sync, and archive. Use worktrees/<change-name> for implementation.",
+    "Use main for planning, sync, archive, and cleanup. Use worktrees/<change-name> for implementation.",
     "Respect .openspec-shipper/config.json safety flags for push and archive.",
     "Stop and report a clear blocker if you cannot continue safely.",
   ].join("\n");

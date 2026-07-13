@@ -109,9 +109,9 @@ creation after push.
 
 After a successful push, keep the local `worktrees/<change-name>` worktree and
 local branch intact. The pull request may still need conflict resolution,
-follow-up fixes, or human review. Cleanup belongs to the archive phase after the
-implementation has merged and the OpenSpec archive push has succeeded. Never
-force-delete local branches from the ship worker.
+follow-up fixes, or human review. Cleanup belongs to the cleanup phase after
+the implementation has merged and the OpenSpec archive push has succeeded.
+Never force-delete local branches from the ship worker.
 
 If blocked, report the exact command and output, include the
 `OPENSPEC_SHIPPER_BLOCKED:` final line, and keep any local commit intact so a

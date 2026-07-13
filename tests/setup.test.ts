@@ -15,10 +15,14 @@ describe("target setup", () => {
     });
 
     expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-apply-worktree.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-cleanup-worktree.md"))).toBe(true);
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
     expect(await readFile(join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml"), "utf8")).toContain("actions/github-script@v8");
     expect(await readFile(join(harness.projectDir, ".opencode/agents/openspec-archive-worker.md"), "utf8")).toContain(
-      "already complete and continue with the post-archive cleanup rules below",
+      "Do not clean local worktrees or branches",
+    );
+    expect(await readFile(join(harness.projectDir, ".opencode/agents/openspec-cleanup-worker.md"), "utf8")).toContain(
+      "Missing worktree and missing local branch are successful no-ops",
     );
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.profile).toBe("node-npm");

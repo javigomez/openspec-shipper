@@ -46,6 +46,8 @@ export function openCodeCommandName(phase: DeliverPhase): string {
       return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
+    case "waiting_for_pr":
+      return "openspec-main-sync";
     case "waiting_for_merge":
       return "openspec-main-sync";
   }

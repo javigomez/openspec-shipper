@@ -322,7 +322,7 @@ describe("runner", () => {
     expect(queue).toContain("phase: waiting_for_merge");
   });
 
-  test("blocks deliver ship phase when no pull request exists after success", async () => {
+  test("advances deliver ship phase to waiting for PR when no pull request exists after success", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
     let checkedBranch = "";
 
@@ -335,12 +335,12 @@ describe("runner", () => {
       executor: cleanExecutor,
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(checkedBranch).toBe("feat/add-name-greeting");
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: ship");
-    expect(queue).toContain("No open pull request exists for feat/add-name-greeting");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: waiting_for_pr");
+    expect(queue).toContain("![waiting_for_pr waiting](https://img.shields.io/badge/waiting_for_pr-waiting-orange)");
     expect(queue).not.toContain("waiting_for_merge");
   });
 
@@ -713,23 +713,24 @@ describe("runner", () => {
     expect(queue).toContain("- [x] archive");
   });
 
-  test("run mode stops after the first blocked task", async () => {
+  test("run mode continues after the first blocked task by default", async () => {
     const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
     let calls = 0;
 
     const exitCode = await runQueue("run", {
       ...harness.config,
+      maxBlockedTasks: 100,
       executor: async () => {
         calls += 1;
         return { exitCode: 1, output: "failed" };
       },
     });
 
-    expect(exitCode).toBe(1);
-    expect(calls).toBe(1);
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(2);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] sync");
-    expect(queue).toContain("- [ ] archive");
+    expect(queue).toContain("- [!] archive");
   });
 
   test("run mode continues after blocked tasks within the configured limit", async () => {

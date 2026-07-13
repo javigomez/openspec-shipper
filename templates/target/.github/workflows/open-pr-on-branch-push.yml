@@ -83,7 +83,7 @@ jobs:
 
       - name: Create PR when none is open yet
         if: steps.readiness.outputs.should_create == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           BRANCH_NAME: ${{ steps.readiness.outputs.branch_name }}
           LATEST_SUBJECT: ${{ steps.readiness.outputs.latest_subject }}

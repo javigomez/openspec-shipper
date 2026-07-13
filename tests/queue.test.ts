@@ -102,6 +102,21 @@ describe("queue parser", () => {
     );
   });
 
+  test("advances ship to waiting for PR when PR creation is external", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+    const task = result.tasks[0]!;
+
+    const next = advanceDeliverTask(result.lines, task, {
+      timestamp: "2026-07-13T08:21:00.000Z",
+    });
+
+    expect(next).toContain("phase: waiting_for_pr");
+    expect(next).toContain("![waiting_for_pr waiting](https://img.shields.io/badge/waiting_for_pr-waiting-orange)");
+    const parsed = parseQueue(next).tasks[0]!;
+    expect(deliverPhase(parsed)).toBe("waiting_for_pr");
+    expect(findFirstRunnableTask([parsed])).toBeUndefined();
+  });
+
   test("marks a deliver task as running without changing its queue status", () => {
     const result = parseQueue("- [ ] deliver add-name-greeting\n");
     const task = result.tasks[0]!;
@@ -155,7 +170,7 @@ describe("queue parser", () => {
 
   test("ignores visual badges and log links when parsing commands", () => {
     const result = parseQueue(
-      "- [x] deliver test-10-migrate-tap-zone-layer-rntl <!-- done: 2026-06-25T19:22:32.954Z; log: .openspec-shipper/runs/deliver.log --> ![done](https://img.shields.io/badge/done-success-brightgreen) · _([log](.openspec-shipper/runs/deliver.log))_\n",
+      "- [x] deliver test-10-migrate-tap-zone-layer-rntl <!-- done: 2026-06-25T19:22:32.954Z; log: .openspec-shipper/runs/deliver.log --> ![task done](https://img.shields.io/badge/task-done-brightgreen) · _([log](.openspec-shipper/runs/deliver.log))_\n",
     );
     const task = result.tasks[0]!;
 

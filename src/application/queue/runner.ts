@@ -5,6 +5,7 @@ import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   advanceDeliverTask,
+  advanceDeliverTaskToPhase,
   deliverPhase,
   findBlockedTasks,
   findFirstRunnableTask,
@@ -145,7 +146,7 @@ export function defaultConfig(): RunnerConfig {
     busyDelayMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_BUSY_DELAY_MS ?? process.env.ORCHESTER_BUSY_DELAY_MS, DEFAULT_BUSY_DELAY_MS),
     taskTimeoutMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_TASK_TIMEOUT_MS ?? process.env.ORCHESTER_TASK_TIMEOUT_MS, DEFAULT_TASK_TIMEOUT_MS),
     heartbeatMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_HEARTBEAT_MS ?? process.env.ORCHESTER_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
-    maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS ?? process.env.ORCHESTER_MAX_BLOCKED_TASKS, 0),
+    maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS ?? process.env.ORCHESTER_MAX_BLOCKED_TASKS, 100),
   };
 }
 
@@ -281,7 +282,7 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
         return 0;
       }
 
-      const queue = await loadQueue(config.queuePath);
+      const queue = await refreshExternalWaitingStates(config, await loadQueue(config.queuePath));
       if (queue.errors.length > 0) {
         console.error("Queue has invalid tasks:");
         for (const error of queue.errors) {
@@ -589,18 +590,17 @@ async function executeTask(
 
   const failureSignal = provider(config).detectFailureSignal(result.output);
   if (result.exitCode === 0 && !failureSignal) {
-    const postSuccessBlocker = await validateTaskAfterSuccess(config, task);
-    if (postSuccessBlocker) {
-      const nextContent = markTask(lines, task, "blocked", {
+    const shipResult = await resolveShipSuccess(config, task);
+    if (shipResult) {
+      const nextContent = advanceDeliverTaskToPhase(lines, task, shipResult, {
         timestamp: (config.now?.() ?? new Date()).toISOString(),
-        reason: postSuccessBlocker,
         logPath: relativeLogPath,
         checkedAt: activity.checkedAt,
         startedAt,
       });
       await writeFile(config.queuePath, nextContent);
-      console.error(`[${new Date().toISOString()}] blocked: ${postSuccessBlocker}`);
-      return 1;
+      console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
+      return 0;
     }
 
     const nextContent = advanceDeliverTask(lines, task, {
@@ -628,7 +628,7 @@ async function executeTask(
   return 1;
 }
 
-async function validateTaskAfterSuccess(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
+async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promise<"waiting_for_pr" | "waiting_for_merge" | undefined> {
   if (task.action !== "deliver" || deliverPhase(task) !== "ship" || !task.change) {
     return undefined;
   }
@@ -637,10 +637,49 @@ async function validateTaskAfterSuccess(config: RunnerConfig, task: QueueTask): 
   const detector = config.pullRequestDetector ?? detectOpenPullRequest;
   const pullRequest = await detector(config.projectDir, branch);
   if (pullRequest) {
-    return undefined;
+    return "waiting_for_merge";
   }
 
-  return `No open pull request exists for ${branch}; ship did not reach waiting-for-merge.`;
+  return "waiting_for_pr";
+}
+
+async function refreshExternalWaitingStates(
+  config: RunnerConfig,
+  queue: Awaited<ReturnType<typeof loadQueue>>,
+): Promise<Awaited<ReturnType<typeof loadQueue>>> {
+  let content = queue.lines.join("\n");
+  let changed = false;
+
+  for (const task of queue.tasks) {
+    if (task.status !== "pending" || task.action !== "deliver" || deliverPhase(task) !== "waiting_for_pr" || !task.change) {
+      continue;
+    }
+
+    const branch = detectChangeBranch(config.projectDir, task.change);
+    const detector = config.pullRequestDetector ?? detectOpenPullRequest;
+    const pullRequest = await detector(config.projectDir, branch);
+    if (!pullRequest) {
+      continue;
+    }
+
+    const currentQueue = parseQueue(content);
+    const currentTask = currentQueue.tasks.find((candidate) => candidate.lineIndex === task.lineIndex);
+    if (!currentTask) {
+      continue;
+    }
+
+    content = advanceDeliverTaskToPhase(currentQueue.lines, currentTask, "waiting_for_merge", {
+      timestamp: (config.now?.() ?? new Date()).toISOString(),
+    });
+    changed = true;
+  }
+
+  if (!changed) {
+    return queue;
+  }
+
+  await writeFile(config.queuePath, content);
+  return await loadQueue(config.queuePath);
 }
 
 async function loadQueue(queuePath: string) {
@@ -1061,6 +1100,10 @@ function printStatus(tasks: QueueTask[], config: RunnerConfig) {
 }
 
 function waitingReason(task: QueueTask): string {
+  if (task.action === "deliver" && task.phase === "waiting_for_pr") {
+    return "waits for a PR to be created";
+  }
+
   if (task.action === "deliver" && task.phase === "waiting_for_merge") {
     return "waits for its PR to merge";
   }

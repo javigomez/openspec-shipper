@@ -2,7 +2,7 @@ export type TaskStatus = "pending" | "done" | "blocked";
 
 export type QueueAction = "apply" | "ship" | "sync" | "archive" | "deliver";
 
-export type DeliverPhase = "apply" | "ship" | "waiting_for_merge" | "sync" | "archive";
+export type DeliverPhase = "apply" | "ship" | "waiting_for_pr" | "waiting_for_merge" | "sync" | "archive";
 
 export type QueueTask = {
   lineIndex: number;
@@ -25,7 +25,7 @@ const COMMENT_PATTERN = /<!--(.*?)-->/;
 const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*_\(\[log]\([^)]+\)\)_)?\s*$/;
 const CHANGE_PREFIX_PATTERN = /^openspec\/changes\//;
 const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const DELIVER_PHASES: DeliverPhase[] = ["apply", "ship", "waiting_for_merge", "sync", "archive"];
+const DELIVER_PHASES: DeliverPhase[] = ["apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive"];
 
 export function parseQueue(content: string): QueueParseResult {
   const lines = content.split(/\r?\n/);
@@ -143,6 +143,8 @@ export function openCodeCommandName(task: QueueTask): string {
       return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
+    case "waiting_for_pr":
+      return "openspec-main-sync";
     case "waiting_for_merge":
       return "openspec-main-sync";
   }
@@ -256,6 +258,33 @@ export function advanceDeliverTask(
   return ensureTrailingNewline(nextLines.join("\n"));
 }
 
+export function advanceDeliverTaskToPhase(
+  lines: string[],
+  task: QueueTask,
+  phase: DeliverPhase,
+  details: { timestamp: string; logPath?: string; checkedAt?: string; startedAt?: string },
+): string {
+  if (task.action !== "deliver") {
+    return markTask(lines, task, "done", details);
+  }
+
+  const nextLines = [...lines];
+  const detailParts = [
+    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    `phase: ${phase}`,
+    `advanced: ${details.timestamp}`,
+    details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
+    details.startedAt ? `started: ${details.startedAt}` : undefined,
+    details.logPath ? `log: ${details.logPath}` : undefined,
+  ].filter(Boolean);
+  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+    status: "pending",
+    phase,
+    logPath: details.logPath,
+  });
+  return ensureTrailingNewline(nextLines.join("\n"));
+}
+
 export function deliverPhase(task: QueueTask): DeliverPhase {
   return task.phase ?? "apply";
 }
@@ -322,7 +351,7 @@ function taskIsRunnable(task: QueueTask, tasks: QueueTask[]): boolean {
     return false;
   }
 
-  return task.action !== "deliver" || deliverPhase(task) !== "waiting_for_merge";
+  return task.action !== "deliver" || !["waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
 }
 
 export function commandAcceptsChangeArgument(task: QueueTask): boolean {
@@ -334,7 +363,7 @@ export function commandAcceptsChangeArgument(task: QueueTask): boolean {
     return false;
   }
 
-  return deliverPhase(task) !== "sync";
+  return !["sync", "waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
 }
 
 function isDeliverPhase(value: string): value is DeliverPhase {
@@ -366,11 +395,13 @@ function badgeForVisual(visual: {
   phase?: DeliverPhase;
 }): string {
   if (visual.status === "done") {
-    return "![done](https://img.shields.io/badge/done-success-brightgreen)";
+    const phase = visual.phase ?? "task";
+    return `![${phase} done](https://img.shields.io/badge/${phase}-done-brightgreen)`;
   }
 
   if (visual.status === "blocked") {
-    return "![blocked](https://img.shields.io/badge/blocked-error-red)";
+    const phase = visual.phase ?? "task";
+    return `![${phase} blocked](https://img.shields.io/badge/${phase}-blocked-red)`;
   }
 
   if (visual.status === "running") {
@@ -384,8 +415,12 @@ function badgeForVisual(visual: {
   }
 
   const phase = visual.phase ?? "pending";
+  if (phase === "waiting_for_pr") {
+    return "![waiting_for_pr waiting](https://img.shields.io/badge/waiting_for_pr-waiting-orange)";
+  }
+
   if (phase === "waiting_for_merge") {
-    return "![waiting for merge](https://img.shields.io/badge/waiting_for_merge-needs_merge-orange)";
+    return "![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)";
   }
 
   if (phase === "pending") {

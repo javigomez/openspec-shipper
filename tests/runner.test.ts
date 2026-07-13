@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { defaultConfig, runQueue, type Executor, type RunnerConfig } from "../src/runner";
+import { BLOCKED_TASK_RETRY_HINT } from "../src/queue";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -518,6 +519,27 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: ship");
+  });
+
+  test("removes retry hints left below manually unblocked tasks", async () => {
+    const harness = await createHarness(
+      [
+        "- [ ] deliver add-name-greeting <!-- phase: waiting_for_merge; blocked: 2026-07-13T15:41:00.829Z; reason: fixed now --> ![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)",
+        BLOCKED_TASK_RETRY_HINT,
+        "",
+      ].join("\n"),
+    );
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async () => undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).not.toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
   });
 
   test("passes OpenCode log flags before the command", async () => {

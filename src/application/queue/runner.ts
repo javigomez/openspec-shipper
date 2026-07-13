@@ -14,6 +14,7 @@ import {
   markTaskChecking,
   markTaskRunning,
   parseQueue,
+  removeRetryHintsForUnblockedTasks,
   taskSlug,
   type QueueTask,
 } from "../../domain/queue/queue.js";
@@ -666,19 +667,25 @@ async function reconcileQueue(
   config: RunnerConfig,
   queue: Awaited<ReturnType<typeof loadQueue>>,
 ): Promise<Awaited<ReturnType<typeof loadQueue>>> {
-  let content = queue.lines.join("\n");
-  let changed = false;
+  const originalContent = queue.lines.join("\n");
+  let content = removeRetryHintsForUnblockedTasks(originalContent);
+  let changed = content !== originalContent;
+  let cursor = 0;
 
-  for (const task of queue.tasks) {
-    if (task.status !== "pending" || task.action !== "deliver" || !task.change) {
-      continue;
-    }
-
+  while (true) {
     const currentQueue = parseQueue(content);
-    const currentTask = currentQueue.tasks.find((candidate) => candidate.lineIndex === task.lineIndex);
+    const currentTask = currentQueue.tasks.find((candidate) => {
+      return (
+        candidate.lineIndex >= cursor &&
+        candidate.status === "pending" &&
+        candidate.action === "deliver" &&
+        Boolean(candidate.change)
+      );
+    });
     if (!currentTask) {
-      continue;
+      break;
     }
+    cursor = currentTask.lineIndex + 1;
 
     const evidence = await collectDeliveryEvidence(config, currentTask);
     const decision = reconcileDeliveryTask(currentTask, evidence);

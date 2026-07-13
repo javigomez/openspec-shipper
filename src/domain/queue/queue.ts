@@ -26,6 +26,7 @@ const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*_\(\[log]\([
 const CHANGE_PREFIX_PATTERN = /^openspec\/changes\//;
 const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DELIVER_PHASES: DeliverPhase[] = ["apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive"];
+export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 
 export function parseQueue(content: string): QueueParseResult {
   const lines = content.split(/\r?\n/);
@@ -176,12 +177,12 @@ export function markTask(
   ].filter(Boolean);
 
   const nextLines = [...lines];
-  nextLines[task.lineIndex] = formatTaskLine(marker, task.rawCommand, detailParts, {
+  const nextLine = formatTaskLine(marker, task.rawCommand, detailParts, {
     status,
     phase: task.action === "deliver" ? deliverPhase(task) : undefined,
     logPath: details.logPath,
   });
-  return ensureTrailingNewline(nextLines.join("\n"));
+  return replaceTaskLine(nextLines, task, nextLine, { retryHint: status === "blocked" });
 }
 
 export function markTaskChecking(
@@ -196,12 +197,11 @@ export function markTaskChecking(
     `checking: ${details.timestamp}`,
   ].filter(Boolean);
 
-  const nextLines = [...lines];
-  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+  const nextLine = formatTaskLine(" ", task.rawCommand, detailParts, {
     status: "checking",
     phase,
   });
-  return ensureTrailingNewline(nextLines.join("\n"));
+  return replaceTaskLine(lines, task, nextLine);
 }
 
 export function markTaskRunning(
@@ -217,13 +217,12 @@ export function markTaskRunning(
     details.logPath ? `log: ${details.logPath}` : undefined,
   ].filter(Boolean);
 
-  const nextLines = [...lines];
-  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+  const nextLine = formatTaskLine(" ", task.rawCommand, detailParts, {
     status: "running",
     phase,
     logPath: details.logPath,
   });
-  return ensureTrailingNewline(nextLines.join("\n"));
+  return replaceTaskLine(lines, task, nextLine);
 }
 
 export function advanceDeliverTask(
@@ -241,7 +240,6 @@ export function advanceDeliverTask(
   }
 
   const nextPhase = DELIVER_PHASES[DELIVER_PHASES.indexOf(phase) + 1]!;
-  const nextLines = [...lines];
   const detailParts = [
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
     `phase: ${nextPhase}`,
@@ -250,12 +248,12 @@ export function advanceDeliverTask(
     details.startedAt ? `started: ${details.startedAt}` : undefined,
     details.logPath ? `log: ${details.logPath}` : undefined,
   ].filter(Boolean);
-  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+  const nextLine = formatTaskLine(" ", task.rawCommand, detailParts, {
     status: "pending",
     phase: nextPhase,
     logPath: details.logPath,
   });
-  return ensureTrailingNewline(nextLines.join("\n"));
+  return replaceTaskLine(lines, task, nextLine);
 }
 
 export function advanceDeliverTaskToPhase(
@@ -268,7 +266,6 @@ export function advanceDeliverTaskToPhase(
     return markTask(lines, task, "done", details);
   }
 
-  const nextLines = [...lines];
   const detailParts = [
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
     `phase: ${phase}`,
@@ -277,12 +274,34 @@ export function advanceDeliverTaskToPhase(
     details.startedAt ? `started: ${details.startedAt}` : undefined,
     details.logPath ? `log: ${details.logPath}` : undefined,
   ].filter(Boolean);
-  nextLines[task.lineIndex] = formatTaskLine(" ", task.rawCommand, detailParts, {
+  const nextLine = formatTaskLine(" ", task.rawCommand, detailParts, {
     status: "pending",
     phase,
     logPath: details.logPath,
   });
-  return ensureTrailingNewline(nextLines.join("\n"));
+  return replaceTaskLine(lines, task, nextLine);
+}
+
+export function removeRetryHintsForUnblockedTasks(content: string): string {
+  const lines = content.split(/\r?\n/);
+  let changed = false;
+  const nextLines: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const task = line.match(TASK_PATTERN);
+    const nextLine = lines[index + 1];
+    if (task && task[2] !== "!" && nextLine === BLOCKED_TASK_RETRY_HINT) {
+      nextLines.push(line);
+      index += 1;
+      changed = true;
+      continue;
+    }
+
+    nextLines.push(line);
+  }
+
+  return changed ? ensureTrailingNewline(nextLines.join("\n")) : content;
 }
 
 export function deliverPhase(task: QueueTask): DeliverPhase {
@@ -378,6 +397,26 @@ function formatTaskLine(
 ): string {
   const metadata = detailParts.length > 0 ? ` <!-- ${detailParts.join("; ")} -->` : "";
   return `- [${marker}] ${rawCommand}${metadata}${formatVisualDecoration(visual)}`;
+}
+
+function replaceTaskLine(
+  lines: string[],
+  task: QueueTask,
+  nextLine: string,
+  options: { retryHint?: boolean } = {},
+): string {
+  const nextLines = [...lines];
+  nextLines[task.lineIndex] = nextLine;
+
+  if (nextLines[task.lineIndex + 1] === BLOCKED_TASK_RETRY_HINT) {
+    nextLines.splice(task.lineIndex + 1, 1);
+  }
+
+  if (options.retryHint) {
+    nextLines.splice(task.lineIndex + 1, 0, BLOCKED_TASK_RETRY_HINT);
+  }
+
+  return ensureTrailingNewline(nextLines.join("\n"));
 }
 
 function formatVisualDecoration(visual: {

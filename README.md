@@ -192,6 +192,17 @@ apply -> ship -> waiting_for_merge -> sync -> archive
 notice when the PR has merged and then reconciles the task to `phase: sync`, so
 the shipper can sync `main` and archive safely.
 
+When a task blocks, the queue includes a human retry hint below it:
+
+```md
+- [!] deliver add-name-greeting <!-- phase: archive; reason: ... -->
+  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.
+```
+
+After fixing the cause, change only `[!]` to `[ ]`. The next queue command will
+remove the hint, reconcile the task from repository evidence, and retry or move
+it to the correct phase.
+
 ## Providers
 
 ### OpenCode

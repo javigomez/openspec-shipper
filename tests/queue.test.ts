@@ -1,17 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
   advanceDeliverTask,
+  BLOCKED_TASK_RETRY_HINT,
   buildOpenCodeArgs,
   detectFailureSignal,
   deliverPhase,
   findBlockedTasks,
   findFirstRunnableTask,
   findWaitingTasks,
+  markTask,
   markTaskChecking,
   markTaskRunning,
   normalizeChangeName,
   openCodeCommandName,
   parseQueue,
+  removeRetryHintsForUnblockedTasks,
 } from "../src/queue";
 
 describe("queue parser", () => {
@@ -154,6 +157,36 @@ describe("queue parser", () => {
     const parsed = parseQueue(next).tasks[0]!;
     expect(parsed.status).toBe("pending");
     expect(deliverPhase(parsed)).toBe("apply");
+  });
+
+  test("adds a human retry hint when a task is blocked", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+    const task = result.tasks[0]!;
+
+    const next = markTask(result.lines, task, "blocked", {
+      timestamp: "2026-07-13T15:41:00.829Z",
+      reason: "OpenSpec archive worker reported a blocker",
+      logPath: "runs/archive.log",
+    });
+
+    expect(next).toContain("- [!] deliver add-name-greeting");
+    expect(next).toContain("![archive blocked](https://img.shields.io/badge/archive-blocked-red)");
+    expect(next).toContain(BLOCKED_TASK_RETRY_HINT);
+  });
+
+  test("removes a stale retry hint when the human changes blocked to pending", () => {
+    const content = [
+      "- [ ] deliver add-name-greeting <!-- phase: archive; blocked: 2026-07-13T15:41:00.829Z; reason: fixed now --> ![archive blocked](https://img.shields.io/badge/archive-blocked-red)",
+      BLOCKED_TASK_RETRY_HINT,
+      "- [ ] deliver add-spanish-greeting <!-- depends_on: add-name-greeting -->",
+      "",
+    ].join("\n");
+
+    const next = removeRetryHintsForUnblockedTasks(content);
+
+    expect(next).not.toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(next).toContain("- [ ] deliver add-name-greeting");
+    expect(next).toContain("- [ ] deliver add-spanish-greeting");
   });
 
   test("finds the first runnable task after waiting dependencies", () => {

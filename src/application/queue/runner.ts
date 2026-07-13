@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, rmSync, writeFileSync } from "node:fs";
-import { access, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -61,6 +61,8 @@ export type RunnerConfig = {
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
   gitStatusDetector?: GitStatusDetector;
+  activeChangeDetector?: ActiveChangeDetector;
+  archivedChangeDetector?: ArchivedChangeDetector;
   localClaimDetector?: LocalClaimDetector;
   remoteBranchDetector?: RemoteBranchDetector;
   pullRequestDetector?: PullRequestDetector;
@@ -102,6 +104,8 @@ export type ExecutorResult = {
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
 export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
+export type ActiveChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type ArchivedChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type RemoteBranchDetector = (projectDir: string, branch: string) => Promise<boolean>;
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
@@ -641,6 +645,9 @@ async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promis
   const evidence: DeliveryEvidence = {
     changeName: task.change,
     declaredPhase: "ship",
+    hasActiveChange: true,
+    hasArchivedChange: false,
+    cleanupComplete: false,
     hasLocalClaim: true,
     hasRemoteBranch: true,
     hasOpenPullRequest: Boolean(pullRequest),
@@ -690,6 +697,11 @@ async function reconcileQueue(
         reason: decision.reason,
       });
       changed = true;
+    } else if (decision.kind === "done") {
+      content = markTask(currentQueue.lines, { ...currentTask, phase: decision.phase }, "done", {
+        timestamp: (config.now?.() ?? new Date()).toISOString(),
+      });
+      changed = true;
     }
   }
 
@@ -708,34 +720,33 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   }
 
   const branch = detectChangeBranch(config.projectDir, changeName);
+  const activeChangeDetector = config.activeChangeDetector ?? detectActiveChange;
+  const archivedChangeDetector = config.archivedChangeDetector ?? detectArchivedChange;
   const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
   const remoteBranchDetector = config.remoteBranchDetector ?? detectRemoteBranch;
   const pullRequestDetector = config.pullRequestDetector ?? detectOpenPullRequest;
   const mergedPullRequestDetector = config.mergedPullRequestDetector ?? detectMergedPullRequest;
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
 
-  const [hasLocalClaim, hasRemoteBranch, tasksComplete] = await Promise.all([
+  const [hasActiveChange, hasArchivedChange, hasLocalClaim, hasRemoteBranch, tasksComplete] = await Promise.all([
+    activeChangeDetector(config.projectDir, changeName),
+    archivedChangeDetector(config.projectDir, changeName),
     localClaimDetector(config.projectDir, changeName),
     remoteBranchDetector(config.projectDir, branch),
     tasksCompleteDetector(config.projectDir, changeName),
   ]);
   const declaredPhase = deliverPhase(task);
-  const shouldCheckPullRequest =
-    hasLocalClaim ||
-    hasRemoteBranch ||
-    declaredPhase === "ship" ||
-    declaredPhase === "waiting_for_pr" ||
-    declaredPhase === "waiting_for_merge";
-  const [openPullRequest, mergedPullRequest] = shouldCheckPullRequest
-    ? await Promise.all([
-        pullRequestDetector(config.projectDir, branch),
-        mergedPullRequestDetector(config.projectDir, branch),
-      ])
-    : [undefined, undefined];
+  const [openPullRequest, mergedPullRequest] = await Promise.all([
+    pullRequestDetector(config.projectDir, branch),
+    mergedPullRequestDetector(config.projectDir, branch),
+  ]);
 
   return {
     changeName,
     declaredPhase,
+    hasActiveChange,
+    hasArchivedChange,
+    cleanupComplete: hasArchivedChange && !hasLocalClaim,
     hasLocalClaim,
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
@@ -1072,6 +1083,29 @@ async function detectRemoteBranch(projectDir: string, branch: string): Promise<b
     timeout: 10_000,
   });
   return remoteRef.status === 0 && remoteRef.stdout.trim().length > 0;
+}
+
+async function detectActiveChange(projectDir: string, changeName: string): Promise<boolean> {
+  return await pathExists(join(projectDir, "openspec", "changes", changeName));
+}
+
+async function detectArchivedChange(projectDir: string, changeName: string): Promise<boolean> {
+  const archiveDir = join(projectDir, "openspec", "changes", "archive");
+  const entries = await readdir(archiveDir, { withFileTypes: true }).catch(() => []);
+  const matches = entries
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith(`-${changeName}`))
+    .map((entry) => join(archiveDir, entry.name));
+  if (matches.length !== 1) {
+    return false;
+  }
+
+  const [archivePath] = matches;
+  return Boolean(
+    archivePath &&
+      (await pathExists(join(archivePath, "proposal.md"))) &&
+      (await pathExists(join(archivePath, "design.md"))) &&
+      (await pathExists(join(archivePath, "tasks.md"))),
+  );
 }
 
 async function detectTasksComplete(projectDir: string, changeName: string): Promise<boolean> {

@@ -197,6 +197,34 @@ apply -> ship -> waiting_for_merge -> sync -> archive -> cleanup
 notice when the PR has merged and then reconciles the task to `phase: sync`, so
 the shipper can sync `main`, archive safely, and clean local artifacts.
 
+### Reverse State Inference
+
+`queue.md` is the human-facing source of truth, but it is reconciled before each
+queue command. Reconciliation infers the most advanced observable state first,
+instead of trusting the phase comment blindly:
+
+```text
+archived and locally clean -> done
+archived but local work remains -> cleanup
+merged PR -> sync
+open PR -> waiting_for_merge
+remote branch -> waiting_for_pr
+local work complete -> ship
+active change or local work -> apply
+nothing found -> blocked
+```
+
+This backwards inference avoids false blockers when an earlier phase can no
+longer see its original inputs because a later phase already happened. For
+example, after `openspec archive` succeeds, `openspec/changes/<change-name>/`
+disappears. The reconciler therefore checks `openspec/changes/archive/` before
+concluding that an archive task is broken.
+
+Explicit waiting phases are not regressed just because a transient external
+check returns no data. For example, `waiting_for_merge` remains waiting unless
+the runner positively observes a merged PR, archived change, or completed
+cleanup.
+
 When a task blocks, the queue includes a human retry hint below it:
 
 ```md

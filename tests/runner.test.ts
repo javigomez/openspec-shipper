@@ -243,7 +243,6 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      pullRequestDetector: async () => "https://github.com/example/project/pull/1",
       executor: async (_command, args) => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
@@ -536,6 +535,81 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: ship");
+  });
+
+  test("marks a bare deliver task done when archive exists and cleanup is complete", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      activeChangeDetector: async () => false,
+      archivedChangeDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      localClaimDetector: async () => false,
+      remoteBranchDetector: async () => false,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async () => undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
+    expect(queue).toContain("![cleanup done](https://img.shields.io/badge/cleanup-done-brightgreen)");
+  });
+
+  test("reconstructs cleanup when archive exists and local claim remains", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+
+    const exitCode = await runQueue("dry-run", {
+      ...harness.config,
+      activeChangeDetector: async () => false,
+      archivedChangeDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      remoteBranchDetector: async () => false,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async () => undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: cleanup");
+  });
+
+  test("does not regress an explicit waiting-for-merge task when PR state is temporarily unavailable", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: waiting_for_merge -->\n");
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      activeChangeDetector: async () => false,
+      archivedChangeDetector: async () => false,
+      localClaimDetector: async () => false,
+      remoteBranchDetector: async () => false,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async () => undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).not.toContain("[!]");
+  });
+
+  test("blocks a bare deliver task when no evidence of the change exists", async () => {
+    const harness = await createHarness("- [ ] deliver missing-change\n");
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      activeChangeDetector: async () => false,
+      archivedChangeDetector: async () => false,
+      localClaimDetector: async () => false,
+      remoteBranchDetector: async () => false,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async () => undefined,
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver missing-change");
+    expect(queue).toContain("was not found in active changes");
   });
 
   test("removes retry hints left below manually unblocked tasks", async () => {
@@ -1020,6 +1094,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
     gitStatusDetector: async () => [],
+    activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };

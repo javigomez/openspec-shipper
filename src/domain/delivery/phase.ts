@@ -3,6 +3,9 @@ import type { DeliverPhase } from "../queue/queue.js";
 export type DeliveryEvidence = {
   changeName: string;
   declaredPhase: DeliverPhase;
+  hasActiveChange: boolean;
+  hasArchivedChange: boolean;
+  cleanupComplete: boolean;
   hasLocalClaim: boolean;
   hasRemoteBranch: boolean;
   hasOpenPullRequest: boolean;

@@ -5,10 +5,34 @@ import type { DeliveryEvidence, PhaseDecision } from "./phase.js";
 export type DeliveryReconcileDecision =
   | { kind: "unchanged"; phase: DeliverPhase; decision: PhaseDecision }
   | { kind: "transition"; phase: DeliverPhase; reason: string; decision: PhaseDecision }
+  | { kind: "done"; phase: DeliverPhase; reason: string }
   | { kind: "blocked"; phase: DeliverPhase; reason: string; decision: PhaseDecision };
 
 export function reconcileDeliveryTask(task: QueueTask, evidence: DeliveryEvidence): DeliveryReconcileDecision {
   const declaredPhase = deliverPhase(task);
+  const inferred = inferDeliveryState(evidence);
+
+  if (inferred.kind === "done") {
+    return inferred;
+  }
+
+  if (inferred.kind === "transition" && inferred.phase !== declaredPhase) {
+    return inferred;
+  }
+
+  if (inferred.kind === "blocked") {
+    return {
+      kind: "blocked",
+      phase: inferred.phase,
+      reason: inferred.reason,
+      decision: {
+        kind: "blocked",
+        phase: inferred.phase,
+        reason: inferred.reason,
+      },
+    };
+  }
+
   const decision = phaseDefinition(declaredPhase).preChecks(evidence);
 
   if (decision.kind === "transition") {
@@ -34,4 +58,84 @@ export function reconcileDeliveryTask(task: QueueTask, evidence: DeliveryEvidenc
     phase: decision.phase,
     decision,
   };
+}
+
+type DeliveryStateInference =
+  | { kind: "done"; phase: DeliverPhase; reason: string }
+  | { kind: "transition"; phase: DeliverPhase; reason: string; decision: PhaseDecision }
+  | { kind: "blocked"; phase: DeliverPhase; reason: string }
+  | { kind: "unchanged" };
+
+function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference {
+  if (evidence.hasArchivedChange && evidence.cleanupComplete) {
+    return { kind: "done", phase: "cleanup", reason: "change is archived and local cleanup is complete" };
+  }
+
+  if (evidence.hasArchivedChange) {
+    return transitionInference("cleanup", "change is already archived");
+  }
+
+  if (evidence.hasMergedPullRequest) {
+    return transitionInference("sync", "pull request is merged");
+  }
+
+  if (evidence.hasOpenPullRequest) {
+    return transitionInference("waiting_for_merge", "open pull request exists");
+  }
+
+  if (evidence.hasRemoteBranch) {
+    return transitionInference("waiting_for_pr", "remote implementation branch exists");
+  }
+
+  if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedes(evidence.declaredPhase, "ship")) {
+    return transitionInference("ship", "local implementation is complete");
+  }
+
+  if (evidence.hasActiveChange || evidence.hasLocalClaim) {
+    return { kind: "unchanged" };
+  }
+
+  return evidence.declaredPhase === "apply"
+    ? {
+        kind: "blocked",
+        phase: evidence.declaredPhase,
+        reason: `OpenSpec change ${evidence.changeName} was not found in active changes, archive, local worktrees, local branches, remote branches, or pull requests`,
+      }
+    : { kind: "unchanged" };
+}
+
+function transitionInference(phase: DeliverPhase, reason: string): DeliveryStateInference {
+  return {
+    kind: "transition",
+    phase,
+    reason,
+    decision: {
+      kind: "transition",
+      phase,
+      reason,
+    },
+  };
+}
+
+function phasePrecedes(left: DeliverPhase, right: DeliverPhase): boolean {
+  return phaseRank(left) < phaseRank(right);
+}
+
+function phaseRank(phase: DeliverPhase): number {
+  switch (phase) {
+    case "apply":
+      return 0;
+    case "ship":
+      return 1;
+    case "waiting_for_pr":
+      return 2;
+    case "waiting_for_merge":
+      return 3;
+    case "sync":
+      return 4;
+    case "archive":
+      return 5;
+    case "cleanup":
+      return 6;
+  }
 }

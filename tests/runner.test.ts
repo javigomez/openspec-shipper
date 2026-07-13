@@ -409,6 +409,25 @@ describe("runner", () => {
     expect(queue).toContain("phase: ship");
   });
 
+  test("refreshes waiting-for-pr tasks before deciding the queue is waiting", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: waiting_for_pr -->\n");
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      pullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+      executor: async () => {
+        throw new Error("waiting-for-pr refresh should not invoke an executor");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).toContain("![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)");
+  });
+
   test("passes OpenCode log flags before the command", async () => {
     const harness = await createHarness("- [ ] sync\n");
     let receivedArgs: string[] = [];

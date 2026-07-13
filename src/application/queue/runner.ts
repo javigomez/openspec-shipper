@@ -159,7 +159,7 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
     return printOpenCodeStats(config);
   }
 
-  const queue = await loadQueue(config.queuePath);
+  const queue = await refreshExternalWaitingStates(config, await loadQueue(config.queuePath));
 
   if (queue.errors.length > 0) {
     console.error("Queue has invalid tasks:");

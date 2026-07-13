@@ -48,6 +48,17 @@ git commit -m "chore: install openspec shipper"
 
 ## Check The Installation
 
+Before running the queue, enable the repository setting that lets the auto-PR
+workflow create pull requests:
+
+```text
+GitHub Settings > Actions > General > Workflow permissions >
+Allow GitHub Actions to create and approve pull requests
+```
+
+If this is disabled, `ship` can push the branch but GitHub will reject the
+workflow that opens the PR.
+
 ```bash
 npx openspec-shipper doctor
 ```

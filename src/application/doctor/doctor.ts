@@ -72,6 +72,10 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
       : warning("auto PR workflow", "Auto PR workflow missing; ship workers push but do not create PRs themselves"),
   );
 
+  if (config?.github.autoOpenPr !== false && (await fileExists(join(projectDir, ".github/workflows/open-pr-on-branch-push.yml")))) {
+    checks.push(checkGitHubActionsPullRequestPermission(projectDir));
+  }
+
   return checks;
 }
 
@@ -98,6 +102,71 @@ function checkCommand(command: string, args: string[], cwd: string, successMessa
   }
 
   return ok(command, successMessage);
+}
+
+function checkGitHubActionsPullRequestPermission(projectDir: string): DoctorCheck {
+  const remote = spawnSync("git", ["remote", "get-url", "origin"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (remote.status !== 0) {
+    return warning("github actions PR permission", "Cannot verify auto-PR permission because git remote origin is missing");
+  }
+
+  const repository = parseGitHubRepository(remote.stdout.trim());
+  if (!repository) {
+    return warning("github actions PR permission", "Cannot verify auto-PR permission because origin is not a GitHub repo URL");
+  }
+
+  const result = spawnSync(
+    "gh",
+    ["api", `repos/${repository.owner}/${repository.repo}/actions/permissions/workflow`],
+    { cwd: projectDir, encoding: "utf8", timeout: 10_000 },
+  );
+  if (result.error) {
+    return warning("github actions PR permission", `Cannot verify auto-PR permission: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    const message = firstLine(result.stderr || result.stdout) ?? `gh api exited with code ${result.status}`;
+    return warning(
+      "github actions PR permission",
+      `Cannot verify auto-PR permission with gh api: ${message}. Check Settings > Actions > General manually.`,
+    );
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as {
+      can_approve_pull_request_reviews?: unknown;
+      default_workflow_permissions?: unknown;
+    };
+    if (parsed.can_approve_pull_request_reviews !== true) {
+      return warning(
+        "github actions PR permission",
+        "Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests",
+      );
+    }
+
+    return ok("github actions PR permission", "GitHub Actions may create pull requests");
+  } catch {
+    return warning("github actions PR permission", "Cannot parse gh api workflow permission response");
+  }
+}
+
+function parseGitHubRepository(remoteUrl: string): { owner: string; repo: string } | undefined {
+  const normalized = remoteUrl.replace(/\.git$/, "");
+  const ssh = normalized.match(/^git@github\.com:([^/]+)\/(.+)$/);
+  if (ssh?.[1] && ssh[2]) {
+    return { owner: ssh[1], repo: ssh[2] };
+  }
+
+  const https = normalized.match(/^https:\/\/github\.com\/([^/]+)\/(.+)$/);
+  if (https?.[1] && https[2]) {
+    return { owner: https[1], repo: https[2] };
+  }
+
+  return undefined;
 }
 
 function packageManagerCommand(config: ShipperConfig | undefined): string {

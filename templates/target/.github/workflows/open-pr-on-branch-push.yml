@@ -36,6 +36,12 @@ jobs:
 
           branch="${GITHUB_REF_NAME}"
           change_name="${branch#*/}"
+          branch_type="${branch%%/*}"
+          if [ "${branch_type}" = "${branch}" ]; then
+            branch_type="chore"
+          fi
+          human_change_name="$(printf '%s' "${change_name}" | tr '-' ' ')"
+          pr_title="${branch_type}: ${human_change_name}"
 
           should_create="true"
           summary="- Auto-opened from branch push."
@@ -73,8 +79,8 @@ jobs:
           {
             echo "should_create=${should_create}"
             echo "branch_name=${branch}"
-            echo "latest_subject<<EOF"
-            git log -1 --pretty=%s
+            echo "pr_title<<EOF"
+            echo "${pr_title}"
             echo "EOF"
             echo "summary_line<<EOF"
             echo "${summary}"
@@ -86,7 +92,7 @@ jobs:
         uses: actions/github-script@v8
         env:
           BRANCH_NAME: ${{ steps.readiness.outputs.branch_name }}
-          LATEST_SUBJECT: ${{ steps.readiness.outputs.latest_subject }}
+          PR_TITLE: ${{ steps.readiness.outputs.pr_title }}
           SUMMARY_LINE: ${{ steps.readiness.outputs.summary_line }}
         with:
           github-token: ${{ github.token }}
@@ -94,7 +100,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const branch = process.env.BRANCH_NAME;
-            const latestSubject = process.env.LATEST_SUBJECT.trim();
+            const prTitle = process.env.PR_TITLE.trim();
             const summaryLine = process.env.SUMMARY_LINE.trim();
             const head = `${owner}:${branch}`;
 
@@ -112,7 +118,7 @@ jobs:
               return;
             }
 
-            const title = latestSubject || branch;
+            const title = prTitle || branch;
             const body = [
               "## Summary",
               "",

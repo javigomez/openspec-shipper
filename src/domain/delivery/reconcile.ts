@@ -75,6 +75,10 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("cleanup_worktree", "change is already archived");
   }
 
+  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
+    return transitionInference("prepare_worktree", "active OpenSpec change exists without a prepared workspace");
+  }
+
   if (evidence.hasMergedPullRequest) {
     return transitionInference("sync_main", "pull request is merged");
   }
@@ -89,10 +93,6 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
 
   if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedes(evidence.declaredPhase, "push")) {
     return transitionInference("push", "local implementation is complete");
-  }
-
-  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
-    return transitionInference("prepare_worktree", "active OpenSpec change exists without a prepared workspace");
   }
 
   if (evidence.hasActiveChange || evidence.hasLocalClaim) {

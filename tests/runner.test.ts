@@ -490,6 +490,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("run", {
       ...harness.config,
+      activeChangeDetector: async () => false,
       remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
       pullRequestDetector: async (_projectDir, branch) =>
         branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
@@ -508,6 +509,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("dry-run", {
       ...harness.config,
+      activeChangeDetector: async () => false,
       remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
       pullRequestDetector: async () => undefined,
       mergedPullRequestDetector: async (_projectDir, branch) =>
@@ -519,11 +521,41 @@ describe("runner", () => {
     expect(queue).toContain("phase: sync_main");
   });
 
+  test("prefers active local changes over stale merged PR evidence", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    let preparedChange = "";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      activeChangeDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      localClaimDetector: async () => false,
+      remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+      prepareWorkspace: async (input) => {
+        preparedChange = input.changeName;
+        return "prepared\n";
+      },
+      executor: async () => {
+        throw new Error("stale PR evidence should not skip prepare_worktree");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(preparedChange).toBe("add-name-greeting");
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: implement");
+    expect(queue).not.toContain("phase: sync_main");
+    expect(queue).not.toContain("phase: archive");
+  });
+
   test("reconstructs waiting-for-pr from a bare deliver task when only the remote branch exists", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
 
     const exitCode = await runQueue("run", {
       ...harness.config,
+      activeChangeDetector: async () => false,
       remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
       pullRequestDetector: async () => undefined,
       executor: async () => {

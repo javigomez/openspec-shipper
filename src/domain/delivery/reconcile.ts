@@ -87,15 +87,15 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("push", "local implementation is complete but not published");
   }
 
-  if (evidence.hasMergedPullRequest) {
+  if (evidence.hasMergedPullRequest && phasePrecedes(evidence.declaredPhase, "sync_main")) {
     return transitionInference("sync_main", "pull request is merged");
   }
 
-  if (evidence.hasOpenPullRequest) {
+  if (evidence.hasOpenPullRequest && phasePrecedes(evidence.declaredPhase, "waiting_for_merge")) {
     return transitionInference("waiting_for_merge", "open pull request exists");
   }
 
-  if (evidence.hasRemoteBranch) {
+  if (evidence.hasRemoteBranch && phasePrecedes(evidence.declaredPhase, "waiting_for_pr")) {
     return transitionInference("waiting_for_pr", "remote implementation branch exists");
   }
 
@@ -123,6 +123,10 @@ function transitionInference(phase: DeliverPhase, reason: string): DeliveryState
       reason,
     },
   };
+}
+
+function phasePrecedes(left: DeliverPhase, right: DeliverPhase): boolean {
+  return phaseRank(left) < phaseRank(right);
 }
 
 function phasePrecedesOrMatches(left: DeliverPhase, right: DeliverPhase): boolean {

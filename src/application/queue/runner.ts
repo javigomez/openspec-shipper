@@ -121,7 +121,7 @@ export type PrepareWorkspaceInput = {
 };
 export type Sleep = (ms: number) => Promise<void>;
 
-const DEFAULT_LOOP_DELAY_MS = 120_000;
+const DEFAULT_LOOP_DELAY_MS = 5_000;
 const DEFAULT_BUSY_DELAY_MS = 60_000;
 const DEFAULT_TASK_TIMEOUT_MS = 90 * 60_000;
 const DEFAULT_HEARTBEAT_MS = 60_000;

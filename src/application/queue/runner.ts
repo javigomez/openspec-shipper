@@ -64,6 +64,7 @@ export type RunnerConfig = {
   activeChangeDetector?: ActiveChangeDetector;
   archivedChangeDetector?: ArchivedChangeDetector;
   localClaimDetector?: LocalClaimDetector;
+  localClaimPublishedDetector?: LocalClaimPublishedDetector;
   remoteBranchDetector?: RemoteBranchDetector;
   pullRequestDetector?: PullRequestDetector;
   mergedPullRequestDetector?: MergedPullRequestDetector;
@@ -108,6 +109,7 @@ export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
 export type ActiveChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type ArchivedChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type LocalClaimPublishedDetector = (projectDir: string, changeName: string, branch: string) => Promise<boolean>;
 export type RemoteBranchDetector = (projectDir: string, branch: string) => Promise<boolean>;
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
@@ -672,6 +674,7 @@ async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promis
     hasArchivedChange: false,
     cleanupComplete: false,
     hasLocalClaim: true,
+    localClaimPublished: true,
     hasRemoteBranch: true,
     hasOpenPullRequest: Boolean(pullRequest),
     hasMergedPullRequest: false,
@@ -746,15 +749,17 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const activeChangeDetector = config.activeChangeDetector ?? detectActiveChange;
   const archivedChangeDetector = config.archivedChangeDetector ?? detectArchivedChange;
   const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
+  const localClaimPublishedDetector = config.localClaimPublishedDetector ?? detectLocalClaimPublished;
   const remoteBranchDetector = config.remoteBranchDetector ?? detectRemoteBranch;
   const pullRequestDetector = config.pullRequestDetector ?? detectOpenPullRequest;
   const mergedPullRequestDetector = config.mergedPullRequestDetector ?? detectMergedPullRequest;
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
 
-  const [hasActiveChange, hasArchivedChange, hasLocalClaim, hasRemoteBranch, tasksComplete] = await Promise.all([
+  const [hasActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, hasRemoteBranch, tasksComplete] = await Promise.all([
     activeChangeDetector(config.projectDir, changeName),
     archivedChangeDetector(config.projectDir, changeName),
     localClaimDetector(config.projectDir, changeName),
+    localClaimPublishedDetector(config.projectDir, changeName, branch),
     remoteBranchDetector(config.projectDir, branch),
     tasksCompleteDetector(config.projectDir, changeName),
   ]);
@@ -771,6 +776,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     hasArchivedChange,
     cleanupComplete: hasArchivedChange && !hasLocalClaim,
     hasLocalClaim,
+    localClaimPublished,
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
     hasMergedPullRequest: Boolean(mergedPullRequest),
@@ -1226,6 +1232,46 @@ async function changeHasExistingLocalClaim(projectDir: string, changeName: strin
     .split(/\r?\n/)
     .map((line) => line.trim())
     .some((line) => line === changeName || line.endsWith(`/${changeName}`));
+}
+
+async function detectLocalClaimPublished(projectDir: string, changeName: string, branch: string): Promise<boolean> {
+  const localHead = resolveLocalClaimHead(projectDir, changeName, branch);
+  if (!localHead) {
+    return false;
+  }
+
+  const remoteRef = `refs/remotes/origin/${branch}`;
+  const containsLocalHead = spawnSync("git", ["-C", projectDir, "merge-base", "--is-ancestor", localHead, remoteRef], {
+    encoding: "utf8",
+  });
+  if (containsLocalHead.status === 0) {
+    return true;
+  }
+
+  const remoteRefResult = spawnSync("git", ["-C", projectDir, "ls-remote", "--heads", "origin", branch], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (remoteRefResult.status !== 0) {
+    return false;
+  }
+
+  const [remoteHead] = remoteRefResult.stdout.trim().split(/\s+/);
+  return Boolean(remoteHead) && remoteHead === localHead;
+}
+
+function resolveLocalClaimHead(projectDir: string, changeName: string, branch: string): string | undefined {
+  const worktreeHead = spawnSync("git", ["-C", join(projectDir, "worktrees", changeName), "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  });
+  if (worktreeHead.status === 0) {
+    return worktreeHead.stdout.trim();
+  }
+
+  const branchHead = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", branch], {
+    encoding: "utf8",
+  });
+  return branchHead.status === 0 ? branchHead.stdout.trim() : undefined;
 }
 
 async function detectRemoteBranch(projectDir: string, branch: string): Promise<boolean> {

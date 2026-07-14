@@ -571,6 +571,28 @@ describe("runner", () => {
     expect(queue).not.toContain("phase: archive");
   });
 
+  test("prefers push when local completed work is not published despite stale merged PR evidence", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+
+    const exitCode = await runQueue("dry-run", {
+      ...harness.config,
+      activeChangeDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      localClaimPublishedDetector: async () => false,
+      tasksCompleteDetector: async () => true,
+      remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: push");
+    expect(queue).not.toContain("phase: sync_main");
+    expect(queue).not.toContain("phase: archive");
+  });
+
   test("reconstructs waiting-for-pr from a bare deliver task when only the remote branch exists", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
 

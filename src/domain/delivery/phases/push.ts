@@ -11,6 +11,10 @@ export const pushPhase: DeliveryPhaseDefinition = {
       return blocked("push", "implementation tasks are not complete");
     }
 
+    if (!evidence.localClaimPublished) {
+      return ready("push");
+    }
+
     if (evidence.hasMergedPullRequest) {
       return transition("sync_main", "pull request is merged");
     }

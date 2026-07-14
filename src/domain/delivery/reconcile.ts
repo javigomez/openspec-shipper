@@ -83,8 +83,8 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("implement", "local implementation workspace exists but tasks are not complete");
   }
 
-  if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedesOrMatches(evidence.declaredPhase, "push")) {
-    return transitionInference("push", "local implementation is complete");
+  if (evidence.hasLocalClaim && evidence.tasksComplete && !evidence.localClaimPublished) {
+    return transitionInference("push", "local implementation is complete but not published");
   }
 
   if (evidence.hasMergedPullRequest) {

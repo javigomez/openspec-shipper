@@ -11,6 +11,10 @@ export const implementPhase: DeliveryPhaseDefinition = {
       return ready("implement");
     }
 
+    if (!evidence.localClaimPublished) {
+      return transition("push", "local implementation is complete but not published");
+    }
+
     if (evidence.hasMergedPullRequest) {
       return transition("sync_main", "pull request is merged");
     }

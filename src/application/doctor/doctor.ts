@@ -67,14 +67,14 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   checks.push(
     (await gitignoreContains(projectDir, "worktrees/"))
       ? ok(".gitignore worktrees", "worktrees/ is ignored")
-      : warning(".gitignore worktrees", "Add worktrees/ to .gitignore before running apply workers"),
+      : warning(".gitignore worktrees", "Add worktrees/ to .gitignore before running implement workers"),
   );
 
   checks.push(
     (await fileExists(join(projectDir, ".github/workflows/open-pr-on-branch-push.yml"))) ||
       config?.github.autoOpenPr === false
       ? ok("auto PR workflow", "Auto PR workflow is installed or disabled")
-      : warning("auto PR workflow", "Auto PR workflow missing; ship workers push but do not create PRs themselves"),
+      : warning("auto PR workflow", "Auto PR workflow missing; push workers push but do not create PRs themselves"),
   );
 
   if (config?.github.autoOpenPr !== false && (await fileExists(join(projectDir, ".github/workflows/open-pr-on-branch-push.yml")))) {

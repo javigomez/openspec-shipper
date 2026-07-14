@@ -1,6 +1,6 @@
 import { blocked, execute, ready, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
-export const shipPhase: DeliveryPhaseDefinition = {
+export const pushPhase: DeliveryPhaseDefinition = {
   phase: "push",
   preChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
@@ -35,6 +35,6 @@ export const shipPhase: DeliveryPhaseDefinition = {
 
     return evidence.hasOpenPullRequest
       ? transition("waiting_for_merge", "open pull request exists")
-      : transition("waiting_for_pr", "ship pushed branch and PR creation is external");
+      : transition("waiting_for_pr", "push phase pushed branch and PR creation is external");
   },
 };

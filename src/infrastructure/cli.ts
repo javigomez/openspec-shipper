@@ -44,7 +44,7 @@ export async function runCli(argv: string[]): Promise<void> {
     console.log("");
     console.log("Next steps:");
     console.log("  In GitHub, enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests.");
-    console.log("  Without that setting, the auto-PR workflow cannot create PRs after ship pushes a branch.");
+    console.log("  Without that setting, the auto-PR workflow cannot create PRs after push sends a branch.");
     console.log("  Review and commit the installed files on main before running the queue.");
     console.log("  Do not commit .openspec-shipper/.env, queue.md, shipper.lock, stop, runs/, tmp/, or worktrees/.");
     console.log("  git status --short");

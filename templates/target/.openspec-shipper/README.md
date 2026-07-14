@@ -60,7 +60,7 @@ GitHub Settings > Actions > General > Workflow permissions >
 Allow GitHub Actions to create and approve pull requests
 ```
 
-If this is disabled, `ship` can push the branch but GitHub will reject the
+If this is disabled, `push` can push the branch but GitHub will reject the
 workflow that opens the PR.
 
 OpenSpec Shipper also requires the GitHub CLI for PR state reconciliation:

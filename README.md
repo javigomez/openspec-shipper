@@ -184,7 +184,7 @@ Queue format:
 ```md
 - [ ] deliver add-name-greeting
 - [ ] deliver add-spanish-greeting <!-- depends_on: add-name-greeting -->
-- [ ] sync
+- [ ] sync_main
 ```
 
 `deliver` advances through:
@@ -201,13 +201,13 @@ sequenceDiagram
 
   Human->>OpenSpec: Create change
   Human->>Shipper: Add change to queue.md
-  Shipper->>Shipper: prepare worktree and branch
-  Shipper->>Shipper: apply implementation in worktree
-  Shipper->>Shipper: Push branch and wait for PR
+  Shipper->>Shipper: prepare_worktree
+  Shipper->>Shipper: implement in worktree
+  Shipper->>Shipper: push branch and wait for PR
   Human->>Shipper: Review and merge PR
-  Shipper->>Shipper: sync main
+  Shipper->>Shipper: sync_main
   Shipper->>OpenSpec: archive merged change
-  Shipper->>Shipper: cleanup local worktree and branch
+  Shipper->>Shipper: cleanup_worktree
   Shipper-->>Human: Mark task done and start next task
 
   alt any phase blocks
@@ -253,7 +253,7 @@ concluding that an archive task is broken.
 Explicit waiting phases are not regressed just because a transient external
 check returns no data. For example, `waiting_for_merge` remains waiting unless
 the runner positively observes a merged PR, archived change, or completed
-cleanup.
+cleanup_worktree.
 
 When a task blocks, the queue includes a human retry hint below it:
 
@@ -268,17 +268,18 @@ it to the correct phase.
 
 The `archive` phase is OpenSpec-native: it validates, runs
 `openspec archive <change-name> -y`, commits, and pushes the archive/spec diff on
-`main`. The `cleanup_worktree` phase is OpenSpec Shipper housekeeping: it removes a clean
-local `worktrees/<change-name>` worktree and deletes the merged local branch with
-`git branch -d` when safe. If there is nothing left to clean, cleanup succeeds as
-a no-op.
+`main`. The `cleanup_worktree` phase is OpenSpec Shipper housekeeping: it
+removes a clean local `worktrees/<change-name>` worktree and deletes the merged
+local branch with `git branch -d` when safe. If there is nothing left to clean,
+cleanup succeeds as a no-op.
 
 ## Providers
 
 ### OpenCode
 
-OpenCode is the stable v1 provider. It builds the same commands as the original
-runner:
+OpenCode is the stable v1 provider. It keeps the provider command filenames
+from the original runner, even though the public shipper phases now use clearer
+names:
 
 ```bash
 opencode run --command openspec-apply-worktree <change>

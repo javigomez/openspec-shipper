@@ -1,6 +1,6 @@
 import { execute, ready, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
-export const applyPhase: DeliveryPhaseDefinition = {
+export const implementPhase: DeliveryPhaseDefinition = {
   phase: "implement",
   preChecks(evidence) {
     if (evidence.hasMergedPullRequest) {

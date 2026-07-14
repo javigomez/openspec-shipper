@@ -3,7 +3,7 @@ description: Clean local OpenSpec Shipper worktree and branch after archive
 agent: openspec-cleanup-worker
 ---
 
-Run one OpenSpec Shipper cleanup worker cycle for this repository right now.
+Run one OpenSpec Shipper cleanup_worktree worker cycle for this repository right now.
 
 Manual command: `/openspec-cleanup-worktree`
 

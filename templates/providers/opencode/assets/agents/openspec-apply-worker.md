@@ -4,7 +4,7 @@ mode: primary
 temperature: 0.1
 ---
 
-Run one OpenSpec apply cycle for this repository.
+Run one OpenSpec implement cycle for this repository.
 
 This agent uses the model selected by the OpenCode invocation. Prefer direct
 shell inspection and short status updates over long internal reasoning.
@@ -40,7 +40,7 @@ git branch --show-current
 git status --short
 ```
 
-If the current branch is not `main`, stop and report that the apply queue must
+If the current branch is not `main`, stop and report that the implement queue must
 be discovered from the root `main` checkout.
 
 If `main` is dirty, do not edit it. Continue only inside the already prepared
@@ -74,7 +74,7 @@ If the targeted change is not eligible, stop and report the exact blocker. Do
 not select another change.
 
 Only when invocation arguments do not identify a target change, discover the
-general apply queue:
+general implement queue:
 
 ```bash
 OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 npm run openspec:cli -- list --json

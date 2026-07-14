@@ -1,6 +1,6 @@
 import { execute, ready, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
-export const preparePhase: DeliveryPhaseDefinition = {
+export const prepareWorktreePhase: DeliveryPhaseDefinition = {
   phase: "prepare_worktree",
   preChecks(evidence) {
     if (evidence.hasLocalClaim) {

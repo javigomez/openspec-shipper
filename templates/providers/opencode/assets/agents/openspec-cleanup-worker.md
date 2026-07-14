@@ -4,7 +4,7 @@ mode: primary
 temperature: 0.1
 ---
 
-Run one OpenSpec Shipper cleanup cycle for this repository.
+Run one OpenSpec Shipper cleanup_worktree cycle for this repository.
 
 This agent uses the model selected by the OpenCode invocation. Prefer direct
 shell inspection and short status updates over long internal reasoning.
@@ -14,7 +14,7 @@ contains the guardrails for the orchestrator `cleanup_worktree` queue task.
 
 ## First Response
 
-Immediately say what cleanup target you are checking, then inspect the root
+Immediately say what cleanup_worktree target you are checking, then inspect the root
 checkout. Do not wait silently.
 
 ## Blocker Contract
@@ -35,7 +35,7 @@ This worker only cleans local OpenSpec Shipper artifacts after a change has been
 archived. It MUST NOT run `openspec archive`, edit OpenSpec specs, commit, push,
 create pull requests, delete remote branches, or force-delete local branches.
 
-## Cleanup Rules
+## Cleanup Worktree Rules
 
 Before doing anything:
 
@@ -62,4 +62,4 @@ For the selected change:
    `git branch -D`.
 7. Missing worktree and missing local branch are successful no-ops.
 
-Exit successfully when cleanup is complete or there was nothing left to clean.
+Exit successfully when cleanup_worktree is complete or there was nothing left to clean.

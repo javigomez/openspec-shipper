@@ -1,6 +1,6 @@
 import { execute, ready, type DeliveryPhaseDefinition } from "../phase.js";
 
-export const syncPhase: DeliveryPhaseDefinition = {
+export const syncMainPhase: DeliveryPhaseDefinition = {
   phase: "sync_main",
   preChecks() {
     return ready("sync_main");

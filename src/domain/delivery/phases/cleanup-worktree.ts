@@ -1,6 +1,6 @@
 import { execute, ready, type DeliveryPhaseDefinition } from "../phase.js";
 
-export const cleanupPhase: DeliveryPhaseDefinition = {
+export const cleanupWorktreePhase: DeliveryPhaseDefinition = {
   phase: "cleanup_worktree",
   preChecks() {
     return ready("cleanup_worktree");

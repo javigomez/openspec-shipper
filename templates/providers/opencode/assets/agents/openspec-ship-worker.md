@@ -4,7 +4,7 @@ mode: primary
 temperature: 0.1
 ---
 
-Run one OpenSpec ship cycle for this repository.
+Run one OpenSpec push cycle for this repository.
 
 This agent uses the model selected by the OpenCode invocation. Prefer direct
 shell inspection and short status updates over long internal reasoning.
@@ -62,7 +62,7 @@ archive, commit, push, or create a PR.
 
 Select exactly one completed worktree.
 
-A valid ship candidate has:
+A valid push candidate has:
 
 - `proposal.md`
 - `design.md`
@@ -75,7 +75,7 @@ Skip incomplete scaffolds. If `gh` can confirm an open PR for the deterministic
 branch, skip the change because it is already waiting for review or merge. If
 `gh` is unavailable, use branch and worktree state as the durable claim lock.
 
-## Ship Rules
+## Push Rules
 
 For one eligible completed change:
 
@@ -100,7 +100,7 @@ For one eligible completed change:
 10. After pushing, verify that an open pull request exists for the selected
     branch when `gh` is available. If no pull request exists, stop and end with
     `OPENSPEC_SHIPPER_BLOCKED: no open pull request exists for <branch>`. Do
-    not report the ship cycle as complete in that case.
+    not report the push cycle as complete in that case.
 
 This worker MUST NOT run `openspec archive`. It also MUST NOT call `gh pr
 create`, GitHub connector PR APIs, or any other manual PR creation path. If the
@@ -111,7 +111,7 @@ After a successful push, keep the local `worktrees/<change-name>` worktree and
 local branch intact. The pull request may still need conflict resolution,
 follow-up fixes, or human review. Cleanup belongs to the cleanup_worktree phase after
 the implementation has merged and the OpenSpec archive push has succeeded.
-Never force-delete local branches from the ship worker.
+Never force-delete local branches from the push worker.
 
 If blocked, report the exact command and output, include the
 `OPENSPEC_SHIPPER_BLOCKED:` final line, and keep any local commit intact so a

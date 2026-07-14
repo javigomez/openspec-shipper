@@ -3,7 +3,7 @@ description: Validate and push one completed OpenSpec worktree branch
 agent: openspec-ship-worker
 ---
 
-Run one OpenSpec ship worker cycle for this repository right now.
+Run one OpenSpec push worker cycle for this repository right now.
 
 Manual command: `/openspec-ship-worktree`
 

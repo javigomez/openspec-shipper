@@ -79,6 +79,14 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("prepare_worktree", "active OpenSpec change exists without a prepared workspace");
   }
 
+  if (evidence.hasLocalClaim && !evidence.tasksComplete) {
+    return transitionInference("implement", "local implementation workspace exists but tasks are not complete");
+  }
+
+  if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedesOrMatches(evidence.declaredPhase, "push")) {
+    return transitionInference("push", "local implementation is complete");
+  }
+
   if (evidence.hasMergedPullRequest) {
     return transitionInference("sync_main", "pull request is merged");
   }
@@ -89,10 +97,6 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
 
   if (evidence.hasRemoteBranch) {
     return transitionInference("waiting_for_pr", "remote implementation branch exists");
-  }
-
-  if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedes(evidence.declaredPhase, "push")) {
-    return transitionInference("push", "local implementation is complete");
   }
 
   if (evidence.hasActiveChange || evidence.hasLocalClaim) {
@@ -119,10 +123,6 @@ function transitionInference(phase: DeliverPhase, reason: string): DeliveryState
       reason,
     },
   };
-}
-
-function phasePrecedes(left: DeliverPhase, right: DeliverPhase): boolean {
-  return phaseRank(left) < phaseRank(right);
 }
 
 function phasePrecedesOrMatches(left: DeliverPhase, right: DeliverPhase): boolean {

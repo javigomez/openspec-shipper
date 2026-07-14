@@ -3,6 +3,14 @@ import { blocked, execute, ready, transition, type DeliveryPhaseDefinition } fro
 export const pushPhase: DeliveryPhaseDefinition = {
   phase: "push",
   preChecks(evidence) {
+    if (!evidence.hasLocalClaim) {
+      return transition("prepare_worktree", "no local implementation branch or worktree exists");
+    }
+
+    if (!evidence.tasksComplete) {
+      return blocked("push", "implementation tasks are not complete");
+    }
+
     if (evidence.hasMergedPullRequest) {
       return transition("sync_main", "pull request is merged");
     }
@@ -13,14 +21,6 @@ export const pushPhase: DeliveryPhaseDefinition = {
 
     if (evidence.hasRemoteBranch) {
       return transition("waiting_for_pr", "remote implementation branch exists");
-    }
-
-    if (!evidence.hasLocalClaim) {
-      return transition("prepare_worktree", "no local implementation branch or worktree exists");
-    }
-
-    if (!evidence.tasksComplete) {
-      return blocked("push", "implementation tasks are not complete");
     }
 
     return ready("push");

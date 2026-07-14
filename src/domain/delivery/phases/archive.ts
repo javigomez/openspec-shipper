@@ -9,6 +9,6 @@ export const archivePhase: DeliveryPhaseDefinition = {
     return execute("archive");
   },
   postChecks() {
-    return transition("cleanup", "archive completed");
+    return transition("cleanup_worktree", "archive completed");
   },
 };

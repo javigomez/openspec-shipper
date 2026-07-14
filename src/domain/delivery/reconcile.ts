@@ -68,15 +68,15 @@ type DeliveryStateInference =
 
 function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference {
   if (evidence.hasArchivedChange && evidence.cleanupComplete) {
-    return { kind: "done", phase: "cleanup", reason: "change is archived and local cleanup is complete" };
+    return { kind: "done", phase: "cleanup_worktree", reason: "change is archived and local cleanup is complete" };
   }
 
   if (evidence.hasArchivedChange) {
-    return transitionInference("cleanup", "change is already archived");
+    return transitionInference("cleanup_worktree", "change is already archived");
   }
 
   if (evidence.hasMergedPullRequest) {
-    return transitionInference("sync", "pull request is merged");
+    return transitionInference("sync_main", "pull request is merged");
   }
 
   if (evidence.hasOpenPullRequest) {
@@ -87,19 +87,19 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("waiting_for_pr", "remote implementation branch exists");
   }
 
-  if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedes(evidence.declaredPhase, "ship")) {
-    return transitionInference("ship", "local implementation is complete");
+  if (evidence.hasLocalClaim && evidence.tasksComplete && phasePrecedes(evidence.declaredPhase, "push")) {
+    return transitionInference("push", "local implementation is complete");
   }
 
-  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "apply")) {
-    return transitionInference("prepare", "active OpenSpec change exists without a prepared workspace");
+  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
+    return transitionInference("prepare_worktree", "active OpenSpec change exists without a prepared workspace");
   }
 
   if (evidence.hasActiveChange || evidence.hasLocalClaim) {
     return { kind: "unchanged" };
   }
 
-  return phasePrecedesOrMatches(evidence.declaredPhase, "apply")
+  return phasePrecedesOrMatches(evidence.declaredPhase, "implement")
     ? {
         kind: "blocked",
         phase: evidence.declaredPhase,
@@ -131,21 +131,21 @@ function phasePrecedesOrMatches(left: DeliverPhase, right: DeliverPhase): boolea
 
 function phaseRank(phase: DeliverPhase): number {
   switch (phase) {
-    case "apply":
+    case "implement":
       return 1;
-    case "prepare":
+    case "prepare_worktree":
       return 0;
-    case "ship":
+    case "push":
       return 2;
     case "waiting_for_pr":
       return 3;
     case "waiting_for_merge":
       return 4;
-    case "sync":
+    case "sync_main":
       return 5;
     case "archive":
       return 6;
-    case "cleanup":
+    case "cleanup_worktree":
       return 7;
   }
 }

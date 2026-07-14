@@ -259,7 +259,7 @@ describe("runner", () => {
     expect(preparedChange).toBe("test-20-migrate-notebook-access-button-rntl");
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
-    expect(queue).toContain("phase: apply");
+    expect(queue).toContain("phase: implement");
     expect(queue).toContain("checked: 2026-06-17T12:00:00.000Z");
     expect(queue).toContain("started: 2026-06-17T12:00:00.000Z");
   });
@@ -277,9 +277,9 @@ describe("runner", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(queueDuringExecution).toContain("phase: prepare");
+    expect(queueDuringExecution).toContain("phase: prepare_worktree");
     expect(queueDuringExecution).toContain("running: 2026-06-17T12:00:00.000Z");
-    expect(queueDuringExecution).toContain("![prepare running](https://img.shields.io/badge/prepare-running-yellow)");
+    expect(queueDuringExecution).toContain("![prepare_worktree running](https://img.shields.io/badge/prepare_worktree-running-yellow)");
   });
 
   test("writes log links relative to the queue file", async () => {
@@ -297,14 +297,14 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(queuePath, "utf8");
-    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-sync.log");
-    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-sync.log))_");
+    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-sync_main.log");
+    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-sync_main.log))_");
     expect(queue).not.toContain("../../.openspec-shipper");
   });
 
   test("runs the current deliver phase", async () => {
     const harness = await createHarness(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship -->\n",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: push -->\n",
     );
     let receivedArgs: string[] = [];
     let prChecks = 0;
@@ -333,8 +333,8 @@ describe("runner", () => {
     expect(queue).toContain("phase: waiting_for_merge");
   });
 
-  test("advances deliver ship phase to waiting for PR when no pull request exists after success", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+  test("advances deliver push phase to waiting for PR when no pull request exists after success", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let checkedBranch = "";
 
     const exitCode = await runQueue("next", {
@@ -369,13 +369,13 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
-    expect(queue).toContain("phase: cleanup");
-    expect(queue).toContain("![cleanup ready](https://img.shields.io/badge/cleanup-ready-blue)");
+    expect(queue).toContain("phase: cleanup_worktree");
+    expect(queue).toContain("![cleanup_worktree ready](https://img.shields.io/badge/cleanup_worktree-ready-blue)");
   });
 
   test("marks a deliver task done after cleanup succeeds", async () => {
     const harness = await createHarness(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: cleanup -->\n",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: cleanup_worktree -->\n",
     );
 
     const exitCode = await runQueue("next", {
@@ -416,7 +416,7 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver change-b <!-- depends_on: change-a -->");
     expect(queue).toContain("- [ ] deliver change-c");
-    expect(queue).toContain("phase: apply");
+    expect(queue).toContain("phase: implement");
   });
 
   test("skips deliver tasks waiting for merge", async () => {
@@ -447,7 +447,7 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver change-b <!-- phase: waiting_for_merge -->");
     expect(queue).toContain("- [ ] deliver change-c");
-    expect(queue).toContain("phase: apply");
+    expect(queue).toContain("phase: implement");
   });
 
   test("refreshes waiting-for-pr tasks before deciding the queue is waiting", async () => {
@@ -481,8 +481,8 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: sync");
-    expect(queue).toContain("![sync ready](https://img.shields.io/badge/sync-ready-blue)");
+    expect(queue).toContain("phase: sync_main");
+    expect(queue).toContain("![sync_main ready](https://img.shields.io/badge/sync_main-ready-blue)");
   });
 
   test("reconstructs waiting-for-merge from a bare deliver task when a PR is open", async () => {
@@ -516,7 +516,7 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: sync");
+    expect(queue).toContain("phase: sync_main");
   });
 
   test("reconstructs waiting-for-pr from a bare deliver task when only the remote branch exists", async () => {
@@ -547,7 +547,7 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: push");
   });
 
   test("marks a bare deliver task done when archive exists and cleanup is complete", async () => {
@@ -566,7 +566,7 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [x] deliver add-name-greeting");
-    expect(queue).toContain("![cleanup done](https://img.shields.io/badge/cleanup-done-brightgreen)");
+    expect(queue).toContain("![cleanup_worktree done](https://img.shields.io/badge/cleanup_worktree-done-brightgreen)");
   });
 
   test("reconstructs cleanup when archive exists and local claim remains", async () => {
@@ -584,7 +584,7 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: cleanup");
+    expect(queue).toContain("phase: cleanup_worktree");
   });
 
   test("does not regress an explicit waiting-for-merge task when PR state is temporarily unavailable", async () => {
@@ -731,8 +731,8 @@ describe("runner", () => {
     expect(queue).toContain("unexpected server error");
   });
 
-  test("blocks deliver ship phase when the worker reports a push blocker", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+  test("blocks deliver push phase when the worker reports a push blocker", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -746,13 +746,13 @@ describe("runner", () => {
     expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: push");
     expect(queue).toContain("Worker reported a blocker");
     expect(queue).not.toContain("waiting_for_merge");
   });
 
-  test("blocks deliver ship phase when the worker emits the blocked sentinel", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+  test("blocks deliver push phase when the worker emits the blocked sentinel", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -766,7 +766,7 @@ describe("runner", () => {
     expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: push");
     expect(queue).toContain("no open pull request exists for feat/add-name-greeting");
     expect(queue).not.toContain("waiting_for_merge");
   });
@@ -838,8 +838,8 @@ describe("runner", () => {
     expect(queue).toContain("Git remote origin is not configured");
   });
 
-  test("blocks deliver ship phase before waiting for merge when git remote origin is missing", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+  test("blocks deliver push phase before waiting for merge when git remote origin is missing", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let called = false;
 
     const exitCode = await runQueue("next", {
@@ -856,7 +856,7 @@ describe("runner", () => {
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: push");
     expect(queue).toContain("Git remote origin is not configured");
     expect(queue).not.toContain("waiting_for_merge");
   });
@@ -878,7 +878,7 @@ describe("runner", () => {
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: prepare");
+    expect(queue).toContain("phase: prepare_worktree");
     expect(queue).toContain("no existing worktree or branch for add-name-greeting");
   });
 
@@ -904,7 +904,7 @@ describe("runner", () => {
     expect(executorCalled).toBe(false);
     expect(prepareCalled).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: apply");
+    expect(queue).toContain("phase: implement");
   });
 
   test("allows apply with dirty main when the change worktree already exists", async () => {
@@ -924,7 +924,7 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     expect(called).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: ship");
+    expect(queue).toContain("phase: push");
   });
 
   test("next mode marks the task as checking before detecting active opencode", async () => {

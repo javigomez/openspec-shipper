@@ -9,7 +9,7 @@ Manual command: `/openspec-ship-worktree`
 
 Arguments: `$ARGUMENTS`
 
-Treat this command as the OpenCode entrypoint for an orchestrator `ship` queue
+Treat this command as the OpenCode entrypoint for an orchestrator `push` queue
 task.
 
 Goals:

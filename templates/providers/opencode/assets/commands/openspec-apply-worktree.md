@@ -9,7 +9,7 @@ Manual command: `/openspec-apply-worktree`
 
 Arguments: `$ARGUMENTS`
 
-Treat this command as the OpenCode entrypoint for an orchestrator `apply` queue
+Treat this command as the OpenCode entrypoint for an orchestrator `implement` queue
 task.
 
 Goals:
@@ -30,4 +30,4 @@ Important:
   `OPENSPEC_SHIPPER_BLOCKED: <short reason>` line.
 - Do not create PRs or archive changes in this command.
 - Do not create branches or worktrees in this command; the shipper runner's
-  native `prepare` phase owns that setup.
+  native `prepare_worktree` phase owns that setup.

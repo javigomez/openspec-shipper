@@ -1,18 +1,18 @@
 import { execute, ready, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
 export const preparePhase: DeliveryPhaseDefinition = {
-  phase: "prepare",
+  phase: "prepare_worktree",
   preChecks(evidence) {
     if (evidence.hasLocalClaim) {
-      return transition("apply", "local implementation workspace exists");
+      return transition("implement", "local implementation workspace exists");
     }
 
-    return ready("prepare");
+    return ready("prepare_worktree");
   },
   run() {
-    return execute("prepare");
+    return execute("prepare_worktree");
   },
   postChecks() {
-    return transition("apply", "workspace prepared");
+    return transition("implement", "workspace prepared");
   },
 };

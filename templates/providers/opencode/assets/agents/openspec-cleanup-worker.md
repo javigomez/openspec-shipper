@@ -10,7 +10,7 @@ This agent uses the model selected by the OpenCode invocation. Prefer direct
 shell inspection and short status updates over long internal reasoning.
 
 Follow `AGENTS.md` and `.opencode/rules/openspec-git-workflow.md`. This agent
-contains the guardrails for the orchestrator `cleanup` queue task.
+contains the guardrails for the orchestrator `cleanup_worktree` queue task.
 
 ## First Response
 
@@ -27,7 +27,7 @@ OPENSPEC_SHIPPER_BLOCKED: <short reason>
 
 Use this line for dirty worktrees, unsafe branch deletion, missing tools,
 unexpected git failures, or anything requiring human action. Do not include this
-line when the cleanup phase completes successfully.
+line when the cleanup_worktree phase completes successfully.
 
 ## Boundaries
 

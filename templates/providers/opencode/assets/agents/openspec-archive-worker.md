@@ -68,7 +68,7 @@ blocker:
   already complete and exit successfully.
 - Do not run `openspec archive <change-name>` again.
 - Do not create an archive commit when there is no archive/spec diff to commit.
-- Do not clean local worktrees or branches; that belongs to the cleanup phase.
+- Do not clean local worktrees or branches; that belongs to the cleanup_worktree phase.
 - Do not emit `OPENSPEC_SHIPPER_BLOCKED`.
 - If more than one archived directory matches, or the archived directory is
   missing required files, stop and report the exact blocker.
@@ -99,7 +99,7 @@ For the selected change:
 7. Fetch/rebase against `origin/main` once before pushing.
 8. Push `main`.
 
-After push succeeds, do not clean local implementation artifacts. The cleanup
+After push succeeds, do not clean local implementation artifacts. The cleanup_worktree
 phase owns local worktree and branch removal.
 
 If archive, commit, final fetch/rebase, or push fails, report the exact command

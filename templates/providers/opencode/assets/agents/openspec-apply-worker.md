@@ -117,8 +117,8 @@ Use the deterministic branch from the project workflow:
 <type>/<change-name>
 ```
 
-The apply phase never creates branches or worktrees. That is the shipper
-runner's native `prepare` phase. If `worktrees/<change-name>` is missing, stop
+The implement phase never creates branches or worktrees. That is the shipper
+runner's native `prepare_worktree` phase. If `worktrees/<change-name>` is missing, stop
 with:
 
 ```text

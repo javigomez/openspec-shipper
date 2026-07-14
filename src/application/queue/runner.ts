@@ -502,18 +502,18 @@ async function validateTaskPreflight(
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
   const commandName = openCodeCommandName(phase);
   const commandPath =
-    phase === "prepare"
-      ? "(native prepare phase)"
+    phase === "prepare_worktree"
+      ? "(native prepare_worktree phase)"
       : provider(config).id === "opencode"
       ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
       : "(provider does not use OpenCode command files)";
 
-  if (phase === "prepare") {
+  if (phase === "prepare_worktree") {
     const prepareBlocker = await validatePrepareCanCreateWorktree(config, task);
     return prepareBlocker ? { ok: false, commandPath, reason: prepareBlocker } : { ok: true, commandPath };
   }
 
-  if (phase === "ship" && !(await gitRemoteOrigin(config))) {
+  if (phase === "push" && !(await gitRemoteOrigin(config))) {
     return {
       ok: false,
       commandPath,
@@ -551,7 +551,7 @@ async function gitRemoteOrigin(config: RunnerConfig): Promise<string | undefined
 
 async function validatePrepareCanCreateWorktree(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  if (phase !== "prepare" || !task.change) {
+  if (phase !== "prepare_worktree" || !task.change) {
     return undefined;
   }
 
@@ -658,7 +658,7 @@ async function executeTask(
 }
 
 async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promise<"waiting_for_pr" | "waiting_for_merge" | undefined> {
-  if (task.action !== "deliver" || deliverPhase(task) !== "ship" || !task.change) {
+  if (task.action !== "deliver" || deliverPhase(task) !== "push" || !task.change) {
     return undefined;
   }
 
@@ -667,7 +667,7 @@ async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promis
   const pullRequest = await detector(config.projectDir, branch);
   const evidence: DeliveryEvidence = {
     changeName: task.change,
-    declaredPhase: "ship",
+    declaredPhase: "push",
     hasActiveChange: true,
     hasArchivedChange: false,
     cleanupComplete: false,
@@ -677,7 +677,7 @@ async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promis
     hasMergedPullRequest: false,
     tasksComplete: true,
   };
-  const decision = phaseDefinition("ship").postChecks(evidence);
+  const decision = phaseDefinition("push").postChecks(evidence);
   return decision.kind === "transition" && (decision.phase === "waiting_for_pr" || decision.phase === "waiting_for_merge")
     ? decision.phase
     : undefined;
@@ -803,12 +803,12 @@ async function blockTask(
 
 function isNativeTask(task: QueueTask): boolean {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  return phase === "prepare";
+  return phase === "prepare_worktree";
 }
 
 function describeNativeTask(task: QueueTask): string {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  if (phase === "prepare" && task.change) {
+  if (phase === "prepare_worktree" && task.change) {
     return `prepare worktree for ${task.change}`;
   }
 
@@ -866,7 +866,7 @@ async function executeNativeTask(
 
 async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<string> {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  if (phase !== "prepare" || !task.change) {
+  if (phase !== "prepare_worktree" || !task.change) {
     throw new Error(`Native runner does not support ${phase}`);
   }
 

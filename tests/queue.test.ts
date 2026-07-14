@@ -68,14 +68,14 @@ describe("queue parser", () => {
 
   test("parses deliver tasks with phase and dependencies", () => {
     const result = parseQueue(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: ship; depends_on: test-08-add-rntl-test-infra -->\n",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: push; depends_on: test-08-add-rntl-test-infra -->\n",
     );
     const task = result.tasks[0]!;
 
     expect(result.errors).toEqual([]);
     expect(task.action).toBe("deliver");
     expect(task.change).toBe("test-20-migrate-notebook-access-button-rntl");
-    expect(deliverPhase(task)).toBe("ship");
+    expect(deliverPhase(task)).toBe("push");
     expect(task.dependsOn).toEqual(["test-08-add-rntl-test-infra"]);
     expect(openCodeCommandName(task)).toBe("openspec-ship-worktree");
     expect(buildOpenCodeArgs(task)).toEqual([
@@ -84,6 +84,14 @@ describe("queue parser", () => {
       "openspec-ship-worktree",
       "test-20-migrate-notebook-access-button-rntl",
     ]);
+  });
+
+  test("normalizes legacy phase names", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+    const task = result.tasks[0]!;
+
+    expect(result.errors).toEqual([]);
+    expect(deliverPhase(task)).toBe("push");
   });
 
   test("advances deliver phases before marking done", () => {
@@ -98,15 +106,15 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain(
-      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: apply; advanced: 2026-06-25T12:00:00.000Z; checked: 2026-06-25T11:59:58.000Z; started: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: implement; advanced: 2026-06-25T12:00:00.000Z; checked: 2026-06-25T11:59:58.000Z; started: 2026-06-25T12:00:00.000Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
-      "![apply ready](https://img.shields.io/badge/apply-ready-blue) · _([log](.openspec-shipper/runs/apply.log))_",
+      "![implement ready](https://img.shields.io/badge/implement-ready-blue) · _([log](.openspec-shipper/runs/apply.log))_",
     );
   });
 
-  test("advances ship to waiting for PR when PR creation is external", () => {
-    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
+  test("advances push to waiting for PR when PR creation is external", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     const task = result.tasks[0]!;
 
     const next = advanceDeliverTask(result.lines, task, {
@@ -120,7 +128,7 @@ describe("queue parser", () => {
     expect(findFirstRunnableTask([parsed])).toBeUndefined();
   });
 
-  test("advances archive to cleanup before marking deliver done", () => {
+  test("advances archive to cleanup_worktree before marking deliver done", () => {
     const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
     const task = result.tasks[0]!;
 
@@ -128,14 +136,14 @@ describe("queue parser", () => {
       timestamp: "2026-07-13T12:00:00.000Z",
     });
 
-    expect(next).toContain("phase: cleanup");
-    expect(next).toContain("![cleanup ready](https://img.shields.io/badge/cleanup-ready-blue)");
+    expect(next).toContain("phase: cleanup_worktree");
+    expect(next).toContain("![cleanup_worktree ready](https://img.shields.io/badge/cleanup_worktree-ready-blue)");
     const parsed = parseQueue(next).tasks[0]!;
-    expect(deliverPhase(parsed)).toBe("cleanup");
+    expect(deliverPhase(parsed)).toBe("cleanup_worktree");
   });
 
-  test("marks deliver done after cleanup", () => {
-    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup -->\n");
+  test("marks deliver done after cleanup_worktree", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->\n");
     const task = result.tasks[0]!;
 
     const next = advanceDeliverTask(result.lines, task, {
@@ -143,7 +151,7 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain("- [x] deliver add-name-greeting");
-    expect(next).toContain("![cleanup done](https://img.shields.io/badge/cleanup-done-brightgreen)");
+    expect(next).toContain("![cleanup_worktree done](https://img.shields.io/badge/cleanup_worktree-done-brightgreen)");
   });
 
   test("marks a deliver task as running without changing its queue status", () => {
@@ -156,14 +164,14 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain(
-      "- [ ] deliver add-name-greeting <!-- phase: prepare; running: 2026-07-09T16:22:20.003Z; log: .openspec-shipper/runs/apply.log -->",
+      "- [ ] deliver add-name-greeting <!-- phase: prepare_worktree; running: 2026-07-09T16:22:20.003Z; log: .openspec-shipper/runs/apply.log -->",
     );
     expect(next).toContain(
-      "![prepare running](https://img.shields.io/badge/prepare-running-yellow) · _([log](.openspec-shipper/runs/apply.log))_",
+      "![prepare_worktree running](https://img.shields.io/badge/prepare_worktree-running-yellow) · _([log](.openspec-shipper/runs/apply.log))_",
     );
     const parsed = parseQueue(next).tasks[0]!;
     expect(parsed.status).toBe("pending");
-    expect(deliverPhase(parsed)).toBe("prepare");
+    expect(deliverPhase(parsed)).toBe("prepare_worktree");
   });
 
   test("marks a deliver task as checking without changing its queue status", () => {
@@ -175,14 +183,14 @@ describe("queue parser", () => {
     });
 
     expect(next).toContain(
-      "- [ ] deliver add-name-greeting <!-- phase: prepare; checking: 2026-07-10T08:15:00.000Z -->",
+      "- [ ] deliver add-name-greeting <!-- phase: prepare_worktree; checking: 2026-07-10T08:15:00.000Z -->",
     );
     expect(next).toContain(
-      "![prepare checking](https://img.shields.io/badge/prepare-checking-yellow)",
+      "![prepare_worktree checking](https://img.shields.io/badge/prepare_worktree-checking-yellow)",
     );
     const parsed = parseQueue(next).tasks[0]!;
     expect(parsed.status).toBe("pending");
-    expect(deliverPhase(parsed)).toBe("prepare");
+    expect(deliverPhase(parsed)).toBe("prepare_worktree");
   });
 
   test("adds a human retry hint when a task is blocked", () => {

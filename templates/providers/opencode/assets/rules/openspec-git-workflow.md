@@ -133,7 +133,7 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 
 1. Run discovery from root `main`.
 2. Verify the selected `worktrees/<change-name>` already exists.
-3. Never create branches or worktrees in apply; the native `prepare` phase owns
+3. Never create branches or worktrees in implement; the native `prepare_worktree` phase owns
    that setup.
 4. Enter the selected worktree.
 5. Implement one selected change.

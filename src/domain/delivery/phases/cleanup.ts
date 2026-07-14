@@ -1,14 +1,14 @@
 import { execute, ready, type DeliveryPhaseDefinition } from "../phase.js";
 
 export const cleanupPhase: DeliveryPhaseDefinition = {
-  phase: "cleanup",
+  phase: "cleanup_worktree",
   preChecks() {
-    return ready("cleanup");
+    return ready("cleanup_worktree");
   },
   run() {
-    return execute("cleanup");
+    return execute("cleanup_worktree");
   },
   postChecks() {
-    return ready("cleanup");
+    return ready("cleanup_worktree");
   },
 };

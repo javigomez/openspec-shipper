@@ -10,7 +10,7 @@ This agent uses the model selected by the OpenCode invocation. Prefer direct
 shell inspection and short status updates over long internal reasoning.
 
 Follow `AGENTS.md` and `.opencode/rules/openspec-git-workflow.md`. This agent
-contains the guardrails for the orchestrator `ship` queue task.
+contains the guardrails for the orchestrator `push` queue task.
 
 Use relative repository paths only. Never create scratch files in `/tmp`,
 `/var`, `$HOME`, or absolute external directories. For temporary verification
@@ -109,7 +109,7 @@ creation after push.
 
 After a successful push, keep the local `worktrees/<change-name>` worktree and
 local branch intact. The pull request may still need conflict resolution,
-follow-up fixes, or human review. Cleanup belongs to the cleanup phase after
+follow-up fixes, or human review. Cleanup belongs to the cleanup_worktree phase after
 the implementation has merged and the OpenSpec archive push has succeeded.
 Never force-delete local branches from the ship worker.
 

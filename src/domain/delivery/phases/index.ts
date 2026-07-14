@@ -10,14 +10,14 @@ import type { DeliveryPhaseDefinition } from "../phase.js";
 import type { DeliverPhase } from "../../queue/queue.js";
 
 export const deliveryPhases: Record<DeliverPhase, DeliveryPhaseDefinition> = {
-  prepare: preparePhase,
-  apply: applyPhase,
-  ship: shipPhase,
+  prepare_worktree: preparePhase,
+  implement: applyPhase,
+  push: shipPhase,
   waiting_for_pr: waitingForPrPhase,
   waiting_for_merge: waitingForMergePhase,
-  sync: syncPhase,
+  sync_main: syncPhase,
   archive: archivePhase,
-  cleanup: cleanupPhase,
+  cleanup_worktree: cleanupPhase,
 };
 
 export function phaseDefinition(phase: DeliverPhase): DeliveryPhaseDefinition {

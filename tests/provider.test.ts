@@ -21,10 +21,10 @@ const config = {
 
 describe("executor providers", () => {
   test("OpenCode provider builds the current apply command", () => {
-    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: apply -->\n").tasks[0]!;
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
 
     const command = opencodeProvider.buildCommand({
-      phase: "apply",
+      phase: "implement",
       task,
       projectDir: "/repo",
       config,
@@ -48,10 +48,10 @@ describe("executor providers", () => {
   });
 
   test("OpenCode provider builds cleanup command with the target change", () => {
-    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup -->\n").tasks[0]!;
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->\n").tasks[0]!;
 
     const command = opencodeProvider.buildCommand({
-      phase: "cleanup",
+      phase: "cleanup_worktree",
       task,
       projectDir: "/repo",
       config,
@@ -65,7 +65,7 @@ describe("executor providers", () => {
     const task = parseQueue("- [ ] deliver add-name-greeting\n").tasks[0]!;
 
     const command = codexCliProvider.buildCommand({
-      phase: "apply",
+      phase: "implement",
       task,
       projectDir: "/repo",
       config: {
@@ -89,7 +89,7 @@ describe("executor providers", () => {
       "--model",
     ]);
     expect(command.args).toContain("gpt-5.4");
-    expect(command.args.at(-1)).toContain("OpenSpec apply phase");
+    expect(command.args.at(-1)).toContain("OpenSpec implement phase");
   });
 
   test("OpenCode provider treats missing pull requests as a ship failure", () => {

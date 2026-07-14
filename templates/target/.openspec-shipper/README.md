@@ -24,7 +24,7 @@ The installer created or updated these project assets:
 ## Required After Init
 
 Review and commit the installed project assets on `main` before running the
-queue. The native `prepare` phase creates feature worktrees from `HEAD`; if `main` is
+queue. The native `prepare_worktree` phase creates feature worktrees from `HEAD`; if `main` is
 dirty after `init`, the new worktree would miss the freshly installed scripts,
 workflows, provider commands, and package changes.
 
@@ -105,17 +105,17 @@ npx openspec-shipper queue run
 The default `deliver` flow is:
 
 ```text
-prepare -> apply -> ship -> waiting_for_pr -> waiting_for_merge -> sync -> archive -> cleanup
+prepare_worktree -> implement -> push -> waiting_for_pr -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
 ```
 
-`prepare` is native runner logic: it creates or reconnects
+`prepare_worktree` is native runner logic: it creates or reconnects
 `worktrees/<change-name>` and the deterministic implementation branch before
-any model call. `apply` then implements inside that prepared workspace. `ship`
+any model call. `implement` then implements inside that prepared workspace. `push`
 pushes the implementation branch and waits for the auto-PR workflow to open a
-pull request. After the PR merges, the queue can continue through `sync` and
-`archive`, then `cleanup`.
+pull request. After the PR merges, the queue can continue through `sync_main`
+and `archive`, then `cleanup_worktree`.
 
-`archive` is the OpenSpec-native step. `cleanup` is OpenSpec Shipper
+`archive` is the OpenSpec-native step. `cleanup_worktree` is OpenSpec Shipper
 housekeeping: it removes clean local implementation worktrees and merged local
 branches when safe. Missing worktree or branch is a successful no-op.
 

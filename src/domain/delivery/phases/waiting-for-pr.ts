@@ -4,7 +4,7 @@ export const waitingForPrPhase: DeliveryPhaseDefinition = {
   phase: "waiting_for_pr",
   preChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
-      return transition("sync", "pull request is merged");
+      return transition("sync_main", "pull request is merged");
     }
 
     return evidence.hasOpenPullRequest
@@ -16,7 +16,7 @@ export const waitingForPrPhase: DeliveryPhaseDefinition = {
   },
   postChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
-      return transition("sync", "pull request is merged");
+      return transition("sync_main", "pull request is merged");
     }
 
     return evidence.hasOpenPullRequest

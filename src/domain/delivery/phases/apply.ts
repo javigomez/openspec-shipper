@@ -1,10 +1,10 @@
 import { execute, ready, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
 export const applyPhase: DeliveryPhaseDefinition = {
-  phase: "apply",
+  phase: "implement",
   preChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
-      return transition("sync", "pull request is merged");
+      return transition("sync_main", "pull request is merged");
     }
 
     if (evidence.hasOpenPullRequest) {
@@ -16,19 +16,19 @@ export const applyPhase: DeliveryPhaseDefinition = {
     }
 
     if (evidence.hasLocalClaim && evidence.tasksComplete) {
-      return transition("ship", "local implementation is complete");
+      return transition("push", "local implementation is complete");
     }
 
     if (!evidence.hasLocalClaim) {
-      return transition("prepare", "no local implementation branch or worktree exists");
+      return transition("prepare_worktree", "no local implementation branch or worktree exists");
     }
 
-    return ready("apply");
+    return ready("implement");
   },
   run() {
-    return execute("apply");
+    return execute("implement");
   },
   postChecks() {
-    return transition("ship", "apply completed");
+    return transition("push", "implementation completed");
   },
 };

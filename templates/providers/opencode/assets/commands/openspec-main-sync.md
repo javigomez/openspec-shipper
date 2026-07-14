@@ -7,7 +7,7 @@ Run one OpenSpec main-sync worker cycle for this repository right now.
 
 Manual command: `/openspec-main-sync`
 
-Treat this command as the OpenCode entrypoint for an orchestrator `sync` queue
+Treat this command as the OpenCode entrypoint for an orchestrator `sync_main` queue
 task.
 
 Goals:

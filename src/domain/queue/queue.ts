@@ -1,8 +1,16 @@
 export type TaskStatus = "pending" | "done" | "blocked";
 
-export type QueueAction = "prepare" | "apply" | "ship" | "sync" | "archive" | "cleanup" | "deliver";
+export type QueueAction = "prepare_worktree" | "implement" | "push" | "sync_main" | "archive" | "cleanup_worktree" | "deliver";
 
-export type DeliverPhase = "prepare" | "apply" | "ship" | "waiting_for_pr" | "waiting_for_merge" | "sync" | "archive" | "cleanup";
+export type DeliverPhase =
+  | "prepare_worktree"
+  | "implement"
+  | "push"
+  | "waiting_for_pr"
+  | "waiting_for_merge"
+  | "sync_main"
+  | "archive"
+  | "cleanup_worktree";
 
 export type QueueTask = {
   lineIndex: number;
@@ -25,7 +33,16 @@ const COMMENT_PATTERN = /<!--(.*?)-->/;
 const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*_\(\[log]\([^)]+\)\)_)?\s*$/;
 const CHANGE_PREFIX_PATTERN = /^openspec\/changes\//;
 const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const DELIVER_PHASES: DeliverPhase[] = ["prepare", "apply", "ship", "waiting_for_pr", "waiting_for_merge", "sync", "archive", "cleanup"];
+const DELIVER_PHASES: DeliverPhase[] = [
+  "prepare_worktree",
+  "implement",
+  "push",
+  "waiting_for_pr",
+  "waiting_for_merge",
+  "sync_main",
+  "archive",
+  "cleanup_worktree",
+];
 export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 
 export function parseQueue(content: string): QueueParseResult {
@@ -73,7 +90,7 @@ export function parseTaskCommand(command: string): ParseTaskCommandResult {
     return { ok: false, error: "empty queue task" };
   }
 
-  if (action === "prepare" || action === "apply" || action === "deliver") {
+  if (action === "prepare_worktree" || action === "prepare" || action === "implement" || action === "apply" || action === "deliver") {
     if (parts.length !== 2) {
       return { ok: false, error: `\`${action}\` tasks must be \`${action} <change-name>\`` };
     }
@@ -83,21 +100,46 @@ export function parseTaskCommand(command: string): ParseTaskCommandResult {
       return { ok: false, error: `\`${action}\` change must be a kebab-case OpenSpec change name` };
     }
 
-    return { ok: true, task: { action, change } };
+    return { ok: true, task: { action: normalizeQueueAction(action), change } };
   }
 
-  if (action === "ship" || action === "sync" || action === "archive" || action === "cleanup") {
+  if (
+    action === "push" ||
+    action === "ship" ||
+    action === "sync_main" ||
+    action === "sync" ||
+    action === "archive" ||
+    action === "cleanup_worktree" ||
+    action === "cleanup"
+  ) {
     if (parts.length !== 1) {
       return { ok: false, error: `\`${action}\` tasks do not accept arguments` };
     }
 
-    return { ok: true, task: { action } };
+    return { ok: true, task: { action: normalizeQueueAction(action) } };
   }
 
   return {
     ok: false,
-    error: `unknown task action \`${action}\`; expected prepare, apply, ship, sync, archive, or cleanup`,
+    error: `unknown task action \`${action}\`; expected prepare_worktree, implement, push, sync_main, archive, or cleanup_worktree`,
   };
+}
+
+function normalizeQueueAction(action: string): QueueAction {
+  switch (action) {
+    case "prepare":
+      return "prepare_worktree";
+    case "apply":
+      return "implement";
+    case "ship":
+      return "push";
+    case "sync":
+      return "sync_main";
+    case "cleanup":
+      return "cleanup_worktree";
+    default:
+      return action as QueueAction;
+  }
 }
 
 export function normalizeChangeName(value: string): string | undefined {
@@ -136,17 +178,17 @@ export function openCodeCommandName(task: QueueTask): string {
   const action = task.action === "deliver" ? deliverPhase(task) : task.action;
 
   switch (action) {
-    case "prepare":
+    case "prepare_worktree":
       return "openspec-prepare-worktree";
-    case "apply":
+    case "implement":
       return "openspec-apply-worktree";
-    case "ship":
+    case "push":
       return "openspec-ship-worktree";
-    case "sync":
+    case "sync_main":
       return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
-    case "cleanup":
+    case "cleanup_worktree":
       return "openspec-cleanup-worktree";
     case "waiting_for_pr":
       return "openspec-main-sync";
@@ -239,7 +281,7 @@ export function advanceDeliverTask(
   }
 
   const phase = deliverPhase(task);
-  if (phase === "cleanup") {
+  if (phase === "cleanup_worktree") {
     return markTask(lines, task, "done", details);
   }
 
@@ -309,7 +351,7 @@ export function removeRetryHintsForUnblockedTasks(content: string): string {
 }
 
 export function deliverPhase(task: QueueTask): DeliverPhase {
-  return task.phase ?? "prepare";
+  return task.phase ?? "prepare_worktree";
 }
 
 export function detectFailureSignal(output: string): string | undefined {
@@ -348,8 +390,9 @@ function parseTaskMetadata(value: string): Pick<QueueTask, "phase" | "dependsOn"
       continue;
     }
 
-    if (key === "phase" && isDeliverPhase(rawValue)) {
-      metadata.phase = rawValue;
+    const phase = normalizeDeliverPhase(rawValue);
+    if (key === "phase" && phase) {
+      metadata.phase = phase;
     }
 
     if (key === "depends_on") {
@@ -378,7 +421,7 @@ function taskIsRunnable(task: QueueTask, tasks: QueueTask[]): boolean {
 }
 
 export function commandAcceptsChangeArgument(task: QueueTask): boolean {
-  if (task.action === "prepare" || task.action === "apply") {
+  if (task.action === "prepare_worktree" || task.action === "implement") {
     return true;
   }
 
@@ -386,11 +429,24 @@ export function commandAcceptsChangeArgument(task: QueueTask): boolean {
     return false;
   }
 
-  return !["prepare", "sync", "waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
+  return !["prepare_worktree", "sync_main", "waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
 }
 
-function isDeliverPhase(value: string): value is DeliverPhase {
-  return DELIVER_PHASES.includes(value as DeliverPhase);
+function normalizeDeliverPhase(value: string): DeliverPhase | undefined {
+  switch (value) {
+    case "prepare":
+      return "prepare_worktree";
+    case "apply":
+      return "implement";
+    case "ship":
+      return "push";
+    case "sync":
+      return "sync_main";
+    case "cleanup":
+      return "cleanup_worktree";
+    default:
+      return DELIVER_PHASES.includes(value as DeliverPhase) ? (value as DeliverPhase) : undefined;
+  }
 }
 
 function formatTaskLine(

@@ -9,7 +9,7 @@ Manual command: `/openspec-cleanup-worktree`
 
 Arguments: `$ARGUMENTS`
 
-Treat this command as the OpenCode entrypoint for an orchestrator `cleanup`
+Treat this command as the OpenCode entrypoint for an orchestrator `cleanup_worktree`
 queue task.
 
 Goals:

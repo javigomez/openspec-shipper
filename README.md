@@ -31,7 +31,7 @@ becomes `sync` after a PR has been merged.
 Before running the queue, `main` should be clean except for ignored shipper
 runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
 `worktrees/`. `doctor` fails when it sees non-runtime changes because the native
-`prepare` phase creates feature worktrees from the main checkout.
+`prepare_worktree` phase creates feature worktrees from the main checkout.
 
 ## Commands
 
@@ -190,7 +190,7 @@ Queue format:
 `deliver` advances through:
 
 ```text
-prepare -> apply -> ship -> waiting_for_pr -> waiting_for_merge -> sync -> archive -> cleanup
+prepare_worktree -> implement -> push -> waiting_for_pr -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
 ```
 
 ```mermaid
@@ -199,18 +199,16 @@ sequenceDiagram
   participant Shipper as openspec-shipper
   participant OpenSpec
 
-  Human->>OpenSpec: Create or review change
+  Human->>OpenSpec: Create change
   Human->>Shipper: Add change to queue.md
-  Shipper->>Shipper: Reconcile queue from repo evidence
   Shipper->>Shipper: prepare worktree and branch
   Shipper->>Shipper: apply implementation in worktree
-  Shipper->>OpenSpec: validate change
-  Shipper->>Shipper: ship branch and wait for PR
+  Shipper->>Shipper: Push branch and wait for PR
   Human->>Shipper: Review and merge PR
   Shipper->>Shipper: sync main
   Shipper->>OpenSpec: archive merged change
   Shipper->>Shipper: cleanup local worktree and branch
-  Shipper-->>Human: Mark task done
+  Shipper-->>Human: Mark task done and start next task
 
   alt any phase blocks
     Shipper-->>Human: Write blocker reason and retry hint
@@ -219,14 +217,14 @@ sequenceDiagram
   end
 ```
 
-`prepare` is native runner logic: it creates or reconnects
+`prepare_worktree` is native runner logic: it creates or reconnects
 `worktrees/<change-name>` and the deterministic implementation branch before
-any AI executor is called. `apply` then spends model tokens only on
+any AI executor is called. `implement` then spends model tokens only on
 implementation inside that prepared workspace.
 
 `waiting_for_merge` is intentionally not runnable. The runner uses `gh` to
-notice when the PR has merged and then reconciles the task to `phase: sync`, so
-the shipper can sync `main`, archive safely, and clean local artifacts.
+notice when the PR has merged and then reconciles the task to `phase: sync_main`, so
+the shipper can synchronize local `main`, archive safely, and clean local artifacts.
 
 ### Reverse State Inference
 
@@ -236,13 +234,13 @@ instead of trusting the phase comment blindly:
 
 ```text
 archived and locally clean -> done
-archived but local work remains -> cleanup
-merged PR -> sync
+archived but local work remains -> cleanup_worktree
+merged PR -> sync_main
 open PR -> waiting_for_merge
 remote branch -> waiting_for_pr
-local work complete -> ship
-local work incomplete -> apply
-active change without local work -> prepare
+local work complete -> push
+local work incomplete -> implement
+active change without local work -> prepare_worktree
 nothing found -> blocked
 ```
 
@@ -270,7 +268,7 @@ it to the correct phase.
 
 The `archive` phase is OpenSpec-native: it validates, runs
 `openspec archive <change-name> -y`, commits, and pushes the archive/spec diff on
-`main`. The `cleanup` phase is OpenSpec Shipper housekeeping: it removes a clean
+`main`. The `cleanup_worktree` phase is OpenSpec Shipper housekeeping: it removes a clean
 local `worktrees/<change-name>` worktree and deletes the merged local branch with
 `git branch -d` when safe. If there is nothing left to clean, cleanup succeeds as
 a no-op.

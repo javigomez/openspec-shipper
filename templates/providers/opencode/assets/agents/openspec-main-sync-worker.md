@@ -11,7 +11,7 @@ OpenCode invocation. Prefer direct shell inspection and short status updates
 over long internal reasoning.
 
 Follow `AGENTS.md` and `.opencode/rules/openspec-git-workflow.md`. This agent
-contains the guardrails for the orchestrator `sync` queue task.
+contains the guardrails for the orchestrator `sync_main` queue task.
 
 ## First Response
 

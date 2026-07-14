@@ -26,7 +26,7 @@ such as `.opencode/`.
 
 `gh` is used by the runner to reconcile PR state before spending tokens. That is
 how `waiting_for_pr` becomes `waiting_for_merge`, and how `waiting_for_merge`
-becomes `sync` after a PR has been merged.
+becomes `sync_main` after a PR has been merged.
 
 Before running the queue, `main` should be clean except for ignored shipper
 runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
@@ -155,7 +155,7 @@ belongs to the application. A repo-local usage guide is installed at
 `.openspec-shipper/README.md`.
 
 Commit the installed project assets on `main` before running the queue. The
-native `prepare` phase creates feature worktrees from `HEAD`; if `main` is dirty after
+native `prepare_worktree` phase creates feature worktrees from `HEAD`; if `main` is dirty after
 `init`, the new worktree would miss the freshly installed scripts, workflows,
 provider commands, and package changes. Local queue state remains ignored.
 

@@ -194,67 +194,27 @@ prepare -> apply -> ship -> waiting_for_pr -> waiting_for_merge -> sync -> archi
 ```
 
 ```mermaid
-flowchart TD
-  subgraph Human["Human"]
-    HCreate["Create or review an OpenSpec change"]
-    HQueue["Add change to queue.md"]
-    HMerge["Review and merge the PR"]
-    HRetry["Fix blocker and change [!] back to [ ]"]
-  end
+eventmodeling
 
-  subgraph Shipper["openspec-shipper"]
-    SRun["queue run / queue next"]
-    SReconcile["Reconcile queue.md from repo evidence"]
-    SPrepare["prepare: create or reconnect worktree + branch"]
-    SApply["apply: ask provider to implement in worktree"]
-    SShip["ship: validate, commit checks, push branch"]
-    SWaitPr["waiting_for_pr: observe auto-PR creation"]
-    SWaitMerge["waiting_for_merge: observe PR merge"]
-    SSync["sync: update local main"]
-    SArchive["archive: run OpenSpec archive"]
-    SCleanup["cleanup: remove safe local worktree + branch"]
-    SDone["done"]
-    SBlocked["blocked: write reason + retry hint"]
-  end
-
-  subgraph OpenSpec["OpenSpec"]
-    OChange["openspec/changes/change-name"]
-    OValidate["openspec validate"]
-    OArchive["openspec/changes/archive"]
-  end
-
-  HCreate --> OChange
-  HQueue --> SRun
-  SRun --> SReconcile
-  SReconcile -->|"active change, no local work"| SPrepare
-  SReconcile -->|"local work exists"| SApply
-  SReconcile -->|"local tasks complete"| SShip
-  SReconcile -->|"remote branch exists"| SWaitPr
-  SReconcile -->|"open PR exists"| SWaitMerge
-  SReconcile -->|"merged PR exists"| SSync
-  SReconcile -->|"archived change exists"| SCleanup
-  SReconcile -->|"archived and clean"| SDone
-
-  SPrepare --> SApply
-  SApply --> OValidate
-  OValidate --> SShip
-  SShip --> SWaitPr
-  SWaitPr --> SWaitMerge
-  HMerge --> SWaitMerge
-  SWaitMerge --> SSync
-  SSync --> SArchive
-  SArchive --> OArchive
-  OArchive --> SCleanup
-  SCleanup --> SDone
-
-  SPrepare -. failure .-> SBlocked
-  SApply -. failure .-> SBlocked
-  SShip -. failure .-> SBlocked
-  SSync -. failure .-> SBlocked
-  SArchive -. failure .-> SBlocked
-  SCleanup -. failure .-> SBlocked
-  SBlocked --> HRetry
-  HRetry --> SRun
+tf 01 pcr Human.CreateOrReviewOpenSpecChange
+tf 02 pcr OpenSpec.ActiveChangeInOpenSpecChanges
+tf 03 pcr Human.AddChangeToQueue
+tf 04 pcr OpenSpecShipper.ReconcileQueueFromRepoEvidence
+tf 05 pcr OpenSpecShipper.PrepareWorktreeAndBranch
+tf 06 pcr OpenSpecShipper.ApplyImplementationInWorktree
+tf 07 pcr OpenSpec.ValidateChange
+tf 08 pcr OpenSpecShipper.ShipPushBranch
+tf 09 pcr OpenSpecShipper.WaitingForPr
+tf 10 pcr OpenSpecShipper.WaitingForMerge
+tf 11 pcr Human.ReviewAndMergePr
+tf 12 pcr OpenSpecShipper.SyncMain
+tf 13 pcr OpenSpecShipper.ArchiveMergedChange
+tf 14 pcr OpenSpec.ArchivedChange
+tf 15 pcr OpenSpecShipper.CleanupLocalWorktreeAndBranch
+tf 16 pcr OpenSpecShipper.Done
+rf 17 pcr OpenSpecShipper.BlockedWithRetryHint
+tf 18 pcr Human.FixBlockerAndMarkPending
+tf 19 pcr OpenSpecShipper.ReconcileQueueFromRepoEvidence
 ```
 
 `prepare` is native runner logic: it creates or reconnects

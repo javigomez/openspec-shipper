@@ -194,27 +194,29 @@ prepare -> apply -> ship -> waiting_for_pr -> waiting_for_merge -> sync -> archi
 ```
 
 ```mermaid
-eventmodeling
+sequenceDiagram
+  participant Human
+  participant Shipper as openspec-shipper
+  participant OpenSpec
 
-tf 01 pcr Human.CreateOrReviewOpenSpecChange
-tf 02 pcr OpenSpec.ActiveChangeInOpenSpecChanges
-tf 03 pcr Human.AddChangeToQueue
-tf 04 pcr OpenSpecShipper.ReconcileQueueFromRepoEvidence
-tf 05 pcr OpenSpecShipper.PrepareWorktreeAndBranch
-tf 06 pcr OpenSpecShipper.ApplyImplementationInWorktree
-tf 07 pcr OpenSpec.ValidateChange
-tf 08 pcr OpenSpecShipper.ShipPushBranch
-tf 09 pcr OpenSpecShipper.WaitingForPr
-tf 10 pcr OpenSpecShipper.WaitingForMerge
-tf 11 pcr Human.ReviewAndMergePr
-tf 12 pcr OpenSpecShipper.SyncMain
-tf 13 pcr OpenSpecShipper.ArchiveMergedChange
-tf 14 pcr OpenSpec.ArchivedChange
-tf 15 pcr OpenSpecShipper.CleanupLocalWorktreeAndBranch
-tf 16 pcr OpenSpecShipper.Done
-rf 17 pcr OpenSpecShipper.BlockedWithRetryHint
-tf 18 pcr Human.FixBlockerAndMarkPending
-tf 19 pcr OpenSpecShipper.ReconcileQueueFromRepoEvidence
+  Human->>OpenSpec: Create or review change
+  Human->>Shipper: Add change to queue.md
+  Shipper->>Shipper: Reconcile queue from repo evidence
+  Shipper->>Shipper: prepare worktree and branch
+  Shipper->>Shipper: apply implementation in worktree
+  Shipper->>OpenSpec: validate change
+  Shipper->>Shipper: ship branch and wait for PR
+  Human->>Shipper: Review and merge PR
+  Shipper->>Shipper: sync main
+  Shipper->>OpenSpec: archive merged change
+  Shipper->>Shipper: cleanup local worktree and branch
+  Shipper-->>Human: Mark task done
+
+  alt any phase blocks
+    Shipper-->>Human: Write blocker reason and retry hint
+    Human->>Shipper: Fix cause and change [!] back to [ ]
+    Shipper->>Shipper: Reconcile again before retrying
+  end
 ```
 
 `prepare` is native runner logic: it creates or reconnects

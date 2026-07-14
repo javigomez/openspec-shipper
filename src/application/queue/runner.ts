@@ -16,6 +16,7 @@ import {
   parseQueue,
   removeRetryHintsForUnblockedTasks,
   taskSlug,
+  type DeliverPhase,
   type QueueTask,
 } from "../../domain/queue/queue.js";
 import { reconcileDeliveryTask } from "../../domain/delivery/reconcile.js";
@@ -754,19 +755,28 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const pullRequestDetector = config.pullRequestDetector ?? detectOpenPullRequest;
   const mergedPullRequestDetector = config.mergedPullRequestDetector ?? detectMergedPullRequest;
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
+  const declaredPhase = deliverPhase(task);
 
-  const [hasActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, hasRemoteBranch, tasksComplete] = await Promise.all([
+  const [hasActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete] = await Promise.all([
     activeChangeDetector(config.projectDir, changeName),
     archivedChangeDetector(config.projectDir, changeName),
     localClaimDetector(config.projectDir, changeName),
     localClaimPublishedDetector(config.projectDir, changeName, branch),
-    remoteBranchDetector(config.projectDir, branch),
     tasksCompleteDetector(config.projectDir, changeName),
   ]);
-  const declaredPhase = deliverPhase(task);
+
+  const shouldCheckRemoteBranch =
+    phasePrecedesForEvidence(declaredPhase, "waiting_for_pr") ||
+    (declaredPhase === "push" && hasLocalClaim && tasksComplete && localClaimPublished);
+  const hasRemoteBranch = shouldCheckRemoteBranch ? await remoteBranchDetector(config.projectDir, branch) : false;
+
+  const shouldCheckOpenPullRequest =
+    phasePrecedesForEvidence(declaredPhase, "waiting_for_merge") ||
+    (declaredPhase === "push" && hasRemoteBranch);
+  const shouldCheckMergedPullRequest = phasePrecedesForEvidence(declaredPhase, "sync_main");
   const [openPullRequest, mergedPullRequest] = await Promise.all([
-    pullRequestDetector(config.projectDir, branch),
-    mergedPullRequestDetector(config.projectDir, branch),
+    shouldCheckOpenPullRequest ? pullRequestDetector(config.projectDir, branch) : Promise.resolve(undefined),
+    shouldCheckMergedPullRequest ? mergedPullRequestDetector(config.projectDir, branch) : Promise.resolve(undefined),
   ]);
 
   return {
@@ -782,6 +792,31 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     hasMergedPullRequest: Boolean(mergedPullRequest),
     tasksComplete,
   };
+}
+
+function phasePrecedesForEvidence(left: DeliverPhase, right: DeliverPhase): boolean {
+  return deliveryPhaseRank(left) < deliveryPhaseRank(right);
+}
+
+function deliveryPhaseRank(phase: DeliverPhase): number {
+  switch (phase) {
+    case "prepare_worktree":
+      return 0;
+    case "implement":
+      return 1;
+    case "push":
+      return 2;
+    case "waiting_for_pr":
+      return 3;
+    case "waiting_for_merge":
+      return 4;
+    case "sync_main":
+      return 5;
+    case "archive":
+      return 6;
+    case "cleanup_worktree":
+      return 7;
+  }
 }
 
 async function loadQueue(queuePath: string) {

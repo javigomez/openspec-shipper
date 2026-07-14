@@ -595,6 +595,7 @@ describe("runner", () => {
 
   test("does not regress archive back to sync when the PR is already merged", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+    let remoteChecks = 0;
 
     const exitCode = await runQueue("dry-run", {
       ...harness.config,
@@ -602,13 +603,22 @@ describe("runner", () => {
       localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
       localClaimPublishedDetector: async () => true,
       tasksCompleteDetector: async () => true,
-      remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
-      pullRequestDetector: async () => undefined,
-      mergedPullRequestDetector: async (_projectDir, branch) =>
-        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+      remoteBranchDetector: async () => {
+        remoteChecks += 1;
+        return true;
+      },
+      pullRequestDetector: async () => {
+        remoteChecks += 1;
+        return undefined;
+      },
+      mergedPullRequestDetector: async () => {
+        remoteChecks += 1;
+        return "https://github.com/example/project/pull/1";
+      },
     });
 
     expect(exitCode).toBe(0);
+    expect(remoteChecks).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: archive");
     expect(queue).not.toContain("phase: sync_main");

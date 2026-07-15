@@ -184,10 +184,10 @@ Queue format:
 ```md
 - [ ] deliver add-name-greeting
 - [ ] deliver add-spanish-greeting <!-- depends_on: add-name-greeting -->
-- [ ] sync_main
 ```
 
-`deliver` advances through:
+`deliver` is the only public queue action. OpenSpec Shipper stores its current
+phase as metadata on that task and advances it through:
 
 ```text
 prepare_worktree -> implement -> push -> waiting_for_pr -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree

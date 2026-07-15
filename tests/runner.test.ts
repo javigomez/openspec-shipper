@@ -106,7 +106,9 @@ describe("runner", () => {
   });
 
   test("does not execute when the queue has a blocked task", async () => {
-    const harness = await createHarness("- [!] ship <!-- blocked: earlier -->\n- [ ] sync\n");
+    const harness = await createHarness(
+      "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: sync_main -->\n",
+    );
     let called = false;
 
     const exitCode = await runQueue("next", {
@@ -122,7 +124,9 @@ describe("runner", () => {
   });
 
   test("skips existing blocked tasks within the configured limit", async () => {
-    const harness = await createHarness("- [!] ship <!-- blocked: earlier -->\n- [ ] sync\n");
+    const harness = await createHarness(
+      "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: sync_main -->\n",
+    );
     let receivedArgs: string[] = [];
 
     const exitCode = await runQueue("next", {
@@ -137,13 +141,18 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     expect(receivedArgs).toEqual(["run", "--command", "openspec-main-sync"]);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] ship");
-    expect(queue).toContain("- [x] sync");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("- [ ] deliver add-spanish-greeting");
+    expect(queue).toContain("phase: archive");
   });
 
   test("pauses when blocked tasks exceed the configured limit", async () => {
     const harness = await createHarness(
-      "- [!] ship <!-- blocked: earlier -->\n- [!] archive <!-- blocked: earlier -->\n- [ ] sync\n",
+      [
+        "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->",
+        "- [!] deliver add-spanish-greeting <!-- phase: archive; blocked: earlier -->",
+        "- [ ] deliver add-shouting-greeting <!-- phase: sync_main -->",
+      ].join("\n"),
     );
     let called = false;
 
@@ -161,7 +170,7 @@ describe("runner", () => {
   });
 
   test("does not execute when there are no pending tasks", async () => {
-    const harness = await createHarness("- [x] ship\n");
+    const harness = await createHarness("- [x] deliver add-name-greeting <!-- phase: cleanup_worktree -->\n");
     let called = false;
 
     const exitCode = await runQueue("next", {
@@ -176,8 +185,10 @@ describe("runner", () => {
     expect(called).toBe(false);
   });
 
-  test("marks the first pending task done on clean success", async () => {
-    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+  test("advances the first pending deliver task on clean success", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n- [ ] deliver add-spanish-greeting <!-- phase: archive -->\n",
+    );
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -186,12 +197,13 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [x] sync");
-    expect(queue).toContain("- [ ] archive");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: archive");
+    expect(queue).toContain("- [ ] deliver add-spanish-greeting");
   });
 
   test("passes the configured model to opencode", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
     let receivedArgs: string[] = [];
 
     const exitCode = await runQueue("next", {
@@ -214,11 +226,16 @@ describe("runner", () => {
   });
 
   test("passes the configured model to targeted apply commands", async () => {
-    const harness = await createHarness("- [ ] apply test-20-migrate-notebook-access-button-rntl\n");
+    const harness = await createHarness(
+      "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: implement -->\n",
+    );
     let receivedArgs: string[] = [];
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      localClaimDetector: async (_projectDir, changeName) =>
+        changeName === "test-20-migrate-notebook-access-button-rntl",
+      tasksCompleteDetector: async () => false,
       opencodeModel: "opencode-go/deepseek-v4-pro",
       executor: async (_command, args) => {
         receivedArgs = args;
@@ -287,7 +304,7 @@ describe("runner", () => {
     const harness = await createHarness("");
     const queuePath = join(harness.config.stateDir, "queue.md");
     await mkdir(harness.config.stateDir, { recursive: true });
-    await writeFile(queuePath, "- [ ] sync\n");
+    await writeFile(queuePath, "- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -298,8 +315,8 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(queuePath, "utf8");
-    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-sync_main.log");
-    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-sync_main.log))_");
+    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-deliver-sync_main-add-name-greeting.log");
+    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-deliver-sync_main-add-name-greeting.log))_");
     expect(queue).not.toContain("../../.openspec-shipper");
   });
 
@@ -759,7 +776,7 @@ describe("runner", () => {
   });
 
   test("passes OpenCode log flags before the command", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
     let receivedArgs: string[] = [];
 
     const exitCode = await runQueue("next", {
@@ -787,7 +804,7 @@ describe("runner", () => {
   });
 
   test("passes OpenCode stats options to the executor when enabled", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
     let receivedOptions: Parameters<Executor>[2] | undefined;
 
     const exitCode = await runQueue("next", {
@@ -816,30 +833,32 @@ describe("runner", () => {
   });
 
   test("marks the first pending task blocked on non-zero exit", async () => {
-    const harness = await createHarness("- [ ] ship\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       executor: async () => ({ exitCode: 1, output: "failed" }),
     });
 
     expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("command exited with code 1");
   });
 
   test("marks the first pending task blocked when output contains an error signal", async () => {
-    const harness = await createHarness("- [ ] ship\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       executor: async () => ({ exitCode: 0, output: "Unexpected server error" }),
     });
 
     expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("unexpected server error");
   });
 
@@ -884,7 +903,7 @@ describe("runner", () => {
   });
 
   test("marks the first pending task blocked when the executor cannot start", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -895,16 +914,17 @@ describe("runner", () => {
 
     expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] sync");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("spawn failed");
   });
 
   test("blocks before execution when the project command file is missing", async () => {
-    const harness = await createHarness("- [ ] ship\n", { createCommandFiles: false });
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n", { createCommandFiles: false });
     let called = false;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       executor: async () => {
         called = true;
         return { exitCode: 0, output: "done" };
@@ -914,7 +934,7 @@ describe("runner", () => {
     expect(exitCode).toBe(1);
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("OpenCode command file not found");
   });
 
@@ -930,7 +950,7 @@ describe("runner", () => {
   });
 
   test("blocks ship before execution when git remote origin is missing", async () => {
-    const harness = await createHarness("- [ ] ship\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let called = false;
 
     const exitCode = await runQueue("next", {
@@ -946,7 +966,7 @@ describe("runner", () => {
     expect(exitCode).toBe(1);
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] ship");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("Git remote origin is not configured");
   });
 
@@ -1040,11 +1060,12 @@ describe("runner", () => {
   });
 
   test("next mode marks the task as checking before detecting active opencode", async () => {
-    const harness = await createHarness("- [ ] ship\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let called = false;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       processDetector: async () => ["12345"],
       executor: async () => {
         called = true;
@@ -1055,12 +1076,17 @@ describe("runner", () => {
     expect(exitCode).toBe(1);
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [ ] ship <!-- checking: 2026-06-17T12:00:00.000Z -->");
-    expect(queue).toContain("![task checking](https://img.shields.io/badge/task-checking-yellow)");
+    expect(queue).toContain("- [ ] deliver add-name-greeting <!-- phase: push; checking: 2026-06-17T12:00:00.000Z -->");
+    expect(queue).toContain("![push checking](https://img.shields.io/badge/push-checking-yellow)");
   });
 
   test("run mode processes pending tasks until the queue is complete", async () => {
-    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+    const harness = await createHarness(
+      [
+        "- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->",
+        "- [ ] deliver add-spanish-greeting <!-- phase: cleanup_worktree -->",
+      ].join("\n"),
+    );
     const calls: string[] = [];
     const sleeps: number[] = [];
 
@@ -1079,12 +1105,17 @@ describe("runner", () => {
     expect(calls).toHaveLength(2);
     expect(sleeps).toEqual([]);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [x] sync");
-    expect(queue).toContain("- [x] archive");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
+    expect(queue).toContain("- [x] deliver add-spanish-greeting");
   });
 
   test("run mode continues after the first blocked task by default", async () => {
-    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+    const harness = await createHarness(
+      [
+        "- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->",
+        "- [ ] deliver add-spanish-greeting <!-- phase: cleanup_worktree -->",
+      ].join("\n"),
+    );
     let calls = 0;
 
     const exitCode = await runQueue("run", {
@@ -1099,12 +1130,17 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     expect(calls).toBe(2);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] sync");
-    expect(queue).toContain("- [!] archive");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("- [!] deliver add-spanish-greeting");
   });
 
   test("run mode continues after blocked tasks within the configured limit", async () => {
-    const harness = await createHarness("- [ ] sync\n- [ ] archive\n");
+    const harness = await createHarness(
+      [
+        "- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->",
+        "- [ ] deliver add-spanish-greeting <!-- phase: cleanup_worktree -->",
+      ].join("\n"),
+    );
     let calls = 0;
 
     const exitCode = await runQueue("run", {
@@ -1119,12 +1155,12 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     expect(calls).toBe(2);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] sync");
-    expect(queue).toContain("- [x] archive");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("- [x] deliver add-spanish-greeting");
   });
 
   test("run mode waits instead of blocking when opencode is already active", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->\n");
     const sleeps: number[] = [];
     let checks = 0;
     let calls = 0;
@@ -1149,11 +1185,11 @@ describe("runner", () => {
     expect(calls).toBe(1);
     expect(sleeps).toEqual([5]);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [x] sync");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
   });
 
   test("stop mode requests a safe queue stop", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
 
     const exitCode = await runQueue("stop", harness.config);
 
@@ -1163,7 +1199,7 @@ describe("runner", () => {
   });
 
   test("run mode exits while waiting when stop is requested", async () => {
-    const harness = await createHarness("- [ ] sync\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
     const sleeps: number[] = [];
     let called = false;
 
@@ -1185,8 +1221,8 @@ describe("runner", () => {
     expect(called).toBe(false);
     expect(sleeps).toEqual([1_000]);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [ ] sync <!-- checking: 2026-06-17T12:00:00.000Z -->");
-    expect(queue).toContain("![task checking](https://img.shields.io/badge/task-checking-yellow)");
+    expect(queue).toContain("- [ ] deliver add-name-greeting <!-- phase: sync_main; checking: 2026-06-17T12:00:00.000Z -->");
+    expect(queue).toContain("![sync_main checking](https://img.shields.io/badge/sync_main-checking-yellow)");
   });
 });
 

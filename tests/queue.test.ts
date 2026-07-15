@@ -21,25 +21,33 @@ describe("queue parser", () => {
   test("reads pending, done, and blocked tasks", () => {
     const result = parseQueue(
       [
-        "- [ ] apply openspec/changes/test-18-migrate-cover-background-rntl",
-        "- [x] ship",
-        "- [!] archive <!-- blocked: earlier -->",
+        "- [ ] deliver openspec/changes/test-18-migrate-cover-background-rntl",
+        "- [x] deliver test-19-migrate-back-to-console-button-rntl <!-- phase: cleanup_worktree -->",
+        "- [!] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: archive; blocked: earlier -->",
       ].join("\n"),
     );
 
     expect(result.errors).toEqual([]);
     expect(result.tasks.map((task) => task.status)).toEqual(["pending", "done", "blocked"]);
     expect(findFirstRunnableTask(result.tasks)?.rawCommand).toBe(
-      "apply openspec/changes/test-18-migrate-cover-background-rntl",
+      "deliver openspec/changes/test-18-migrate-cover-background-rntl",
     );
     expect(findBlockedTasks(result.tasks)).toHaveLength(1);
   });
 
-  test("rejects unknown commands and typos", () => {
-    const result = parseQueue("- [ ] opencode run /openspec-apply-wortree test-18\n");
+  test("rejects unknown commands, legacy queue actions, and typos", () => {
+    const result = parseQueue(
+      [
+        "- [ ] opencode run /openspec-apply-wortree test-18",
+        "- [ ] ship",
+        "- [ ] apply add-name-greeting",
+      ].join("\n"),
+    );
 
     expect(result.tasks).toEqual([]);
     expect(result.errors[0]).toContain("unknown task action `opencode`");
+    expect(result.errors[1]).toContain("unknown task action `ship`; expected deliver <change-name>");
+    expect(result.errors[2]).toContain("unknown task action `apply`; expected deliver <change-name>");
   });
 
   test("normalizes OpenSpec change names", () => {
@@ -53,7 +61,7 @@ describe("queue parser", () => {
   });
 
   test("builds opencode arguments for a targeted apply", () => {
-    const result = parseQueue("- [ ] apply test-18-migrate-cover-background-rntl\n");
+    const result = parseQueue("- [ ] deliver test-18-migrate-cover-background-rntl <!-- phase: implement -->\n");
     const task = result.tasks[0]!;
 
     expect(openCodeCommandName(task)).toBe("openspec-apply-worktree");
@@ -84,14 +92,6 @@ describe("queue parser", () => {
       "openspec-ship-worktree",
       "test-20-migrate-notebook-access-button-rntl",
     ]);
-  });
-
-  test("normalizes legacy phase names", () => {
-    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: ship -->\n");
-    const task = result.tasks[0]!;
-
-    expect(result.errors).toEqual([]);
-    expect(deliverPhase(task)).toBe("push");
   });
 
   test("advances deliver phases before marking done", () => {

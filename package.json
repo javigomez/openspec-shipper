@@ -25,7 +25,7 @@
     "target:init": "bun run index.ts init",
     "target:update": "bun run index.ts update",
     "target:doctor": "bun run index.ts doctor",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
     "release-patch": "node scripts/release-patch.mjs",

@@ -56,6 +56,46 @@ describe("target setup", () => {
     expect(packageJson.devDependencies["@fission-ai/openspec"]).toBe("^1.2.0");
   });
 
+  test("installs Codex provider assets without installing OpenCode assets", async () => {
+    const harness = await createHarness();
+
+    const result = await installShipperKit({
+      rootDir: harness.rootDir,
+      projectDir: harness.projectDir,
+      profile: "node-npm",
+      provider: "codex-cli",
+    });
+
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/workflow.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/prompts/implement.md"))).toBe(true);
+    expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/codex/prompts/push.md"), "utf8")).toContain(
+      "OpenSpec Shipper Codex Phase: push",
+    );
+    const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
+    expect(shipperConfig.executor.provider).toBe("codex-cli");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
+  });
+
+  test("update preserves the already configured provider when --provider is omitted", async () => {
+    const harness = await createHarness();
+
+    await installShipperKit({
+      rootDir: harness.rootDir,
+      projectDir: harness.projectDir,
+      provider: "codex-cli",
+    });
+    const result = await installShipperKit({
+      rootDir: harness.rootDir,
+      projectDir: harness.projectDir,
+    });
+
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/workflow.md"))).toBe(true);
+    expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
+    const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
+    expect(shipperConfig.executor.provider).toBe("codex-cli");
+  });
+
   test("does not overwrite target files that drifted after installation", async () => {
     const harness = await createHarness();
     const workflowPath = join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml");

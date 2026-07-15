@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { DeliverPhase } from "../../../domain/queue/queue.js";
 import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
 
 export const codexCliProvider: ExecutorProvider = {
@@ -13,8 +16,8 @@ export const codexCliProvider: ExecutorProvider = {
       input.projectDir,
       "--sandbox",
       "workspace-write",
-      "--ask-for-approval",
-      "never",
+      "-c",
+      'approval_policy="never"',
     ];
 
     if (input.config.executor.codex.model) {
@@ -30,7 +33,12 @@ export const codexCliProvider: ExecutorProvider = {
     };
   },
   detectFailureSignal(output: string): string | undefined {
-    if (/blocked|cannot continue without|permission requested|approval/i.test(output)) {
+    const blocked = output.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
+    if (blocked?.[1]) {
+      return `Worker reported a blocker: ${blocked[1].trim()}`;
+    }
+
+    if (/\b(permission requested|approval required|cannot continue without)\b/i.test(output)) {
       return "Codex CLI reported a blocker";
     }
 
@@ -39,12 +47,64 @@ export const codexCliProvider: ExecutorProvider = {
 };
 
 function buildCodexPrompt(input: BuildCommandInput): string {
-  const change = input.task.change ? ` for OpenSpec change ${input.task.change}` : "";
-  return [
-    `Run the OpenSpec ${input.phase} phase${change}.`,
-    "Follow AGENTS.md and the repository OpenSpec workflow.",
-    "Use main for planning, sync_main, archive, and cleanup_worktree. Use worktrees/<change-name> for implementation.",
-    "Respect .openspec-shipper/config.json safety flags for push and archive.",
-    "Stop and report a clear blocker if you cannot continue safely.",
-  ].join("\n");
+  const prompt = readFileSync(codexPromptPath(input.projectDir, input.phase), "utf8");
+  const workflow = readFileSync(codexWorkflowPath(input.projectDir), "utf8");
+  const changeName = input.task.change ?? "";
+  const branchName = changeName ? `feat/${changeName}` : "";
+  const worktreePath = changeName ? `worktrees/${changeName}` : "";
+  return renderTemplate(
+    [
+      prompt,
+      "",
+      "## Installed Workflow Reference",
+      "",
+      workflow,
+      "",
+      "## Invocation Context",
+      "",
+      `- phase: ${input.phase}`,
+      `- change: ${changeName || "(none)"}`,
+      `- branch: ${branchName || "(none)"}`,
+      `- worktree: ${worktreePath || "(none)"}`,
+      `- projectDir: ${input.projectDir}`,
+    ].join("\n"),
+    {
+      PHASE: input.phase,
+      CHANGE_NAME: changeName,
+      BRANCH_NAME: branchName,
+      WORKTREE_PATH: worktreePath,
+      PROJECT_DIR: input.projectDir,
+    },
+  );
+}
+
+export function codexPromptPath(projectDir: string, phase: DeliverPhase): string {
+  return join(projectDir, ".openspec-shipper", "codex", "prompts", codexPromptFileName(phase));
+}
+
+export function codexWorkflowPath(projectDir: string): string {
+  return join(projectDir, ".openspec-shipper", "codex", "workflow.md");
+}
+
+function codexPromptFileName(phase: DeliverPhase): string {
+  switch (phase) {
+    case "implement":
+      return "implement.md";
+    case "push":
+      return "push.md";
+    case "sync_main":
+      return "sync-main.md";
+    case "archive":
+      return "archive.md";
+    case "cleanup_worktree":
+      return "cleanup-worktree.md";
+    case "prepare_worktree":
+    case "waiting_for_pr":
+    case "waiting_for_merge":
+      return `${phase}.md`;
+  }
+}
+
+function renderTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/{{([A-Z_]+)}}/g, (_match, key: string) => values[key] ?? "");
 }

@@ -1,7 +1,11 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { parseQueue } from "../src/domain/queue/queue";
 import { codexCliProvider } from "../src/infrastructure/providers/codex-cli/provider";
 import { opencodeProvider } from "../src/infrastructure/providers/opencode/provider";
+import { installCodexTemplates } from "../src/application/init/setup";
 
 const config = {
   executor: {
@@ -61,13 +65,15 @@ describe("executor providers", () => {
     expect(command.args.at(-1)).toBe("add-name-greeting");
   });
 
-  test("Codex CLI provider builds an experimental exec command", () => {
+  test("Codex CLI provider builds an experimental exec command from installed prompts", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "shipper-codex-provider-"));
+    await installCodexTemplates({ rootDir: join(import.meta.dir, ".."), projectDir });
     const task = parseQueue("- [ ] deliver add-name-greeting\n").tasks[0]!;
 
     const command = codexCliProvider.buildCommand({
       phase: "implement",
       task,
-      projectDir: "/repo",
+      projectDir,
       config: {
         ...config,
         executor: {
@@ -81,15 +87,24 @@ describe("executor providers", () => {
     expect(command.args.slice(0, 8)).toEqual([
       "exec",
       "-C",
-      "/repo",
+      projectDir,
       "--sandbox",
       "workspace-write",
-      "--ask-for-approval",
-      "never",
+      "-c",
+      'approval_policy="never"',
       "--model",
     ]);
     expect(command.args).toContain("gpt-5.4");
-    expect(command.args.at(-1)).toContain("OpenSpec implement phase");
+    expect(command.args.at(-1)).toContain("OpenSpec Shipper Codex Phase: implement");
+    expect(command.args.at(-1)).toContain("add-name-greeting");
+    expect(command.args.at(-1)).toContain("Installed Workflow Reference");
+  });
+
+  test("Codex CLI provider treats blocked sentinel lines as failures", () => {
+    expect(codexCliProvider.detectFailureSignal("All checks passed\nOPENSPEC_SHIPPER_BLOCKED: missing gh auth")).toBe(
+      "Worker reported a blocker: missing gh auth",
+    );
+    expect(codexCliProvider.detectFailureSignal("approval required for command")).toBe("Codex CLI reported a blocker");
   });
 
   test("OpenCode provider treats missing pull requests as a ship failure", () => {

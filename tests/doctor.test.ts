@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
-import { checkWorkingTreeClean } from "../src/application/doctor/doctor";
+import { checkWorkingTreeClean, runDoctor } from "../src/application/doctor/doctor";
 
 describe("doctor", () => {
   test("fails when the main checkout has non-runtime changes", async () => {
@@ -38,6 +38,34 @@ describe("doctor", () => {
     const check = checkWorkingTreeClean(projectDir);
 
     expect(check.ok).toBe(true);
+  });
+
+  test("checks Codex provider assets instead of OpenCode command files", async () => {
+    const projectDir = await createGitRepo();
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(
+      join(projectDir, ".openspec-shipper/config.json"),
+      `${JSON.stringify({
+        version: 1,
+        profile: "node-npm",
+        baseBranch: "main",
+        packageManager: "npm",
+        executor: {
+          provider: "codex-cli",
+          opencode: { bin: "opencode", model: "opencode-go/deepseek-v4-pro" },
+          codex: { bin: "codex", model: "gpt-5.4" },
+        },
+        github: { autoOpenPr: false, prChecks: false },
+        checks: {},
+        safety: { enablePush: true, enableArchive: true },
+      })}\n`,
+    );
+
+    const checks = await runDoctor(projectDir);
+
+    expect(checks.some((check) => check.name === "codex provider" && check.severity === "warning")).toBe(true);
+    expect(checks.some((check) => check.name === ".openspec-shipper/codex/prompts/implement.md" && !check.ok)).toBe(true);
+    expect(checks.some((check) => check.name === ".opencode/commands/openspec-apply-worktree.md")).toBe(false);
   });
 });
 

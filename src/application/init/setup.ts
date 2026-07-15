@@ -6,6 +6,7 @@ import {
   DEFAULT_QUEUE_PATH,
   ENV_EXAMPLE_PATH,
   defaultShipperConfig,
+  readShipperConfig,
   type ExecutorProviderId,
   type ShipperProfile,
 } from "../../domain/config/shipper-config.js";
@@ -24,8 +25,10 @@ export type InstalledFile = {
   status: "installed" | "updated" | "unchanged" | "drifted";
 };
 
-const TEMPLATE_DIR = "templates/providers/opencode/assets";
-const TARGET_DIR = ".opencode";
+const OPENCODE_TEMPLATE_DIR = "templates/providers/opencode/assets";
+const OPENCODE_TARGET_DIR = ".opencode";
+const CODEX_TEMPLATE_DIR = "templates/providers/codex-cli/assets";
+const CODEX_TARGET_DIR = ".openspec-shipper/codex";
 const TARGET_TEMPLATE_DIR = "templates/target";
 const MANIFEST_PATH = ".openspec-shipper/installed.json";
 const SHIPPER_GITIGNORE_HEADER = "# OpenSpec Shipper local state";
@@ -51,26 +54,32 @@ type ManifestFile = {
 };
 
 export async function installOpenCodeTemplates(config: SetupConfig): Promise<InstalledFile[]> {
-  const sourceRoot = join(config.rootDir, TEMPLATE_DIR);
-  const targetRoot = join(config.projectDir, TARGET_DIR);
+  const sourceRoot = join(config.rootDir, OPENCODE_TEMPLATE_DIR);
+  const targetRoot = join(config.projectDir, OPENCODE_TARGET_DIR);
+  return await installTemplateTree(config, sourceRoot, targetRoot);
+}
+
+export async function installCodexTemplates(config: SetupConfig): Promise<InstalledFile[]> {
+  const sourceRoot = join(config.rootDir, CODEX_TEMPLATE_DIR);
+  const targetRoot = join(config.projectDir, CODEX_TARGET_DIR);
   return await installTemplateTree(config, sourceRoot, targetRoot);
 }
 
 export async function installShipperKit(config: SetupConfig): Promise<InstalledFile[]> {
   const profile = config.profile ?? "node-npm";
+  const existingConfig = await readShipperConfig(config.projectDir);
+  const selectedProvider = config.provider ?? existingConfig?.executor.provider ?? "opencode";
   const installed = [
-    ...(await installOpenCodeTemplates(config)),
+    ...(selectedProvider === "codex-cli" ? await installCodexTemplates(config) : await installOpenCodeTemplates(config)),
     ...(await installTemplateTree(config, join(config.rootDir, TARGET_TEMPLATE_DIR), config.projectDir)),
   ];
 
   const configPath = join(config.projectDir, CONFIG_PATH);
   const shipperConfig = defaultShipperConfig(profile);
-  if (config.provider) {
-    shipperConfig.executor.provider = config.provider;
-  }
+  shipperConfig.executor.provider = selectedProvider;
   const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
-  installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample()));
+  installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample(selectedProvider)));
   installed.push(await ensureQueueFile(config.projectDir));
   installed.push(await installGeneratedFile(config, "generated:shipper-queue-example", join(config.projectDir, ".openspec-shipper/queue.example.md"), defaultQueueExample()));
   installed.push(await ensureStateDirectory(config.projectDir, ".openspec-shipper/runs"));
@@ -300,9 +309,9 @@ function defaultDevDependencies(): Record<string, string> {
   };
 }
 
-function defaultEnvExample(): string {
+function defaultEnvExample(provider: ExecutorProviderId = "opencode"): string {
   return [
-    "OPENSPEC_SHIPPER_PROVIDER=opencode",
+    `OPENSPEC_SHIPPER_PROVIDER=${provider}`,
     "OPENSPEC_SHIPPER_OPENCODE_BIN=opencode",
     "OPENSPEC_SHIPPER_OPENCODE_MODEL=opencode-go/deepseek-v4-pro",
     "OPENSPEC_SHIPPER_CODEX_BIN=codex",

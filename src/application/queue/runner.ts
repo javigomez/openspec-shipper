@@ -31,6 +31,7 @@ import {
 } from "../../domain/config/shipper-config.js";
 import { providerById } from "../../infrastructure/providers/registry.js";
 import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
+import { codexPromptPath, codexWorkflowPath } from "../../infrastructure/providers/codex-cli/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
@@ -220,6 +221,13 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
 
   if (mode === "dry-run") {
     console.log(`Next task: ${pendingTask.rawCommand}`);
+    const preflight = await validateTaskPreflight(config, pendingTask);
+    console.log(`Provider asset: ${preflight.commandPath}`);
+    if (!preflight.ok) {
+      console.log(`Preflight: ${preflight.reason}`);
+      return 1;
+    }
+
     if (isNativeTask(pendingTask)) {
       console.log(`Native: ${describeNativeTask(pendingTask)}`);
       console.log(`Cwd: ${config.projectDir}`);
@@ -230,12 +238,6 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<
     }
     if (!isNativeTask(pendingTask) && config.opencodeStats) {
       console.log(`Stats: ${formatStatsPolling(config)}`);
-    }
-    const preflight = await validateTaskPreflight(config, pendingTask);
-    console.log(`Command file: ${preflight.commandPath}`);
-    if (!preflight.ok) {
-      console.log(`Preflight: ${preflight.reason}`);
-      return 1;
     }
 
     console.log("Preflight: ok");
@@ -269,7 +271,7 @@ async function runSingleTaskWithLock(
     }
 
     if (!isNativeTask(task)) {
-      const processCheck = await checkActiveOpenCode(config);
+      const processCheck = await checkActiveExecutor(config);
       if (processCheck.busy) {
         console.error(`Queue busy before spending tokens: ${processCheck.reason}`);
         return 1;
@@ -354,11 +356,11 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
       }
 
       if (!isNativeTask(pendingTask)) {
-        const processCheck = await checkActiveOpenCode(config);
+        const processCheck = await checkActiveExecutor(config);
         if (processCheck.busy) {
           busyState = printBusyWait(processCheck.reason, busyState, config.busyDelayMs);
           if (await waitOrStop(config, sleep, config.busyDelayMs)) {
-            console.log("Queue stop requested. Exiting while waiting for active OpenCode process.");
+            console.log("Queue stop requested. Exiting while waiting for active executor process.");
             return 0;
           }
           continue;
@@ -473,14 +475,15 @@ async function acquireLock(
   };
 }
 
-async function checkActiveOpenCode(config: RunnerConfig): Promise<{ busy: false } | { busy: true; reason: string }> {
-  const detector = config.processDetector ?? detectActiveOpenCodeProcesses;
+async function checkActiveExecutor(config: RunnerConfig): Promise<{ busy: false } | { busy: true; reason: string }> {
+  const currentProvider = provider(config);
+  const detector = config.processDetector ?? (() => detectActiveExecutorProcesses(currentProvider.activeProcessNames));
   const activeProcesses = await detector();
   if (activeProcesses.length === 0) {
     return { busy: false };
   }
 
-  return { busy: true, reason: `active opencode process(es):\n${activeProcesses.map((process) => `- ${process}`).join("\n")}` };
+  return { busy: true, reason: `active ${currentProvider.displayName} process(es):\n${activeProcesses.map((process) => `- ${process}`).join("\n")}` };
 }
 
 async function blockOnFailedPreflight(
@@ -502,14 +505,15 @@ async function validateTaskPreflight(
   config: RunnerConfig,
   task: QueueTask,
 ): Promise<{ ok: true; commandPath: string } | { ok: false; commandPath: string; reason: string }> {
-  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  const phase = deliverPhase(task);
+  const currentProvider = provider(config);
   const commandName = openCodeCommandName(phase);
   const commandPath =
     phase === "prepare_worktree"
       ? "(native prepare_worktree phase)"
-      : provider(config).id === "opencode"
+      : currentProvider.id === "opencode"
       ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
-      : "(provider does not use OpenCode command files)";
+      : codexPromptPath(config.projectDir, phase);
 
   if (phase === "prepare_worktree") {
     const prepareBlocker = await validatePrepareCanCreateWorktree(config, task);
@@ -524,8 +528,25 @@ async function validateTaskPreflight(
     };
   }
 
-  if (provider(config).id !== "opencode") {
-    return { ok: true, commandPath: "(provider does not use OpenCode command files)" };
+  if (currentProvider.id === "codex-cli") {
+    const workflowPath = codexWorkflowPath(config.projectDir);
+    if (!(await fileExists(workflowPath))) {
+      return {
+        ok: false,
+        commandPath: workflowPath,
+        reason: `Codex workflow file not found at ${workflowPath}. Run openspec-shipper init --provider codex-cli.`,
+      };
+    }
+
+    if (!(await fileExists(commandPath))) {
+      return {
+        ok: false,
+        commandPath,
+        reason: `Codex prompt file not found at ${commandPath}. Run openspec-shipper init --provider codex-cli.`,
+      };
+    }
+
+    return { ok: true, commandPath };
   }
 
   if (commandName.startsWith("/")) {
@@ -959,7 +980,7 @@ async function requestStop(config: RunnerConfig): Promise<number> {
   await mkdir(config.stateDir, { recursive: true });
   await writeFile(stopPath(config), stopRequestContent());
   console.log(`Stop requested: ${stopPath(config)}`);
-  console.log("A running queue:run will exit before starting another OpenCode task.");
+  console.log("A running queue:run will exit before starting another executor task.");
   return 0;
 }
 
@@ -1113,7 +1134,7 @@ export async function spawnExecutor(
         return;
       }
 
-      const message = `\nOpenSpec Shipper task timed out after ${formatDuration(options.timeoutMs)}; terminating OpenCode.\n`;
+      const message = `\nOpenSpec Shipper task timed out after ${formatDuration(options.timeoutMs)}; terminating executor.\n`;
       output = capOutput(`${output}${message}`);
       process.stderr.write(message);
       log.write(message);
@@ -1134,7 +1155,7 @@ export async function spawnExecutor(
         const now = Date.now();
         const message = `\n[${new Date().toISOString()}] still running: ${formatDuration(
           now - startedAt,
-        )} elapsed, ${formatDuration(now - lastChildOutputAt)} since last OpenCode output. Log: ${
+        )} elapsed, ${formatDuration(now - lastChildOutputAt)} since last executor output. Log: ${
           options.logPath
         }${formatStatsSnapshot(options.stats, now, {
           lastStatsAt,
@@ -1182,24 +1203,36 @@ export async function spawnExecutor(
 }
 
 export async function detectActiveOpenCodeProcesses(): Promise<string[]> {
+  return await detectActiveExecutorProcesses(["opencode"]);
+}
+
+export async function detectActiveExecutorProcesses(processNames: string[]): Promise<string[]> {
   if (process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR === "1" || process.env.ORCHESTER_ALLOW_ACTIVE_OPENCODE === "1") {
     return [];
   }
 
-  const result = spawnSync("pgrep", ["-x", "opencode"], { encoding: "utf8" });
-  if (result.status === 1) {
-    return [];
+  const active: string[] = [];
+  for (const processName of processNames) {
+    const result = spawnSync("pgrep", ["-x", processName], { encoding: "utf8" });
+    if (result.status === 1) {
+      continue;
+    }
+
+    if (result.status !== 0) {
+      active.push(`pgrep ${processName} failed with code ${result.status ?? "unknown"}`);
+      continue;
+    }
+
+    active.push(
+      ...result.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map(describeProcess),
+    );
   }
 
-  if (result.status !== 0) {
-    return [`pgrep failed with code ${result.status ?? "unknown"}`];
-  }
-
-  return result.stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(describeProcess);
+  return active;
 }
 
 export async function detectGitRemoteOrigin(projectDir: string): Promise<string | undefined> {
@@ -1681,11 +1714,11 @@ function printBusyWait(
 
   if (state.checks === 1) {
     console.log(`Queue busy before spending tokens:\n${reason}`);
-    console.log("The queue will not start another OpenCode worker while this process is active.");
+    console.log("The queue will not start another executor worker while this process is active.");
     console.log("Stop that process if it is stale, or set OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=1 to override.");
   } else {
     console.log(
-      `Still busy after ${formatDuration(now - state.firstSeenAt)} (${state.checks} checks): same opencode process(es).`,
+      `Still busy after ${formatDuration(now - state.firstSeenAt)} (${state.checks} checks): same executor process(es).`,
     );
   }
 

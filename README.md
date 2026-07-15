@@ -145,7 +145,9 @@ npx openspec-shipper init --profile node-npm
 - `.openspec-shipper/README.md` and `.openspec-shipper/queue.example.md`
 - `.openspec-shipper/openspec-config.example.yaml` as optional OpenSpec config guidance
 - `.openspec-shipper/scripts/` with shipper-owned validation helpers
-- `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
+- provider assets:
+  - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
+  - Codex CLI: `.openspec-shipper/codex/`
 - GitHub workflow for auto PR creation after branch push
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees
@@ -297,8 +299,12 @@ With config enabled, it also adds:
 
 ### Codex CLI
 
-Codex CLI is experimental. It does not install `.opencode` assets and currently
-exists so the provider contract can be tested in the demo flow:
+Codex CLI is experimental. It does not install `.opencode` assets; it installs
+phase prompts under `.openspec-shipper/codex/`:
+
+```bash
+npx openspec-shipper init --provider codex-cli
+```
 
 ```json
 {
@@ -315,7 +321,7 @@ exists so the provider contract can be tested in the demo flow:
 Dry-run will produce command specs like:
 
 ```bash
-codex exec -C <projectDir> --sandbox workspace-write --ask-for-approval never --model <model> <prompt>
+codex exec -C <projectDir> --sandbox workspace-write -c 'approval_policy="never"' --model <model> <prompt>
 ```
 
 Claude Code is intentionally roadmap-only for now.

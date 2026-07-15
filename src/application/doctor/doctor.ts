@@ -11,12 +11,21 @@ export type DoctorCheck = {
   severity: "error" | "warning";
 };
 
-const REQUIRED_COMMANDS = [
+const REQUIRED_OPENCODE_COMMANDS = [
   ".opencode/commands/openspec-apply-worktree.md",
   ".opencode/commands/openspec-ship-worktree.md",
   ".opencode/commands/openspec-main-sync.md",
   ".opencode/commands/openspec-archive-merged.md",
   ".opencode/commands/openspec-cleanup-worktree.md",
+];
+
+const REQUIRED_CODEX_ASSETS = [
+  ".openspec-shipper/codex/workflow.md",
+  ".openspec-shipper/codex/prompts/implement.md",
+  ".openspec-shipper/codex/prompts/push.md",
+  ".openspec-shipper/codex/prompts/sync-main.md",
+  ".openspec-shipper/codex/prompts/archive.md",
+  ".openspec-shipper/codex/prompts/cleanup-worktree.md",
 ];
 
 const REQUIRED_PACKAGE_SCRIPTS = [
@@ -35,7 +44,7 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   checks.push(checkWorkingTreeClean(projectDir));
   checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for PR state reconciliation"));
   checks.push(checkGitHubCliAuth(projectDir));
-  checks.push(checkCommand(config?.executor.opencode.bin ?? "opencode", ["--version"], projectDir, "OpenCode CLI is available"));
+  checks.push(checkProviderCommand(projectDir, config));
   checks.push(checkCommand(packageManagerCommand(config), ["--version"], projectDir, "Configured package manager is available"));
 
   checks.push(
@@ -50,9 +59,7 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
       : warning("openspec-shipper config", ".openspec-shipper/config.json missing; run `openspec-shipper init`"),
   );
 
-  for (const file of REQUIRED_COMMANDS) {
-    checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
-  }
+  checks.push(...(await checkProviderAssets(projectDir, config)));
 
   if (packageJson) {
     for (const script of REQUIRED_PACKAGE_SCRIPTS) {
@@ -81,6 +88,34 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
     checks.push(checkGitHubActionsPullRequestPermission(projectDir));
   }
 
+  return checks;
+}
+
+function checkProviderCommand(projectDir: string, config: ShipperConfig | undefined): DoctorCheck {
+  const provider = config?.executor.provider ?? "opencode";
+  if (provider === "codex-cli") {
+    return checkCommand(config?.executor.codex.bin ?? "codex", ["--version"], projectDir, "Codex CLI is available");
+  }
+
+  return checkCommand(config?.executor.opencode.bin ?? "opencode", ["--version"], projectDir, "OpenCode CLI is available");
+}
+
+async function checkProviderAssets(projectDir: string, config: ShipperConfig | undefined): Promise<DoctorCheck[]> {
+  const provider = config?.executor.provider ?? "opencode";
+  if (provider === "codex-cli") {
+    const checks: DoctorCheck[] = [
+      warning("codex provider", "Codex CLI provider is experimental; validate it in a demo repo before relying on it"),
+    ];
+    for (const file of REQUIRED_CODEX_ASSETS) {
+      checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
+    }
+    return checks;
+  }
+
+  const checks: DoctorCheck[] = [];
+  for (const file of REQUIRED_OPENCODE_COMMANDS) {
+    checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
+  }
   return checks;
 }
 

@@ -51,10 +51,11 @@ Use relative repository paths only. Never invent or type absolute paths under
 tool asks for `external_directory` permission, stop and report the path as a
 blocker instead of retrying.
 
-Use the project npm script for OpenSpec commands. If
-`npm run openspec:cli -- <args>` fails because dependencies are missing, stop
-and report the missing dependency/tooling. Do not fall back to unrelated
-worktrees.
+Use the OpenSpec command configured in `.openspec-shipper/config.json`
+(`checks.openspec`). In the default npm profile this expands to
+`npm run openspec:cli -- <args>`. If the configured command fails because
+dependencies are missing, stop and report the missing dependency/tooling. Do
+not fall back to unrelated worktrees.
 
 When invocation arguments identify a target change, do targeted discovery only.
 Do not run `openspec list --json`. Instead inspect and validate that exact
@@ -65,7 +66,7 @@ test -f openspec/changes/<change-name>/proposal.md
 test -f openspec/changes/<change-name>/design.md
 test -f openspec/changes/<change-name>/tasks.md
 find openspec/changes/<change-name>/specs -name spec.md -print
-OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 npm run openspec:cli -- validate <change-name>
+OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> validate <change-name>
 test -d worktrees/<change-name>
 test -f worktrees/<change-name>/openspec/changes/<change-name>/tasks.md
 ```
@@ -77,7 +78,7 @@ Only when invocation arguments do not identify a target change, discover the
 general implement queue:
 
 ```bash
-OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 npm run openspec:cli -- list --json
+OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> list --json
 find worktrees -maxdepth 3 -name tasks.md -print 2>/dev/null
 ```
 
@@ -91,8 +92,7 @@ A ready change has:
 - `openspec/changes/<change-name>/design.md`
 - `openspec/changes/<change-name>/tasks.md`
 - at least one `openspec/changes/<change-name>/specs/**/spec.md`
-- a passing
-  `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 npm run openspec:cli -- validate <change-name>`
+- a passing configured OpenSpec validation command for `<change-name>`
 - at least one unchecked task in `tasks.md`
 - an already prepared `worktrees/<change-name>` worktree
 

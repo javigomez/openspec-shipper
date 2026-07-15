@@ -14,9 +14,9 @@ The installer created or updated these project assets:
 - `.openspec-shipper/queue.example.md`
 - `.openspec-shipper/openspec-config.example.yaml`
 - `.openspec-shipper/scripts/`
-- `.opencode/commands`
-- `.opencode/agents`
-- `.opencode/rules`
+- provider assets:
+  - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
+  - Codex CLI: `.openspec-shipper/codex/`
 - `.github/workflows/open-pr-on-branch-push.yml`
 - `package.json`
 - `.gitignore`
@@ -46,7 +46,7 @@ Suggested commit:
 
 ```bash
 git status --short
-git add .github .opencode .openspec-shipper/.env.example .openspec-shipper/README.md .openspec-shipper/openspec-config.example.yaml .openspec-shipper/queue.example.md .openspec-shipper/scripts .gitignore package.json package-lock.json
+git add <reviewed installed files>
 git commit -m "chore: install openspec shipper"
 ```
 

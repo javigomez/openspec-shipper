@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { defaultConfig, runQueue, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT } from "../src/queue";
+import { installCodexTemplates } from "../src/application/init/setup";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -947,6 +948,66 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver add-name-greeting");
     expect(queue).not.toContain("OpenCode command file not found");
+  });
+
+  test("blocks Codex execution before spending tokens when prompts are missing", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      providerId: "codex-cli",
+      codexBin: "codex",
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("Codex workflow file not found");
+  });
+
+  test("runs Codex with installed phase prompts", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
+    await installCodexTemplates({ rootDir: join(import.meta.dir, ".."), projectDir: harness.rootDir });
+    let receivedCommand = "";
+    let receivedArgs: string[] = [];
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      providerId: "codex-cli",
+      codexBin: "codex",
+      codexModel: "gpt-5.4",
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async (command, args) => {
+        receivedCommand = command;
+        receivedArgs = args;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedCommand).toBe("codex");
+    expect(receivedArgs.slice(0, 8)).toEqual([
+      "exec",
+      "-C",
+      harness.rootDir,
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      'approval_policy="never"',
+      "--model",
+    ]);
+    expect(receivedArgs).toContain("gpt-5.4");
+    expect(receivedArgs.at(-1)).toContain("OpenSpec Shipper Codex Phase: implement");
+    expect(receivedArgs.at(-1)).toContain("add-name-greeting");
   });
 
   test("blocks ship before execution when git remote origin is missing", async () => {

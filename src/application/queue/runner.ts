@@ -624,12 +624,21 @@ async function executeTask(
   if (result.exitCode === 0 && !failureSignal) {
     const shipResult = await resolveShipSuccess(config, task);
     if (shipResult) {
-      const nextContent = advanceDeliverTaskToPhase(lines, task, shipResult, {
-        timestamp: (config.now?.() ?? new Date()).toISOString(),
-        logPath: relativeLogPath,
-        checkedAt: activity.checkedAt,
-        startedAt,
-      });
+      const timestamp = (config.now?.() ?? new Date()).toISOString();
+      const nextContent = shipResultRequiresHuman(shipResult)
+        ? markTask(lines, { ...task, phase: shipResult }, "blocked", {
+            timestamp,
+            reason: humanInterventionReason(shipResult),
+            logPath: relativeLogPath,
+            checkedAt: activity.checkedAt,
+            startedAt,
+          })
+        : advanceDeliverTaskToPhase(lines, task, shipResult, {
+            timestamp,
+            logPath: relativeLogPath,
+            checkedAt: activity.checkedAt,
+            startedAt,
+          });
       await writeFile(config.queuePath, nextContent);
       console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
       return 0;
@@ -714,9 +723,15 @@ async function reconcileQueue(
     const evidence = await collectDeliveryEvidence(config, currentTask);
     const decision = reconcileDeliveryTask(currentTask, evidence);
     if (decision.kind === "transition" && decision.phase !== deliverPhase(currentTask)) {
-      content = advanceDeliverTaskToPhase(currentQueue.lines, currentTask, decision.phase, {
-        timestamp: (config.now?.() ?? new Date()).toISOString(),
-      });
+      const timestamp = (config.now?.() ?? new Date()).toISOString();
+      content = shipResultRequiresHuman(decision.phase)
+        ? markTask(currentQueue.lines, { ...currentTask, phase: decision.phase }, "blocked", {
+            timestamp,
+            reason: humanInterventionReason(decision.phase),
+          })
+        : advanceDeliverTaskToPhase(currentQueue.lines, currentTask, decision.phase, {
+            timestamp,
+          });
       changed = true;
     } else if (decision.kind === "blocked") {
       content = markTask(currentQueue.lines, currentTask, "blocked", {
@@ -738,6 +753,18 @@ async function reconcileQueue(
 
   await writeFile(config.queuePath, content);
   return await loadQueue(config.queuePath);
+}
+
+function shipResultRequiresHuman(phase: DeliverPhase): boolean {
+  return phase === "waiting_for_merge";
+}
+
+function humanInterventionReason(phase: DeliverPhase): string {
+  if (phase === "waiting_for_merge") {
+    return "PR is ready and waits for a human to merge it";
+  }
+
+  return "Human intervention required";
 }
 
 async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): Promise<DeliveryEvidence> {

@@ -244,6 +244,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      maxBlockedTasks: 1,
       executor: async (_command, args) => {
         receivedArgs = args;
         return { exitCode: 0, output: "done" };
@@ -330,7 +331,10 @@ describe("runner", () => {
       "test-20-migrate-notebook-access-button-rntl",
     ]);
     const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver test-20-migrate-notebook-access-button-rntl");
     expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
+    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
   });
 
   test("advances deliver push phase to waiting for PR when no pull request exists after success", async () => {
@@ -419,35 +423,28 @@ describe("runner", () => {
     expect(queue).toContain("phase: implement");
   });
 
-  test("skips deliver tasks waiting for merge", async () => {
+  test("blocks deliver tasks waiting for merge", async () => {
     const harness = await createHarness(
       [
         "- [ ] deliver change-b <!-- phase: waiting_for_merge -->",
         "- [ ] deliver change-c",
       ].join("\n"),
     );
-    let receivedArgs: string[] = [];
-    let preparedChange = "";
-
     const exitCode = await runQueue("next", {
       ...harness.config,
-      executor: async (_command, args) => {
-        receivedArgs = args;
-        return { exitCode: 0, output: "done" };
-      },
-      prepareWorkspace: async (input) => {
-        preparedChange = input.changeName;
-        return "prepared\n";
+      executor: async () => {
+        throw new Error("waiting for merge should block before running another task");
       },
     });
 
-    expect(exitCode).toBe(0);
-    expect(receivedArgs).toEqual([]);
-    expect(preparedChange).toBe("change-c");
+    expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [ ] deliver change-b <!-- phase: waiting_for_merge -->");
+    expect(queue).toContain("- [!] deliver change-b");
+    expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
+    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
     expect(queue).toContain("- [ ] deliver change-c");
-    expect(queue).toContain("phase: implement");
+    expect(queue).not.toContain("phase: implement");
   });
 
   test("refreshes waiting-for-pr tasks before deciding the queue is waiting", async () => {
@@ -455,6 +452,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("run", {
       ...harness.config,
+      maxBlockedTasks: 1,
       pullRequestDetector: async (_projectDir, branch) =>
         branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
       executor: async () => {
@@ -464,9 +462,10 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
-    expect(queue).toContain("![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)");
+    expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
+    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
   });
 
   test("refreshes waiting-for-merge tasks to sync when the PR is merged", async () => {
@@ -490,6 +489,7 @@ describe("runner", () => {
 
     const exitCode = await runQueue("run", {
       ...harness.config,
+      maxBlockedTasks: 1,
       activeChangeDetector: async () => false,
       remoteBranchDetector: async (_projectDir, branch) => branch === "feat/add-name-greeting",
       pullRequestDetector: async (_projectDir, branch) =>
@@ -501,7 +501,9 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
   });
 
   test("reconstructs sync from a bare deliver task when the PR is already merged", async () => {
@@ -706,10 +708,12 @@ describe("runner", () => {
       mergedPullRequestDetector: async () => undefined,
     });
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
-    expect(queue).not.toContain("[!]");
+    expect(queue).toContain("waits for its PR to merge");
+    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
   });
 
   test("blocks a bare deliver task when no evidence of the change exists", async () => {
@@ -743,13 +747,15 @@ describe("runner", () => {
     const exitCode = await runQueue("status", {
       ...harness.config,
       pullRequestDetector: async () => undefined,
-      mergedPullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
     });
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).not.toContain(BLOCKED_TASK_RETRY_HINT);
     expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: sync_main");
   });
 
   test("passes OpenCode log flags before the command", async () => {

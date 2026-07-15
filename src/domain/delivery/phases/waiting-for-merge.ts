@@ -1,4 +1,4 @@
-import { noop, transition, wait, type DeliveryPhaseDefinition } from "../phase.js";
+import { blocked, noop, transition, type DeliveryPhaseDefinition } from "../phase.js";
 
 export const waitingForMergePhase: DeliveryPhaseDefinition = {
   phase: "waiting_for_merge",
@@ -7,7 +7,7 @@ export const waitingForMergePhase: DeliveryPhaseDefinition = {
       return transition("sync_main", "pull request is merged");
     }
 
-    return wait("waiting_for_merge", "waits for its PR to merge");
+    return blocked("waiting_for_merge", "waits for its PR to merge");
   },
   run() {
     return noop("waiting_for_merge", "waiting for external merge");
@@ -17,6 +17,6 @@ export const waitingForMergePhase: DeliveryPhaseDefinition = {
       return transition("sync_main", "pull request is merged");
     }
 
-    return wait("waiting_for_merge", "waits for its PR to merge");
+    return blocked("waiting_for_merge", "waits for its PR to merge");
   },
 };

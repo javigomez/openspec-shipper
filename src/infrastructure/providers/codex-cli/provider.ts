@@ -33,18 +33,30 @@ export const codexCliProvider: ExecutorProvider = {
     };
   },
   detectFailureSignal(output: string): string | undefined {
-    const blocked = output.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
+    const detectionOutput = codexAssistantOutput(output);
+    const blocked = detectionOutput.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
     if (blocked?.[1]) {
-      return `Worker reported a blocker: ${blocked[1].trim()}`;
+      const reason = blocked[1].trim();
+      if (reason !== "<short reason>") {
+        return `Worker reported a blocker: ${reason}`;
+      }
     }
 
-    if (/\b(permission requested|approval required|cannot continue without)\b/i.test(output)) {
+    if (/\b(permission requested|approval required|cannot continue without)\b/i.test(detectionOutput)) {
       return "Codex CLI reported a blocker";
     }
 
     return undefined;
   },
 };
+
+function codexAssistantOutput(output: string): string {
+  if (!/^codex$/m.test(output)) {
+    return output;
+  }
+
+  return output.split(/^codex$/m).slice(1).join("\n");
+}
 
 function buildCodexPrompt(input: BuildCommandInput): string {
   const prompt = readFileSync(codexPromptPath(input.projectDir, input.phase), "utf8");

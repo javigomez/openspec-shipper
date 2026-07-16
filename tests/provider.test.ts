@@ -107,6 +107,31 @@ describe("executor providers", () => {
     expect(codexCliProvider.detectFailureSignal("approval required for command")).toBe("Codex CLI reported a blocker");
   });
 
+  test("Codex CLI provider ignores blocked sentinel examples echoed from the prompt", () => {
+    const output = [
+      "user",
+      "If blocked, print:",
+      "OPENSPEC_SHIPPER_BLOCKED: <short reason>",
+      "OPENSPEC_SHIPPER_BLOCKED: prepared worktree missing for add-name-greeting",
+      "codex",
+      "Implemented the change and committed it successfully.",
+    ].join("\n");
+
+    expect(codexCliProvider.detectFailureSignal(output)).toBeUndefined();
+  });
+
+  test("Codex CLI provider detects blocked sentinel lines in assistant output", () => {
+    const output = [
+      "user",
+      "OPENSPEC_SHIPPER_BLOCKED: <short reason>",
+      "codex",
+      "I cannot continue.",
+      "OPENSPEC_SHIPPER_BLOCKED: missing gh auth",
+    ].join("\n");
+
+    expect(codexCliProvider.detectFailureSignal(output)).toBe("Worker reported a blocker: missing gh auth");
+  });
+
   test("OpenCode provider treats missing pull requests as a ship failure", () => {
     expect(opencodeProvider.detectFailureSignal("No pull request exists yet — branch-push automation should create it.")).toBe(
       "Ship worker did not find an open pull request",

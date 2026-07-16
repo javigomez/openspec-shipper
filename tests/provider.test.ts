@@ -132,6 +132,20 @@ describe("executor providers", () => {
     expect(codexCliProvider.detectFailureSignal(output)).toBe("Worker reported a blocker: missing gh auth");
   });
 
+  test("Codex CLI provider keeps scanning after placeholder blocker examples", () => {
+    const output = [
+      "user",
+      "Run the phase.",
+      "codex",
+      "Reading workflow.md",
+      "OPENSPEC_SHIPPER_BLOCKED: <short reason>",
+      "The repo is dirty, so I cannot continue.",
+      "OPENSPEC_SHIPPER_BLOCKED: dirty root main checkout",
+    ].join("\n");
+
+    expect(codexCliProvider.detectFailureSignal(output)).toBe("Worker reported a blocker: dirty root main checkout");
+  });
+
   test("OpenCode provider treats missing pull requests as a ship failure", () => {
     expect(opencodeProvider.detectFailureSignal("No pull request exists yet — branch-push automation should create it.")).toBe(
       "Ship worker did not find an open pull request",

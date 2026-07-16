@@ -34,9 +34,9 @@ export const codexCliProvider: ExecutorProvider = {
   },
   detectFailureSignal(output: string): string | undefined {
     const detectionOutput = codexAssistantOutput(output);
-    const blocked = detectionOutput.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
-    if (blocked?.[1]) {
-      const reason = blocked[1].trim();
+    const blockedSignals = detectionOutput.matchAll(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/gim);
+    for (const blocked of blockedSignals) {
+      const reason = blocked[1]?.trim();
       if (reason !== "<short reason>") {
         return `Worker reported a blocker: ${reason}`;
       }

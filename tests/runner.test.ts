@@ -1075,6 +1075,26 @@ describe("runner", () => {
     expect(queue).toContain("no existing worktree or branch for add-name-greeting");
   });
 
+  test("blocks prepare when main is not synchronized with origin", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    let prepareCalled = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      mainSyncDetector: async () => ({ ok: false, reason: "Main is behind origin/main; run sync_main before preparing a new worktree." }),
+      prepareWorkspace: async () => {
+        prepareCalled = true;
+        return "prepared\n";
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(prepareCalled).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("Main is behind origin/main");
+  });
+
   test("ignores shipper runtime files when checking dirty main", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let executorCalled = false;
@@ -1116,6 +1136,32 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     expect(called).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: push");
+  });
+
+  test("allows prepare phase with unsynced main when the change worktree already exists", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    await mkdir(join(harness.rootDir, "worktrees/add-name-greeting"), { recursive: true });
+    let prepareCalled = false;
+    let executorCalled = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      mainSyncDetector: async () => ({ ok: false, reason: "Main is behind origin/main" }),
+      executor: async () => {
+        executorCalled = true;
+        return { exitCode: 0, output: "done" };
+      },
+      prepareWorkspace: async () => {
+        prepareCalled = true;
+        return "already prepared\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(prepareCalled).toBe(false);
+    expect(executorCalled).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: push");
   });
@@ -1355,6 +1401,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
     gitStatusDetector: async () => [],
+    mainSyncDetector: async () => ({ ok: true }),
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
     prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,

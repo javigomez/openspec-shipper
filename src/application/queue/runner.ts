@@ -64,6 +64,7 @@ export type RunnerConfig = {
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
   gitStatusDetector?: GitStatusDetector;
+  mainSyncDetector?: MainSyncDetector;
   activeChangeDetector?: ActiveChangeDetector;
   archivedChangeDetector?: ArchivedChangeDetector;
   localClaimDetector?: LocalClaimDetector;
@@ -109,6 +110,7 @@ export type ExecutorResult = {
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
 export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
+export type MainSyncDetector = (projectDir: string) => Promise<MainSyncStatus>;
 export type ActiveChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type ArchivedChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
@@ -125,6 +127,10 @@ export type PrepareWorkspaceInput = {
   worktreeDir: string;
 };
 export type Sleep = (ms: number) => Promise<void>;
+
+type MainSyncStatus =
+  | { ok: true }
+  | { ok: false; reason: string };
 
 const DEFAULT_LOOP_DELAY_MS = 5_000;
 const DEFAULT_BUSY_DELAY_MS = 60_000;
@@ -598,7 +604,8 @@ async function validatePrepareCanCreateWorktree(config: RunnerConfig, task: Queu
 
   const status = filterLocalStateStatus(await gitStatus(config));
   if (status.length === 0) {
-    return undefined;
+    const mainSync = await gitMainSyncStatus(config);
+    return mainSync.ok ? undefined : mainSync.reason;
   }
 
   return [
@@ -610,6 +617,11 @@ async function validatePrepareCanCreateWorktree(config: RunnerConfig, task: Queu
 
 async function gitStatus(config: RunnerConfig): Promise<string[]> {
   const detector = config.gitStatusDetector ?? detectGitStatus;
+  return await detector(config.projectDir);
+}
+
+async function gitMainSyncStatus(config: RunnerConfig): Promise<MainSyncStatus> {
+  const detector = config.mainSyncDetector ?? detectMainSyncStatus;
   return await detector(config.projectDir);
 }
 
@@ -1263,6 +1275,52 @@ export async function detectGitStatus(projectDir: string): Promise<string[]> {
     .filter(Boolean);
 }
 
+export async function detectMainSyncStatus(projectDir: string): Promise<MainSyncStatus> {
+  const branch = runGit(projectDir, ["branch", "--show-current"]).trim();
+  if (branch !== "main") {
+    return { ok: false, reason: `Prepare must run from main; current branch is ${branch || "(detached)"}.` };
+  }
+
+  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin"], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (fetch.status !== 0) {
+    return {
+      ok: false,
+      reason: `Cannot verify main is up to date with origin before preparing a worktree: ${formatGitError(fetch)}`,
+    };
+  }
+
+  const upstream = spawnSync("git", ["-C", projectDir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (upstream.status !== 0) {
+    return {
+      ok: false,
+      reason: "Main has no upstream configured; set upstream to origin/main before preparing a worktree.",
+    };
+  }
+
+  const head = runGit(projectDir, ["rev-parse", "HEAD"]).trim();
+  const upstreamHead = runGit(projectDir, ["rev-parse", "@{u}"]).trim();
+  if (head === upstreamHead) {
+    return { ok: true };
+  }
+
+  const base = runGit(projectDir, ["merge-base", "HEAD", "@{u}"]).trim();
+  if (base === head) {
+    return { ok: false, reason: "Main is behind origin/main; run sync_main before preparing a new worktree." };
+  }
+
+  if (base === upstreamHead) {
+    return { ok: false, reason: "Main has local commits not pushed to origin/main; push or reset main before preparing a new worktree." };
+  }
+
+  return { ok: false, reason: "Main has diverged from origin/main; reconcile main before preparing a new worktree." };
+}
+
 async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
   const messages = [
     `Preparing ${input.changeName}`,
@@ -1279,6 +1337,11 @@ async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
   const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
   if (currentBranch !== "main") {
     throw new Error(`Prepare must run from main; current branch is ${currentBranch || "(detached)"}.`);
+  }
+
+  const syncStatus = await detectMainSyncStatus(input.projectDir);
+  if (!syncStatus.ok) {
+    throw new Error(syncStatus.reason);
   }
 
   await mkdir(dirname(input.worktreeDir), { recursive: true });
@@ -1316,6 +1379,14 @@ function runGit(projectDir: string, args: string[]): string {
   }
 
   return result.stdout;
+}
+
+function formatGitError(result: ReturnType<typeof spawnSync>): string {
+  if (result.error) {
+    return result.error.message;
+  }
+
+  return firstNonEmptyLine(`${result.stderr ?? ""}\n${result.stdout ?? ""}`) ?? `git exited with code ${result.status ?? "unknown"}`;
 }
 
 async function changeHasExistingLocalClaim(projectDir: string, changeName: string): Promise<boolean> {

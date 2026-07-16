@@ -100,10 +100,15 @@ OPENSPEC_SHIPPER_OPENCODE_BIN=opencode
 OPENSPEC_SHIPPER_OPENCODE_MODEL=opencode-go/deepseek-v4-pro
 OPENSPEC_SHIPPER_CODEX_BIN=codex
 OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.4
+OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=2
 OPENSPEC_SHIPPER_PRINT_LOGS=1
 OPENSPEC_SHIPPER_LOG_LEVEL=ERROR
 OPENSPEC_SHIPPER_STATS=1
 ```
+
+`OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR` is a numeric allowance. The default is
+`2`, so having Codex/ChatGPT or OpenCode open in another window does not block
+the queue. Set it to `0` for strict single-executor mode.
 
 `init` adds these ignored entries:
 

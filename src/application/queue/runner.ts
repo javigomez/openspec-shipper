@@ -59,6 +59,7 @@ export type RunnerConfig = {
   taskTimeoutMs: number;
   heartbeatMs: number;
   maxBlockedTasks: number;
+  activeExecutorAllowance?: number;
   executor?: Executor;
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
@@ -131,6 +132,7 @@ const DEFAULT_TASK_TIMEOUT_MS = 90 * 60_000;
 const DEFAULT_HEARTBEAT_MS = 60_000;
 const DEFAULT_STATS_INTERVAL_MS = 120_000;
 const DEFAULT_STATS_TIMEOUT_MS = 10_000;
+const DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE = 2;
 const KILL_GRACE_MS = 10_000;
 const SIGINT_DUPLICATE_GRACE_MS = 1_500;
 const ROOT_DIR = fileURLToPath(new URL("../../..", import.meta.url));
@@ -165,6 +167,7 @@ export function defaultConfig(): RunnerConfig {
     taskTimeoutMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_TASK_TIMEOUT_MS ?? process.env.ORCHESTER_TASK_TIMEOUT_MS, DEFAULT_TASK_TIMEOUT_MS),
     heartbeatMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_HEARTBEAT_MS ?? process.env.ORCHESTER_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
     maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS ?? process.env.ORCHESTER_MAX_BLOCKED_TASKS, 100),
+    activeExecutorAllowance: parsePositiveInt(process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR, DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE),
   };
 }
 
@@ -479,11 +482,15 @@ async function checkActiveExecutor(config: RunnerConfig): Promise<{ busy: false 
   const currentProvider = provider(config);
   const detector = config.processDetector ?? (() => detectActiveExecutorProcesses(currentProvider.activeProcessNames));
   const activeProcesses = await detector();
-  if (activeProcesses.length === 0) {
+  const allowance = config.activeExecutorAllowance ?? DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE;
+  if (activeProcesses.length <= allowance) {
     return { busy: false };
   }
 
-  return { busy: true, reason: `active ${currentProvider.displayName} process(es):\n${activeProcesses.map((process) => `- ${process}`).join("\n")}` };
+  return {
+    busy: true,
+    reason: `active ${currentProvider.displayName} process(es): ${activeProcesses.length} found, ${allowance} allowed\n${activeProcesses.map((process) => `- ${process}`).join("\n")}`,
+  };
 }
 
 async function blockOnFailedPreflight(
@@ -1207,7 +1214,7 @@ export async function detectActiveOpenCodeProcesses(): Promise<string[]> {
 }
 
 export async function detectActiveExecutorProcesses(processNames: string[]): Promise<string[]> {
-  if (process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR === "1" || process.env.ORCHESTER_ALLOW_ACTIVE_OPENCODE === "1") {
+  if (process.env.ORCHESTER_ALLOW_ACTIVE_OPENCODE === "1") {
     return [];
   }
 
@@ -1715,7 +1722,7 @@ function printBusyWait(
   if (state.checks === 1) {
     console.log(`Queue busy before spending tokens:\n${reason}`);
     console.log("The queue will not start another executor worker while this process is active.");
-    console.log("Stop that process if it is stale, or set OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=1 to override.");
+    console.log("Stop stale processes, or set OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR to a higher number.");
   } else {
     console.log(
       `Still busy after ${formatDuration(now - state.firstSeenAt)} (${state.checks} checks): same executor process(es).`,

@@ -1127,6 +1127,7 @@ describe("runner", () => {
     const exitCode = await runQueue("next", {
       ...harness.config,
       ...implementedChangeEvidence("add-name-greeting"),
+      activeExecutorAllowance: 0,
       processDetector: async () => ["12345"],
       executor: async () => {
         called = true;
@@ -1139,6 +1140,25 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver add-name-greeting <!-- phase: push; checking: 2026-06-17T12:00:00.000Z -->");
     expect(queue).toContain("![push checking](https://img.shields.io/badge/push-checking-yellow)");
+  });
+
+  test("next mode allows up to two active executor processes by default", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->\n");
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      processDetector: async () => ["12345", "67890"],
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(called).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
   });
 
   test("run mode processes pending tasks until the queue is complete", async () => {
@@ -1229,6 +1249,7 @@ describe("runner", () => {
     const exitCode = await runQueue("run", {
       ...harness.config,
       busyDelayMs: 5,
+      activeExecutorAllowance: 0,
       processDetector: async () => {
         checks += 1;
         return checks === 1 ? ["12345"] : [];
@@ -1267,6 +1288,7 @@ describe("runner", () => {
     const exitCode = await runQueue("run", {
       ...harness.config,
       busyDelayMs: 60_000,
+      activeExecutorAllowance: 0,
       processDetector: async () => ["12345"],
       sleep: async (ms) => {
         sleeps.push(ms);

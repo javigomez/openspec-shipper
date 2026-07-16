@@ -1,8 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { defaultConfig, runQueue, type Executor, type RunnerConfig } from "../src/runner";
+import { defaultConfig, detectMainSyncStatus, runQueue, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT } from "../src/queue";
 import { installCodexTemplates } from "../src/application/init/setup";
 import { silenceConsoleDuringTests } from "./test-console";
@@ -1075,13 +1076,45 @@ describe("runner", () => {
     expect(queue).toContain("no existing worktree or branch for add-name-greeting");
   });
 
-  test("blocks prepare when main is not synchronized with origin", async () => {
+  test("fast-forwards main before preparing a worktree when it is behind origin", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-main-sync-"));
+    const originDir = join(rootDir, "origin.git");
+    const seedDir = join(rootDir, "seed");
+    const cloneDir = join(rootDir, "clone");
+
+    git(rootDir, ["init", "--bare", originDir]);
+    await mkdir(seedDir, { recursive: true });
+    git(seedDir, ["init", "-b", "main"]);
+    git(seedDir, ["config", "user.name", "Test User"]);
+    git(seedDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(seedDir, "README.md"), "one\n");
+    git(seedDir, ["add", "README.md"]);
+    git(seedDir, ["commit", "-m", "chore: initial"]);
+    git(seedDir, ["remote", "add", "origin", originDir]);
+    git(seedDir, ["push", "-u", "origin", "main"]);
+
+    git(rootDir, ["clone", originDir, cloneDir]);
+    const before = git(cloneDir, ["rev-parse", "HEAD"]).trim();
+
+    await writeFile(join(seedDir, "README.md"), "two\n");
+    git(seedDir, ["add", "README.md"]);
+    git(seedDir, ["commit", "-m", "chore: update"]);
+    git(seedDir, ["push"]);
+
+    const status = await detectMainSyncStatus(cloneDir);
+
+    expect(status).toEqual({ ok: true });
+    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).not.toBe(before);
+    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(git(cloneDir, ["rev-parse", "@{u}"]).trim());
+  });
+
+  test("blocks prepare when main cannot be safely synchronized with origin", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let prepareCalled = false;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      mainSyncDetector: async () => ({ ok: false, reason: "Main is behind origin/main; run sync_main before preparing a new worktree." }),
+      mainSyncDetector: async () => ({ ok: false, reason: "Main has diverged from origin/main; reconcile main before preparing a new worktree." }),
       prepareWorkspace: async () => {
         prepareCalled = true;
         return "prepared\n";
@@ -1092,7 +1125,7 @@ describe("runner", () => {
     expect(prepareCalled).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("Main is behind origin/main");
+    expect(queue).toContain("Main has diverged from origin/main");
   });
 
   test("ignores shipper runtime files when checking dirty main", async () => {
@@ -1356,6 +1389,15 @@ describe("runner", () => {
 });
 
 const cleanExecutor: Executor = async () => ({ exitCode: 0, output: "done" });
+
+function git(cwd: string, args: string[]): string {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `git ${args.join(" ")} failed`);
+  }
+
+  return result.stdout;
+}
 
 function implementedChangeEvidence(changeName: string): Partial<RunnerConfig> {
   return {

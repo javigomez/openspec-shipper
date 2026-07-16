@@ -1311,7 +1311,18 @@ export async function detectMainSyncStatus(projectDir: string): Promise<MainSync
 
   const base = runGit(projectDir, ["merge-base", "HEAD", "@{u}"]).trim();
   if (base === head) {
-    return { ok: false, reason: "Main is behind origin/main; run sync_main before preparing a new worktree." };
+    const merge = spawnSync("git", ["-C", projectDir, "merge", "--ff-only", "@{u}"], {
+      env: childEnvForCwd(projectDir),
+      encoding: "utf8",
+    });
+    if (merge.status === 0) {
+      return { ok: true };
+    }
+
+    return {
+      ok: false,
+      reason: `Main is behind origin/main but could not be fast-forwarded before preparing a worktree: ${formatGitError(merge)}`,
+    };
   }
 
   if (base === upstreamHead) {

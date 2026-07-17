@@ -1296,22 +1296,30 @@ export async function detectMainSyncStatus(projectDir: string): Promise<MainSync
     env: childEnvForCwd(projectDir),
     encoding: "utf8",
   });
+  let upstreamRef = "@{u}";
   if (upstream.status !== 0) {
-    return {
-      ok: false,
-      reason: "Main has no upstream configured; set upstream to origin/main before preparing a worktree.",
-    };
+    const originMain = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", "refs/remotes/origin/main"], {
+      env: childEnvForCwd(projectDir),
+      encoding: "utf8",
+    });
+    if (originMain.status !== 0) {
+      return {
+        ok: false,
+        reason: "Main has no upstream configured and origin/main does not exist; push main before preparing a worktree.",
+      };
+    }
+    upstreamRef = "origin/main";
   }
 
   const head = runGit(projectDir, ["rev-parse", "HEAD"]).trim();
-  const upstreamHead = runGit(projectDir, ["rev-parse", "@{u}"]).trim();
+  const upstreamHead = runGit(projectDir, ["rev-parse", upstreamRef]).trim();
   if (head === upstreamHead) {
     return { ok: true };
   }
 
-  const base = runGit(projectDir, ["merge-base", "HEAD", "@{u}"]).trim();
+  const base = runGit(projectDir, ["merge-base", "HEAD", upstreamRef]).trim();
   if (base === head) {
-    const merge = spawnSync("git", ["-C", projectDir, "merge", "--ff-only", "@{u}"], {
+    const merge = spawnSync("git", ["-C", projectDir, "merge", "--ff-only", upstreamRef], {
       env: childEnvForCwd(projectDir),
       encoding: "utf8",
     });

@@ -1108,6 +1108,39 @@ describe("runner", () => {
     expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(git(cloneDir, ["rev-parse", "@{u}"]).trim());
   });
 
+  test("uses origin main when local main has no upstream configured", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-main-no-upstream-"));
+    const originDir = join(rootDir, "origin.git");
+    const seedDir = join(rootDir, "seed");
+    const cloneDir = join(rootDir, "clone");
+
+    git(rootDir, ["init", "--bare", originDir]);
+    await mkdir(seedDir, { recursive: true });
+    git(seedDir, ["init", "-b", "main"]);
+    git(seedDir, ["config", "user.name", "Test User"]);
+    git(seedDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(seedDir, "README.md"), "one\n");
+    git(seedDir, ["add", "README.md"]);
+    git(seedDir, ["commit", "-m", "chore: initial"]);
+    git(seedDir, ["remote", "add", "origin", originDir]);
+    git(seedDir, ["push", "-u", "origin", "main"]);
+
+    git(rootDir, ["clone", originDir, cloneDir]);
+    git(cloneDir, ["branch", "--unset-upstream", "main"]);
+    git(cloneDir, ["config", "user.name", "Test User"]);
+    git(cloneDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(cloneDir, "local.txt"), "local\n");
+    git(cloneDir, ["add", "local.txt"]);
+    git(cloneDir, ["commit", "-m", "chore: local"]);
+
+    const status = await detectMainSyncStatus(cloneDir);
+
+    expect(status).toEqual({
+      ok: false,
+      reason: "Main has local commits not pushed to origin/main; push or reset main before preparing a new worktree.",
+    });
+  });
+
   test("blocks prepare when main cannot be safely synchronized with origin", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let prepareCalled = false;

@@ -97,15 +97,13 @@ For one eligible completed change:
 8. Verify repo-local Git identity is configured with `git config user.name` and
    `git config user.email`.
 9. Push the selected branch to origin.
-10. After pushing, verify that an open pull request exists for the selected
-    branch when `gh` is available. If no pull request exists, stop and end with
-    `OPENSPEC_SHIPPER_BLOCKED: no open pull request exists for <branch>`. Do
-    not report the push cycle as complete in that case.
+10. After pushing, verify whether an open pull request already exists for the
+    selected branch when `gh` is available. If no pull request exists yet, that
+    is not a blocker: the branch-push workflow owns pull request creation and
+    the queue will move to `waiting_for_pr`.
 
 This worker MUST NOT run `openspec archive`. It also MUST NOT call `gh pr
-create`, GitHub connector PR APIs, or any other manual PR creation path. If the
-target repo has a branch-push workflow, that workflow owns pull request
-creation after push.
+create`, GitHub connector PR APIs, or any other manual PR creation path.
 
 After a successful push, keep the local `worktrees/<change-name>` worktree and
 local branch intact. The pull request may still need conflict resolution,

@@ -660,7 +660,10 @@ async function executeTask(
     output: error instanceof Error ? error.message : String(error),
   }));
 
-  const failureSignal = provider(config).detectFailureSignal(result.output);
+  let failureSignal = provider(config).detectFailureSignal(result.output);
+  if (isExternalPullRequestCreationSignal(task, failureSignal)) {
+    failureSignal = undefined;
+  }
   if (result.exitCode === 0 && !failureSignal) {
     const shipResult = await resolveShipSuccess(config, task);
     if (shipResult) {
@@ -707,6 +710,15 @@ async function executeTask(
   await writeFile(config.queuePath, nextContent);
   console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
   return 1;
+}
+
+function isExternalPullRequestCreationSignal(task: QueueTask, failureSignal: string | undefined): boolean {
+  return (
+    task.action === "deliver" &&
+    deliverPhase(task) === "push" &&
+    typeof failureSignal === "string" &&
+    /\bno open pull request exists\b/i.test(failureSignal)
+  );
 }
 
 async function resolveShipSuccess(config: RunnerConfig, task: QueueTask): Promise<"waiting_for_pr" | "waiting_for_merge" | undefined> {

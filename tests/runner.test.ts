@@ -884,7 +884,7 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
-  test("blocks deliver push phase when the worker emits the blocked sentinel", async () => {
+  test("moves push to waiting for PR when the worker reports no open pull request after pushing", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
 
     const exitCode = await runQueue("next", {
@@ -896,12 +896,11 @@ describe("runner", () => {
       }),
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: push");
-    expect(queue).toContain("no open pull request exists for feat/add-name-greeting");
-    expect(queue).not.toContain("waiting_for_merge");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: waiting_for_pr");
+    expect(queue).toContain("![waiting_for_pr waiting](https://img.shields.io/badge/waiting_for_pr-waiting-orange)");
   });
 
   test("marks the first pending task blocked when the executor cannot start", async () => {

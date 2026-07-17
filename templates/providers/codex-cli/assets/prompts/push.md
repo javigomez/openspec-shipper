@@ -15,9 +15,9 @@ If you cannot complete this phase, include exactly one final line:
 OPENSPEC_SHIPPER_BLOCKED: <short reason>
 ```
 
-Use it for missing tools, missing permissions, failed checks, missing pull
-requests, ineligible changes, unsafe git state, or anything requiring human
-action. Do not include it after success.
+Use it for missing tools, missing permissions, failed checks, ineligible
+changes, unsafe git state, or anything requiring human action. Do not include it
+after success.
 
 ## Discovery
 
@@ -52,14 +52,10 @@ For `worktrees/{{CHANGE_NAME}}`:
 7. Inspect `.openspec-shipper/config.json`; if `"enablePush": false`, block.
 8. Verify repo-local `git config user.name` and `git config user.email`.
 9. Push the current implementation branch to origin.
-10. If `gh` is available, verify an open PR exists for the branch. If none
-    exists, finish with:
+10. If `gh` is available, you may report whether an open PR already exists for
+    the branch. If none exists yet, that is not a blocker: the branch-push
+    workflow owns PR creation and the queue will move to `waiting_for_pr`.
 
-```text
-OPENSPEC_SHIPPER_BLOCKED: no open pull request exists for <branch>
-```
-
-Do not call `gh pr create` or any other PR creation API. The branch-push
-workflow owns PR creation.
+Do not call `gh pr create` or any other PR creation API.
 
 Do not archive or clean local worktrees.

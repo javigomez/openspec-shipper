@@ -149,9 +149,9 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 5. Commit final verification changes if needed.
 6. Validate commit messages.
 7. Push the branch.
-8. After push, verify that an open PR exists when `gh` is available. If no PR
-   exists, stop and end with
-   `OPENSPEC_SHIPPER_BLOCKED: no open pull request exists for <branch>`.
+8. After push, verify whether an open PR already exists when `gh` is available.
+   If no PR exists yet, that is not a blocker: the branch-push workflow owns PR
+   creation and the queue will move to `waiting_for_pr`.
 9. Do not call `gh pr create` or any other manual PR creation path from the
    ship worker.
 

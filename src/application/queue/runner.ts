@@ -522,8 +522,8 @@ async function validateTaskPreflight(
   const currentProvider = provider(config);
   const commandName = openCodeCommandName(phase);
   const commandPath =
-    phase === "prepare_worktree"
-      ? "(native prepare_worktree phase)"
+    phase === "prepare_worktree" || phase === "sync_main"
+      ? `(native ${phase} phase)`
       : currentProvider.id === "opencode"
       ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
       : codexPromptPath(config.projectDir, phase);
@@ -531,6 +531,10 @@ async function validateTaskPreflight(
   if (phase === "prepare_worktree") {
     const prepareBlocker = await validatePrepareCanCreateWorktree(config, task);
     return prepareBlocker ? { ok: false, commandPath, reason: prepareBlocker } : { ok: true, commandPath };
+  }
+
+  if (phase === "sync_main") {
+    return { ok: true, commandPath };
   }
 
   if (phase === "push" && !(await gitRemoteOrigin(config))) {
@@ -923,13 +927,16 @@ async function blockTask(
 
 function isNativeTask(task: QueueTask): boolean {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  return phase === "prepare_worktree";
+  return phase === "prepare_worktree" || phase === "sync_main";
 }
 
 function describeNativeTask(task: QueueTask): string {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
   if (phase === "prepare_worktree" && task.change) {
     return `prepare worktree for ${task.change}`;
+  }
+  if (phase === "sync_main") {
+    return "synchronize main with origin";
   }
 
   return `${phase} phase`;
@@ -986,6 +993,14 @@ async function executeNativeTask(
 
 async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<string> {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  if (phase === "sync_main") {
+    const syncStatus = await gitMainSyncStatus(config);
+    if (!syncStatus.ok) {
+      throw new Error(syncStatus.reason);
+    }
+    return "Main is synchronized with origin.\n";
+  }
+
   if (phase !== "prepare_worktree" || !task.change) {
     throw new Error(`Native runner does not support ${phase}`);
   }

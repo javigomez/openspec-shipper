@@ -129,19 +129,19 @@ describe("runner", () => {
     const harness = await createHarness(
       "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: sync_main -->\n",
     );
-    let receivedArgs: string[] = [];
+    let called = false;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
       maxBlockedTasks: 1,
-      executor: async (_command, args) => {
-        receivedArgs = args;
+      executor: async () => {
+        called = true;
         return { exitCode: 0, output: "done" };
       },
     });
 
     expect(exitCode).toBe(0);
-    expect(receivedArgs).toEqual(["run", "--command", "openspec-main-sync"]);
+    expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("- [ ] deliver add-spanish-greeting");
@@ -205,11 +205,12 @@ describe("runner", () => {
   });
 
   test("passes the configured model to opencode", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let receivedArgs: string[] = [];
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       opencodeModel: "opencode-go/deepseek-v4-pro",
       executor: async (_command, args) => {
         receivedArgs = args;
@@ -223,7 +224,8 @@ describe("runner", () => {
       "--model",
       "opencode-go/deepseek-v4-pro",
       "--command",
-      "openspec-main-sync",
+      "openspec-ship-worktree",
+      "add-name-greeting",
     ]);
   });
 
@@ -778,11 +780,12 @@ describe("runner", () => {
   });
 
   test("passes OpenCode log flags before the command", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let receivedArgs: string[] = [];
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       opencodeModel: "opencode-go/deepseek-v4-pro",
       opencodePrintLogs: true,
       opencodeLogLevel: "ERROR",
@@ -801,16 +804,18 @@ describe("runner", () => {
       "--model",
       "opencode-go/deepseek-v4-pro",
       "--command",
-      "openspec-main-sync",
+      "openspec-ship-worktree",
+      "add-name-greeting",
     ]);
   });
 
   test("passes OpenCode stats options to the executor when enabled", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let receivedOptions: Parameters<Executor>[2] | undefined;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       opencodeStats: true,
       opencodeStatsIntervalMs: 120_000,
       opencodeStatsTimeoutMs: 10_000,
@@ -904,10 +909,11 @@ describe("runner", () => {
   });
 
   test("marks the first pending task blocked when the executor cannot start", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       executor: async () => {
         throw new Error("spawn failed");
       },
@@ -1392,12 +1398,13 @@ describe("runner", () => {
   });
 
   test("run mode exits while waiting when stop is requested", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     const sleeps: number[] = [];
     let called = false;
 
     const exitCode = await runQueue("run", {
       ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
       busyDelayMs: 60_000,
       activeExecutorAllowance: 0,
       processDetector: async () => ["12345"],
@@ -1415,8 +1422,8 @@ describe("runner", () => {
     expect(called).toBe(false);
     expect(sleeps).toEqual([1_000]);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [ ] deliver add-name-greeting <!-- phase: sync_main; checking: 2026-06-17T12:00:00.000Z -->");
-    expect(queue).toContain("![sync_main checking](https://img.shields.io/badge/sync_main-checking-yellow)");
+    expect(queue).toContain("- [ ] deliver add-name-greeting <!-- phase: push; checking: 2026-06-17T12:00:00.000Z -->");
+    expect(queue).toContain("![push checking](https://img.shields.io/badge/push-checking-yellow)");
   });
 });
 

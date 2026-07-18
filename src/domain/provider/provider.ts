@@ -24,6 +24,7 @@ export type ProviderRuntimeConfig = {
     codex: {
       bin: string;
       model?: string;
+      reasoningEffort?: string;
     };
   };
   opencodePrintLogs?: boolean;

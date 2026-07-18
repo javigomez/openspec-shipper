@@ -100,7 +100,8 @@ OPENSPEC_SHIPPER_PROVIDER=opencode
 OPENSPEC_SHIPPER_OPENCODE_BIN=opencode
 OPENSPEC_SHIPPER_OPENCODE_MODEL=opencode-go/deepseek-v4-pro
 OPENSPEC_SHIPPER_CODEX_BIN=codex
-OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.4
+OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.5
+OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=low
 OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=2
 OPENSPEC_SHIPPER_PRINT_LOGS=1
 OPENSPEC_SHIPPER_LOG_LEVEL=ERROR
@@ -325,7 +326,8 @@ npx openspec-shipper init --provider codex-cli
     "provider": "codex-cli",
     "codex": {
       "bin": "codex",
-      "model": "gpt-5.4"
+      "model": "gpt-5.5",
+      "reasoningEffort": "low"
     }
   }
 }
@@ -334,7 +336,7 @@ npx openspec-shipper init --provider codex-cli
 Dry-run will produce command specs like:
 
 ```bash
-codex exec -C <projectDir> --sandbox workspace-write -c 'approval_policy="never"' --model <model> <prompt>
+codex exec -C <projectDir> --sandbox workspace-write -c 'approval_policy="never"' --model <model> -c 'model_reasoning_effort="low"' <prompt>
 ```
 
 Claude Code is intentionally roadmap-only for now.

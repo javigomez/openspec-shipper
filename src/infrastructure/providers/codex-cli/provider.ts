@@ -24,6 +24,10 @@ export const codexCliProvider: ExecutorProvider = {
       args.push("--model", input.config.executor.codex.model);
     }
 
+    if (input.config.executor.codex.reasoningEffort) {
+      args.push("-c", `model_reasoning_effort="${input.config.executor.codex.reasoningEffort}"`);
+    }
+
     args.push(prompt);
 
     return {

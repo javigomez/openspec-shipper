@@ -47,6 +47,7 @@ export type RunnerConfig = {
   opencodeModel?: string;
   codexBin?: string;
   codexModel?: string;
+  codexReasoningEffort?: string;
   opencodePrintLogs?: boolean;
   opencodeLogLevel?: string;
   opencodeStats?: boolean;
@@ -189,6 +190,7 @@ export function defaultConfig(): RunnerConfig {
     opencodeModel: optionalEnv("OPENSPEC_SHIPPER_OPENCODE_MODEL") ?? optionalEnv("OPENCODE_MODEL") ?? shipperConfig?.executor.opencode.model,
     codexBin: process.env.OPENSPEC_SHIPPER_CODEX_BIN ?? shipperConfig?.executor.codex.bin ?? "codex",
     codexModel: optionalEnv("OPENSPEC_SHIPPER_CODEX_MODEL") ?? shipperConfig?.executor.codex.model,
+    codexReasoningEffort: optionalEnv("OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT") ?? shipperConfig?.executor.codex.reasoningEffort,
     opencodePrintLogs: (process.env.OPENSPEC_SHIPPER_PRINT_LOGS ?? process.env.OPENCODE_PRINT_LOGS) === "1",
     opencodeLogLevel: optionalEnv("OPENSPEC_SHIPPER_LOG_LEVEL") ?? optionalEnv("OPENCODE_LOG_LEVEL"),
     opencodeStats: (process.env.OPENSPEC_SHIPPER_STATS ?? process.env.OPENCODE_STATS) === "1",
@@ -1212,6 +1214,7 @@ function buildConfiguredProviderCommand(config: RunnerConfig, task: QueueTask): 
         codex: {
           bin: config.codexBin ?? "codex",
           model: config.codexModel,
+          reasoningEffort: config.codexReasoningEffort,
         },
       },
       opencodePrintLogs: config.opencodePrintLogs,

@@ -20,6 +20,7 @@ export type ShipperConfig = {
     codex: {
       bin: string;
       model?: string;
+      reasoningEffort?: string;
     };
   };
   github: {
@@ -68,7 +69,8 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
       },
       codex: {
         bin: "codex",
-        model: "gpt-5.4",
+        model: "gpt-5.5",
+        reasoningEffort: "low",
       },
     },
     github: {

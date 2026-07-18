@@ -1,5 +1,5 @@
 ---
-description: Archive one merged completed OpenSpec change from main
+description: Archive one merged completed OpenSpec change from the base branch
 agent: openspec-archive-worker
 ---
 
@@ -14,10 +14,11 @@ queue task.
 
 Goals:
 
-- Run only from the root `main` checkout.
+- Run only from the root base branch checkout.
 - Select exactly one merged completed OpenSpec change.
 - Validate and archive that change.
-- Commit and push the archive/spec-sync result on `main`.
+- Leave the archive/spec-sync diff for the OpenSpec Shipper runner to commit
+  and push.
 - Stop and report clearly if blocked.
 
 Important:

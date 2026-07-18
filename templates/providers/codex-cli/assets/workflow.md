@@ -5,7 +5,8 @@ execution surface for implementation agents.
 
 ## Core Model
 
-- `main` is the canonical OpenSpec planning, sync, and archive checkout.
+- The configured base branch is the canonical OpenSpec planning, sync, and
+  archive checkout. It defaults to `main`.
 - Implementation work runs only in `worktrees/<change-name>`.
 - The shipper runner owns the native `prepare_worktree` phase. Codex must not
   create branches or worktrees during `implement`.
@@ -71,9 +72,10 @@ invent a scope.
 - `push` is native OpenSpec Shipper logic: it validates the completed worktree,
   pushes the selected implementation branch, and creates or reuses a PR with
   `gh`.
-- `sync_main` is native OpenSpec Shipper logic: it reconciles root `main` with
-  `origin/main`.
-- `archive` runs OpenSpec archive from root `main` and pushes the archive/spec
-  diff. It must not clean worktrees.
+- `sync_main` is native OpenSpec Shipper logic: it reconciles the root base
+  branch checkout with its origin branch.
+- `archive` runs OpenSpec archive from the root base branch checkout and leaves
+  the archive/spec diff for the runner. It must not commit, push, or clean
+  worktrees.
 - `cleanup_worktree` is native OpenSpec Shipper logic: it removes only clean
   local implementation worktrees and merged local branches.

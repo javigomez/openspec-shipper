@@ -14,7 +14,7 @@ describe("doctor", () => {
 
     expect(check.ok).toBe(false);
     expect(check.severity).toBe("error");
-    expect(check.message).toContain("Main checkout has uncommitted non-runtime changes");
+    expect(check.message).toContain("main checkout has uncommitted non-runtime changes");
     expect(check.message).toContain("package.json");
   });
 

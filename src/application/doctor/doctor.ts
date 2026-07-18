@@ -35,7 +35,8 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
 
   checks.push(checkCommand("git", ["rev-parse", "--is-inside-work-tree"], projectDir, "Git repository detected"));
   checks.push(checkCommand("git", ["rev-parse", "--verify", config?.baseBranch ?? "main"], projectDir, "Base branch exists"));
-  checks.push(checkWorkingTreeClean(projectDir));
+  checks.push(checkGitIdentity(projectDir));
+  checks.push(checkWorkingTreeClean(projectDir, config?.baseBranch ?? "main"));
   checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for pull request management"));
   checks.push(checkGitHubCliAuth(projectDir));
   checks.push(checkGitHubPullRequestAccess(projectDir));
@@ -128,8 +129,32 @@ function checkCommand(command: string, args: string[], cwd: string, successMessa
   return ok(command, successMessage);
 }
 
-export function checkWorkingTreeClean(projectDir: string): DoctorCheck {
-  const result = spawnSync("git", ["status", "--short"], {
+function checkGitIdentity(projectDir: string): DoctorCheck {
+  const name = spawnSync("git", ["config", "--get", "user.name"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const email = spawnSync("git", ["config", "--get", "user.email"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const missing = [
+    name.status === 0 && name.stdout.trim() ? undefined : "user.name",
+    email.status === 0 && email.stdout.trim() ? undefined : "user.email",
+  ].filter(Boolean);
+
+  return missing.length === 0
+    ? ok("git identity", "Git user.name and user.email are configured")
+    : error(
+        "git identity",
+        `Git identity is missing ${missing.join(", ")}; configure it before running phases that commit changes`,
+      );
+}
+
+export function checkWorkingTreeClean(projectDir: string, baseBranch = "main"): DoctorCheck {
+  const result = spawnSync("git", ["status", "--short", "--untracked-files=all"], {
     cwd: projectDir,
     encoding: "utf8",
     timeout: 10_000,
@@ -149,13 +174,13 @@ export function checkWorkingTreeClean(projectDir: string): DoctorCheck {
       .filter(Boolean),
   );
   if (dirty.length === 0) {
-    return ok("working tree", "No non-runtime changes in the main checkout");
+    return ok("working tree", `No non-runtime changes in the ${baseBranch} checkout`);
   }
 
   return error(
     "working tree",
     [
-      "Main checkout has uncommitted non-runtime changes.",
+      `${baseBranch} checkout has uncommitted non-runtime changes.`,
       "Commit or stash them before running the queue.",
       `Dirty paths: ${formatDirtyStatus(dirty)}.`,
     ].join(" "),

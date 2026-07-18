@@ -22,14 +22,15 @@ The installer created or updated these project assets:
 
 ## Required After Init
 
-Review and commit the installed project assets on `main` before running the
-queue. The native `prepare_worktree` phase creates feature worktrees from `HEAD`; if `main` is
+Review and commit the installed project assets on the configured base branch
+(`main` by default) before running the queue. The native `prepare_worktree`
+phase creates feature worktrees from `HEAD`; if the base branch is
 dirty after `init`, the new worktree would miss the freshly installed scripts,
 provider commands, and package changes.
 
-`openspec-shipper doctor` checks this and fails when `main` has non-runtime
-changes. Ignored runtime files such as `.openspec-shipper/queue.md`, logs, lock
-files, and `worktrees/` are allowed.
+`openspec-shipper doctor` checks this and fails when the base branch checkout
+has non-runtime changes. Ignored runtime files such as
+`.openspec-shipper/queue.md`, logs, lock files, and `worktrees/` are allowed.
 
 Local queue state remains ignored and should not be committed:
 

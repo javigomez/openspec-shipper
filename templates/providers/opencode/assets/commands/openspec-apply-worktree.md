@@ -14,7 +14,7 @@ task.
 
 Goals:
 
-- Discover the requested OpenSpec change from the root `main` checkout.
+- Discover the requested OpenSpec change from the root base branch checkout.
 - Continue exactly one prepared change in its deterministic worktree.
 - Implement scoped progress, validate appropriately, and commit useful progress.
 - Stop and report clearly if blocked.

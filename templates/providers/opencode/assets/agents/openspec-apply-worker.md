@@ -40,11 +40,12 @@ git branch --show-current
 git status --short
 ```
 
-If the current branch is not `main`, stop and report that the implement queue must
-be discovered from the root `main` checkout.
+If the current branch is not the configured base branch, stop and report that the
+implement queue must be discovered from the root base branch checkout.
 
-If `main` is dirty, do not edit it. Continue only inside the already prepared
-change worktree. Do not run `git pull --ff-only` from a dirty `main`.
+If the base branch checkout is dirty, do not edit it. Continue only inside the
+already prepared change worktree. Do not run `git pull --ff-only` from a dirty
+base branch checkout.
 
 Use relative repository paths only. Never invent or type absolute paths under
 `/Users/...`; if an absolute path is needed, derive it from `pwd` first. If a
@@ -97,7 +98,7 @@ A ready change has:
 - an already prepared `worktrees/<change-name>` worktree
 
 If a change exists only in a worktree, treat that worktree as the authoritative
-place to continue the change only when the root `main` checkout confirms that
+place to continue the change only when the root base branch checkout confirms that
 the change has not already been archived.
 
 Skip changes that already have an open PR when `gh` can confirm it. If `gh` is
@@ -138,7 +139,7 @@ Once inside the selected worktree:
    `/worktrees/`, rerun Jest from this worktree with `testPathIgnorePatterns`
    overridden to exclude only real ignored paths such as `/node_modules/`,
    `/tests/e2e/`, and `/.stryker-tmp/`; do not validate by rerunning from
-   `main`.
+   the base branch checkout.
 6. Run scoped Prettier on changed files before committing.
 7. Commit useful progress with a conventional commit.
 

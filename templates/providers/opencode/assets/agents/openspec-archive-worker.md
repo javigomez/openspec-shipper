@@ -1,5 +1,5 @@
 ---
-description: Archives one merged completed OpenSpec change from main
+description: Archives one merged completed OpenSpec change from the base branch
 mode: primary
 temperature: 0.1
 ---
@@ -26,15 +26,15 @@ OPENSPEC_SHIPPER_BLOCKED: <short reason>
 ```
 
 Use this line for missing tools, missing permissions, failed checks, dirty
-state, ineligible changes, unsafe git state, failed archive pushes, or anything
+state, ineligible changes, unsafe git state, failed archive reconciliation, or anything
 requiring human action. Do not include this line when the phase completes
 successfully.
 
 ## Boundaries
 
 This worker archives changes after their implementation PRs have merged into
-`main`. It MUST NOT run from a change worktree. It MUST NOT create or update
-pull requests.
+the configured base branch. It MUST NOT run from a change worktree. It MUST NOT
+create or update pull requests.
 
 Use OpenSpec native state only. Do not create extra worker metadata such as
 `automation.yaml`.
@@ -45,15 +45,15 @@ Set `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1` for every OpenSpec CLI invocation.
 
 Before doing anything:
 
-1. Verify the current checkout is the repository root on `main`.
-2. Verify `git status --short` is clean. If dirty, report the dirty-main blocker
-   and stop.
-3. Run `git pull --ff-only`. If network or SSH access is unavailable, retry once
-   outside the sandbox when possible. If it still fails, stop without archiving.
-4. Verify repo-local Git identity is configured with `git config user.name` and
-   `git config user.email`.
+1. Verify the current checkout is the repository root on the configured base
+   branch, which defaults to `main`.
+2. Verify `git status --short` is clean. If dirty, report the dirty base branch
+   blocker and stop.
+3. Do not run `git pull`, `git fetch`, `git rebase`, `git commit`, or `git push`.
+   The OpenSpec Shipper runner owns Git synchronization, staging, commit, rebase,
+   and push for this phase.
 
-List active OpenSpec changes on `main`.
+List active OpenSpec changes on the base branch.
 
 If invocation arguments name a target change, inspect only that change. If it is
 not archive-ready, stop and report the exact blocker instead of selecting
@@ -67,7 +67,7 @@ blocker:
 - If exactly one archived directory exists, treat the OpenSpec archive step as
   already complete and exit successfully.
 - Do not run `openspec archive <change-name>` again.
-- Do not create an archive commit when there is no archive/spec diff to commit.
+- Do not create an archive commit when there is no archive/spec diff.
 - Do not clean local worktrees or branches; that belongs to the cleanup_worktree phase.
 - Do not emit `OPENSPEC_SHIPPER_BLOCKED`.
 - If more than one archived directory matches, or the archived directory is
@@ -79,7 +79,7 @@ Select exactly one archive candidate. A valid candidate has:
 - `design.md`
 - `tasks.md`
 - at least one `specs/**/spec.md`
-- every task checkbox complete on `main`
+- every task checkbox complete on the base branch
 - a passing `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`
 
 If no merged change is archive-ready, report that and stop. Do not run checks,
@@ -88,20 +88,15 @@ commit, or push.
 For the selected change:
 
 1. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`.
-2. Before archiving, inspect `.openspec-shipper/config.json` when it exists. If it
-   contains `"enableArchive": false`, stop and report that OpenSpec Shipper archive
-   safety is disabled. Do not archive until a human enables it.
-3. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec archive <change-name> -y`.
-4. Inspect the diff and verify it only touches OpenSpec change/archive and
+2. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec archive <change-name> -y`.
+3. Inspect the diff and verify it only touches OpenSpec change/archive and
    canonical spec files.
-5. Stage only archive/spec-sync paths. Never use `git add .`.
-6. Commit on `main` with `chore: archive <change-name>`.
-7. Fetch/rebase against `origin/main` once before pushing.
-8. Push `main`.
+4. Leave the archive/spec diff unstaged or staged only if a previous command did
+   so automatically. Do not commit it. Do not push it. The runner will stage only
+   allowed OpenSpec paths, commit, rebase, and push after this agent exits.
 
-After push succeeds, do not clean local implementation artifacts. The cleanup_worktree
-phase owns local worktree and branch removal.
+After the archive command succeeds, do not clean local implementation artifacts.
+The cleanup_worktree phase owns local worktree and branch removal.
 
-If archive, commit, final fetch/rebase, or push fails, report the exact command
-and output, include the `OPENSPEC_SHIPPER_BLOCKED:` final line, so a later run
-or human can resume.
+If archive reconciliation fails, report the exact command and output, include the
+`OPENSPEC_SHIPPER_BLOCKED:` final line, so a later run or human can resume.

@@ -45,7 +45,7 @@ export async function runCli(argv: string[]): Promise<void> {
     console.log("Next steps:");
     console.log("  Authenticate GitHub CLI if this machine is not already authenticated:");
     console.log("  gh auth login");
-    console.log("  Review and commit the installed files on main before running the queue.");
+    console.log("  Review and commit the installed files on the configured base branch before running the queue.");
     console.log("  Do not commit .openspec-shipper/.env, queue.md, shipper.lock, stop, runs/, tmp/, or worktrees/.");
     console.log("  git status --short");
     console.log("  git add <installed files you want to track>");

@@ -297,7 +297,7 @@ function defaultScripts(): Record<string, string> {
     "openspec:cli": "env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec",
     "openspec:validate-proposal": "node .openspec-shipper/scripts/validate-openspec-proposal.mjs",
     "lint:branch": "node .openspec-shipper/scripts/validate-branch-name.mjs",
-    "lint:commits": "commitlint --from origin/main --to HEAD",
+    "lint:commits": "commitlint --from origin/$(git branch --show-current) --to HEAD",
   };
 }
 

@@ -29,10 +29,10 @@ reconcile PR state before spending tokens. That is how `push` becomes
 `waiting_for_merge`, and how `waiting_for_merge` becomes `sync_main` after a PR
 has been merged.
 
-Before running the queue, `main` should be clean except for ignored shipper
+Before running the queue, the configured base branch (`main` by default) should be clean except for ignored shipper
 runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
 `worktrees/`. `doctor` fails when it sees non-runtime changes because the native
-`prepare_worktree` phase creates feature worktrees from the main checkout.
+`prepare_worktree` phase creates feature worktrees from the base branch checkout.
 
 ## Commands
 
@@ -162,8 +162,8 @@ The installer does not overwrite the target repo's root `README.md`; that file
 belongs to the application. A repo-local usage guide is installed at
 `.openspec-shipper/README.md`.
 
-Commit the installed project assets on `main` before running the queue. The
-native `prepare_worktree` phase creates feature worktrees from `HEAD`; if `main` is dirty after
+Commit the installed project assets on the configured base branch (`main` by default)
+before running the queue. The native `prepare_worktree` phase creates feature worktrees from `HEAD`; if the base branch is dirty after
 `init`, the new worktree would miss the freshly installed scripts,
 provider commands, and package changes. Local queue state remains ignored.
 
@@ -240,7 +240,8 @@ implementation inside that prepared workspace.
 
 `waiting_for_merge` is intentionally not runnable. The runner uses `gh` to
 notice when the PR has merged and then reconciles the task to `phase: sync_main`, so
-the shipper can synchronize local `main`, archive safely, and clean local artifacts.
+the shipper can synchronize the configured base branch, archive safely, and
+clean local artifacts.
 
 ### Reverse State Inference
 
@@ -282,12 +283,13 @@ After fixing the cause, change only `[!]` to `[ ]`. The next queue command will
 remove the hint, reconcile the task from repository evidence, and retry or move
 it to the correct phase.
 
-The `archive` phase is OpenSpec-native: it validates, runs
-`openspec archive <change-name> -y`, commits, and pushes the archive/spec diff on
-`main`. The `cleanup_worktree` phase is OpenSpec Shipper housekeeping: it
-removes a clean local `worktrees/<change-name>` worktree and deletes the merged
-local branch with `git branch -d` when safe. If there is nothing left to clean,
-cleanup succeeds as a no-op.
+The `archive` phase keeps the intelligent work narrow: the provider validates
+and reconciles OpenSpec archive/spec files, then the runner owns the deterministic
+Git finalization: staging only OpenSpec paths, committing, rebasing, and pushing
+to the configured base branch. The `cleanup_worktree` phase is OpenSpec Shipper
+housekeeping: it removes a clean local `worktrees/<change-name>` worktree and
+deletes the merged local branch with `git branch -d` when safe. If there is
+nothing left to clean, cleanup succeeds as a no-op.
 
 ## Providers
 

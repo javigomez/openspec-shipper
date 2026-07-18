@@ -5,17 +5,19 @@ execution surface for agents.
 
 ## Core Model
 
-- `main` is the canonical OpenSpec planning and archive checkout.
+- The configured base branch is the canonical OpenSpec planning and archive checkout.
+  It defaults to `main`.
 - Create, continue, list, status, sync, validate proposal artifacts, and
-  archive OpenSpec changes on `main`.
+  archive OpenSpec changes on the base branch.
 - The shipper runner prepares deterministic worktrees before model-driven
   implementation starts.
 - Only apply/implementation work runs in the selected change worktree.
-- Never edit product code for an OpenSpec change directly on `main`.
+- Never edit product code for an OpenSpec change directly on the base branch.
 - Pull requests are created after implementation, before archive.
-- Archive only after the PR is merged and `main` has been pulled.
-- A main sync worker may reconcile local `main` with `origin/main`; it must not
-  edit files or create commits.
+- Archive only after the PR is merged and the native `sync_main` phase has
+  reconciled the base branch with origin.
+- The native runner reconciles the base branch with origin; agents must not
+  edit files or create commits for `sync_main`.
 
 ## Branches and Worktrees
 
@@ -108,30 +110,29 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 
 ## Proposal Phase
 
-1. Run only from root `main`.
-2. Verify `main` is clean.
+1. Run only from the root base branch checkout.
+2. Verify the base branch checkout is clean.
 3. Create or continue the OpenSpec proposal artifacts.
 4. Validate the change before treating it as durable.
 5. If your repo adds a stricter proposal wrapper, run that wrapper here.
-6. Commit complete proposal artifacts on `main`.
+6. Commit complete proposal artifacts on the base branch.
 
 ## Prepare Phase
 
-1. Run from root `main`.
-2. Verify `main` is clean. If it is dirty, keep discovery on the local
+1. Run from the root base branch checkout.
+2. Verify the base branch checkout is clean. If it is dirty, keep discovery on the local
    snapshot and stop before creating a new worktree.
-3. Pull with `git pull --ff-only` when network is available and `main` is
-   clean.
+3. Do not pull, push, or create worktrees directly; the native
+   `prepare_worktree` phase owns that setup.
 4. List active OpenSpec changes.
 5. Skip incomplete scaffolds and 100% complete changes.
 6. Skip changes with an existing open PR.
 7. Continue an existing branch/worktree when present.
-8. Create `worktrees/<change-name>` only when no claim exists.
-9. Do not edit product code and do not mark OpenSpec tasks complete.
+8. Do not edit product code and do not mark OpenSpec tasks complete.
 
 ## Apply Phase
 
-1. Run discovery from root `main`.
+1. Run discovery from the root base branch checkout.
 2. Verify the selected `worktrees/<change-name>` already exists.
 3. Never create branches or worktrees in implement; the native `prepare_worktree` phase owns
    that setup.
@@ -150,22 +151,20 @@ the pull request with GitHub CLI.
 
 ## Archive Phase
 
-1. Run only from root `main`.
-2. Verify `main` is clean.
-3. Run `git pull --ff-only`.
-4. Select changes whose tasks are 100% complete on `main`.
+1. Run only from the root base branch checkout.
+2. Verify the base branch checkout is clean.
+3. Do not run `git pull`, `git fetch`, `git rebase`, `git commit`, or `git push`.
+   The runner owns Git synchronization and finalization for archive.
+4. Select changes whose tasks are 100% complete on the base branch.
 5. Select exactly one eligible change per run. Do not archive batches.
 6. Run `openspec validate <change-name>`.
 7. Run `openspec archive <change-name> -y`.
-8. Stage only OpenSpec archive/spec files.
-9. Commit archive result on `main`.
-10. Fetch/rebase before push to avoid divergence.
-11. Push `main`.
-12. If push fails, stop with at most one local archive commit.
-13. Do not clean local worktrees or branches in this phase.
+8. Verify the diff only touches OpenSpec change/archive and canonical spec files.
+9. Leave the diff for the runner to stage, commit, rebase, and push.
+10. Do not clean local worktrees or branches in this phase.
 
 ## Native Cleanup And Main Sync Phases
 
 OpenSpec Shipper owns `cleanup_worktree` and `sync_main` in runner code. OpenCode
-agents must not remove worktrees, delete branches, reconcile `main`, or call
-GitHub APIs for these phases.
+agents must not remove worktrees, delete branches, reconcile the base branch, or
+call GitHub APIs for these phases.

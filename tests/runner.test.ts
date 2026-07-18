@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { defaultConfig, detectMainSyncStatus, runQueue, type Executor, type RunnerConfig } from "../src/runner";
+import { defaultConfig, detectMainSyncStatus, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT } from "../src/queue";
 import { installCodexTemplates } from "../src/application/init/setup";
 import { silenceConsoleDuringTests } from "./test-console";
@@ -356,12 +356,15 @@ describe("runner", () => {
   test("advances deliver push phase to waiting for merge after opening a PR", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let pushedBranch = "";
+    let baseBranch = "";
 
     const exitCode = await runQueue("next", {
       ...harness.config,
+      baseBranch: "develop",
       ...implementedChangeEvidence("add-name-greeting"),
       pushBranchAndOpenPullRequest: async (input) => {
         pushedBranch = input.branch;
+        baseBranch = input.baseBranch;
         return "pushed and opened PR\n";
       },
       executor: cleanExecutor,
@@ -369,6 +372,7 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     expect(pushedBranch).toBe("feat/add-name-greeting");
+    expect(baseBranch).toBe("develop");
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
@@ -391,6 +395,63 @@ describe("runner", () => {
     expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
     expect(queue).toContain("phase: cleanup_worktree");
     expect(queue).toContain("![cleanup_worktree ready](https://img.shields.io/badge/cleanup_worktree-ready-blue)");
+  });
+
+  test("finalizes archive by committing and pushing OpenSpec diff", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-archive-finalize-"));
+    const originDir = join(rootDir, "origin.git");
+    const projectDir = join(rootDir, "project");
+
+    git(rootDir, ["init", "--bare", originDir]);
+    await mkdir(projectDir, { recursive: true });
+    git(projectDir, ["init", "-b", "main"]);
+    git(projectDir, ["config", "user.name", "Test User"]);
+    git(projectDir, ["config", "user.email", "test@example.com"]);
+    git(projectDir, ["remote", "add", "origin", originDir]);
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await mkdir(join(projectDir, ".opencode/commands"), { recursive: true });
+    await writeFile(join(projectDir, ".gitignore"), ".openspec-shipper/queue.md\n.openspec-shipper/runs/\n");
+    await writeFile(join(projectDir, ".openspec-shipper/config.json"), JSON.stringify({ safety: { enableArchive: true } }));
+    await writeFile(join(projectDir, ".opencode/commands/openspec-archive-merged.md"), "archive\n");
+    await writeFile(join(projectDir, "README.md"), "demo\n");
+    git(projectDir, ["add", "."]);
+    git(projectDir, ["commit", "-m", "chore: initial"]);
+    git(projectDir, ["push", "-u", "origin", "main"]);
+
+    const queuePath = join(projectDir, ".openspec-shipper/queue.md");
+    await writeFile(queuePath, "- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+
+    const exitCode = await runQueue("next", {
+      rootDir: projectDir,
+      projectDir,
+      queuePath,
+      stateDir: join(projectDir, ".openspec-shipper"),
+      opencodeBin: "mock-opencode",
+      opencodeStatsIntervalMs: 120_000,
+      opencodeStatsTimeoutMs: 10_000,
+      opencodeStatsProject: "",
+      loopDelayMs: 0,
+      busyDelayMs: 0,
+      taskTimeoutMs: 1_000,
+      heartbeatMs: 0,
+      maxBlockedTasks: 0,
+      executor: async () => {
+        const archiveDir = join(projectDir, "openspec/changes/archive/2026-07-18-add-name-greeting");
+        await mkdir(archiveDir, { recursive: true });
+        await mkdir(join(projectDir, "openspec/specs/hello-cli"), { recursive: true });
+        await writeFile(join(archiveDir, "proposal.md"), "proposal\n");
+        await writeFile(join(archiveDir, "design.md"), "design\n");
+        await writeFile(join(archiveDir, "tasks.md"), "- [x] done\n");
+        await writeFile(join(projectDir, "openspec/specs/hello-cli/spec.md"), "## Purpose\n\nGreeting.\n");
+        return { exitCode: 0, output: "archived\n" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(git(projectDir, ["log", "-1", "--pretty=%s"]).trim()).toBe("chore: archive add-name-greeting");
+    expect(git(originDir, ["rev-parse", "main"]).trim()).toBe(git(projectDir, ["rev-parse", "HEAD"]).trim());
+    const queue = await readFile(queuePath, "utf8");
+    expect(queue).toContain("phase: cleanup_worktree");
   });
 
   test("marks a deliver task done after cleanup succeeds", async () => {
@@ -1046,7 +1107,7 @@ describe("runner", () => {
     expect(queue).toContain("no existing worktree or branch for add-name-greeting");
   });
 
-  test("fast-forwards main before preparing a worktree when it is behind origin", async () => {
+  test("detects synchronizable main without mutating when it is behind origin", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "shipper-main-sync-"));
     const originDir = join(rootDir, "origin.git");
     const seedDir = join(rootDir, "seed");
@@ -1074,11 +1135,67 @@ describe("runner", () => {
     const status = await detectMainSyncStatus(cloneDir);
 
     expect(status).toEqual({ ok: true });
-    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).not.toBe(before);
-    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(git(cloneDir, ["rev-parse", "@{u}"]).trim());
+    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(before);
   });
 
-  test("uses origin main when local main has no upstream configured", async () => {
+  test("dry-run prepare does not push local main commits", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-dry-run-no-push-"));
+    const originDir = join(rootDir, "origin.git");
+    const seedDir = join(rootDir, "seed");
+    const cloneDir = join(rootDir, "clone");
+
+    git(rootDir, ["init", "--bare", originDir]);
+    await mkdir(seedDir, { recursive: true });
+    git(seedDir, ["init", "-b", "main"]);
+    git(seedDir, ["config", "user.name", "Test User"]);
+    git(seedDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(seedDir, "README.md"), "one\n");
+    git(seedDir, ["add", "README.md"]);
+    git(seedDir, ["commit", "-m", "chore: initial"]);
+    git(seedDir, ["remote", "add", "origin", originDir]);
+    git(seedDir, ["push", "-u", "origin", "main"]);
+
+    git(rootDir, ["clone", originDir, cloneDir]);
+    git(cloneDir, ["config", "user.name", "Test User"]);
+    git(cloneDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(cloneDir, ".gitignore"), ".openspec-shipper/queue.md\n");
+    await mkdir(join(cloneDir, "openspec/changes/add-name-greeting/specs/hello-cli"), { recursive: true });
+    await writeFile(join(cloneDir, "openspec/changes/add-name-greeting/proposal.md"), "proposal\n");
+    await writeFile(join(cloneDir, "openspec/changes/add-name-greeting/design.md"), "design\n");
+    await writeFile(join(cloneDir, "openspec/changes/add-name-greeting/tasks.md"), "- [ ] implement\n");
+    await writeFile(join(cloneDir, "openspec/changes/add-name-greeting/specs/hello-cli/spec.md"), "spec\n");
+    git(cloneDir, ["add", ".gitignore", "openspec"]);
+    git(cloneDir, ["commit", "-m", "chore: local proposal"]);
+
+    const queuePath = join(cloneDir, ".openspec-shipper/queue.md");
+    await mkdir(join(cloneDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(queuePath, "- [ ] deliver add-name-greeting\n");
+    const localHead = git(cloneDir, ["rev-parse", "HEAD"]).trim();
+    const originBefore = git(cloneDir, ["rev-parse", "origin/main"]).trim();
+
+    const exitCode = await runQueue("dry-run", {
+      rootDir: cloneDir,
+      projectDir: cloneDir,
+      queuePath,
+      stateDir: join(cloneDir, ".openspec-shipper"),
+      opencodeBin: "mock-opencode",
+      opencodeStatsIntervalMs: 120_000,
+      opencodeStatsTimeoutMs: 10_000,
+      opencodeStatsProject: "",
+      loopDelayMs: 0,
+      busyDelayMs: 0,
+      taskTimeoutMs: 1_000,
+      heartbeatMs: 0,
+      maxBlockedTasks: 0,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(localHead);
+    expect(git(cloneDir, ["rev-parse", "origin/main"]).trim()).toBe(originBefore);
+    expect(git(originDir, ["rev-parse", "main"]).trim()).toBe(originBefore);
+  });
+
+  test("synchronizes main by pushing local commits when no upstream is configured", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "shipper-main-no-upstream-"));
     const originDir = join(rootDir, "origin.git");
     const seedDir = join(rootDir, "seed");
@@ -1103,9 +1220,9 @@ describe("runner", () => {
     git(cloneDir, ["add", "local.txt"]);
     git(cloneDir, ["commit", "-m", "chore: local"]);
 
-    const status = await detectMainSyncStatus(cloneDir);
+    const output = await synchronizeBaseBranchWithOrigin(cloneDir, "main");
 
-    expect(status).toEqual({ ok: true });
+    expect(output).toContain("main");
     expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(git(cloneDir, ["rev-parse", "origin/main"]).trim());
   });
 
@@ -1443,9 +1560,11 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     gitRemoteDetector: async () => "git@github.com:example/project.git",
     gitStatusDetector: async () => [],
     mainSyncDetector: async () => ({ ok: true }),
+    syncBaseBranch: async (_projectDir, baseBranch) => `synced ${baseBranch}\n`,
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
     prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,
+    finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };
 

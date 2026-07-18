@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream, existsSync, rmSync, writeFileSync } from "node:fs";
-import { access, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -41,6 +41,7 @@ export type RunnerConfig = {
   projectDir: string;
   queuePath: string;
   stateDir: string;
+  baseBranch?: string;
   providerId?: ExecutorProviderId;
   opencodeBin: string;
   opencodeModel?: string;
@@ -73,9 +74,11 @@ export type RunnerConfig = {
   pullRequestDetector?: PullRequestDetector;
   mergedPullRequestDetector?: MergedPullRequestDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
+  syncBaseBranch?: SyncBaseBranch;
   prepareWorkspace?: PrepareWorkspace;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
   cleanupWorkspace?: CleanupWorkspace;
+  finalizeArchive?: FinalizeArchive;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -112,7 +115,7 @@ export type ExecutorResult = {
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
 export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
-export type MainSyncDetector = (projectDir: string) => Promise<MainSyncStatus>;
+export type MainSyncDetector = (projectDir: string, baseBranch: string) => Promise<MainSyncStatus>;
 export type ActiveChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type ArchivedChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
@@ -122,11 +125,13 @@ export type PullRequestDetector = (projectDir: string, branch: string) => Promis
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
+export type SyncBaseBranch = (projectDir: string, baseBranch: string) => Promise<string>;
 export type PrepareWorkspaceInput = {
   projectDir: string;
   changeName: string;
   branch: string;
   worktreeDir: string;
+  baseBranch: string;
 };
 export type PushBranchAndOpenPullRequest = (input: PushBranchInput) => Promise<string>;
 export type PushBranchInput = {
@@ -134,6 +139,7 @@ export type PushBranchInput = {
   changeName: string;
   branch: string;
   worktreeDir: string;
+  baseBranch: string;
 };
 export type CleanupWorkspace = (input: CleanupWorkspaceInput) => Promise<string>;
 export type CleanupWorkspaceInput = {
@@ -142,6 +148,12 @@ export type CleanupWorkspaceInput = {
   branch: string;
   worktreeDir: string;
 };
+export type FinalizeArchiveInput = {
+  projectDir: string;
+  changeName: string;
+  baseBranch: string;
+};
+export type FinalizeArchive = (input: FinalizeArchiveInput) => Promise<string>;
 export type Sleep = (ms: number) => Promise<void>;
 
 type MainSyncStatus =
@@ -171,6 +183,7 @@ export function defaultConfig(): RunnerConfig {
     projectDir,
     queuePath: process.env.OPENSPEC_SHIPPER_QUEUE_PATH ?? process.env.QUEUE_PATH ?? join(projectDir, DEFAULT_QUEUE_PATH),
     stateDir,
+    baseBranch: shipperConfig?.baseBranch ?? "main",
     providerId: (process.env.OPENSPEC_SHIPPER_PROVIDER as ExecutorProviderId | undefined) ?? shipperConfig?.executor.provider ?? "opencode",
     opencodeBin: process.env.OPENSPEC_SHIPPER_OPENCODE_BIN ?? process.env.OPENCODE_BIN ?? shipperConfig?.executor.opencode.bin ?? "opencode",
     opencodeModel: optionalEnv("OPENSPEC_SHIPPER_OPENCODE_MODEL") ?? optionalEnv("OPENCODE_MODEL") ?? shipperConfig?.executor.opencode.model,
@@ -558,6 +571,14 @@ async function validateTaskPreflight(
     return { ok: true, commandPath };
   }
 
+  if (phase === "archive" && readShipperConfigSync(config.projectDir)?.safety.enableArchive === false) {
+    return {
+      ok: false,
+      commandPath,
+      reason: "OpenSpec Shipper archive safety is disabled in .openspec-shipper/config.json.",
+    };
+  }
+
   if (currentProvider.id === "codex-cli") {
     const workflowPath = codexWorkflowPath(config.projectDir);
     if (!(await fileExists(workflowPath))) {
@@ -626,8 +647,8 @@ async function validatePrepareCanCreateWorktree(config: RunnerConfig, task: Queu
   }
 
   return [
-    `Main checkout has uncommitted changes and no existing worktree or branch for ${task.change}.`,
-    "Commit or stash the changes on main before creating a new worktree.",
+    `${configuredBaseBranch(config)} checkout has uncommitted changes and no existing worktree or branch for ${task.change}.`,
+    `Commit or stash the changes on ${configuredBaseBranch(config)} before creating a new worktree.`,
     `Dirty paths: ${formatDirtyStatus(status)}.`,
   ].join(" ");
 }
@@ -651,6 +672,11 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
     if (!ghAuth.ok) {
       return `GitHub CLI is not authenticated: ${ghAuth.reason}. Run gh auth login, then openspec-shipper doctor.`;
     }
+
+    const gitIdentity = checkGitIdentity(config.projectDir);
+    if (!gitIdentity.ok) {
+      return gitIdentity.reason;
+    }
   }
 
   const worktreeDir = join(config.projectDir, "worktrees", task.change);
@@ -673,7 +699,11 @@ async function gitStatus(config: RunnerConfig): Promise<string[]> {
 
 async function gitMainSyncStatus(config: RunnerConfig): Promise<MainSyncStatus> {
   const detector = config.mainSyncDetector ?? detectMainSyncStatus;
-  return await detector(config.projectDir);
+  return await detector(config.projectDir, configuredBaseBranch(config));
+}
+
+function configuredBaseBranch(config: RunnerConfig): string {
+  return config.baseBranch ?? "main";
 }
 
 async function executeTask(
@@ -713,6 +743,31 @@ async function executeTask(
 
   const failureSignal = provider(config).detectFailureSignal(result.output);
   if (result.exitCode === 0 && !failureSignal) {
+    if (task.action === "deliver" && deliverPhase(task) === "archive" && task.change) {
+      try {
+        const archiveFinalizer = config.finalizeArchive ?? finalizeArchive;
+        const finalizeOutput = await archiveFinalizer({
+          projectDir: config.projectDir,
+          changeName: task.change,
+          baseBranch: configuredBaseBranch(config),
+        });
+        await appendFile(logPath, `\n## Native archive finalization\n\n${finalizeOutput}`);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await appendFile(logPath, `\n## Native archive finalization failed\n\n${reason}\n`);
+        const nextContent = markTask(lines, task, "blocked", {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          reason,
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        });
+        await writeFile(config.queuePath, nextContent);
+        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+        return 1;
+      }
+    }
+
     const nextContent = advanceDeliverTask(lines, task, {
       timestamp: (config.now?.() ?? new Date()).toISOString(),
       logPath: relativeLogPath,
@@ -924,7 +979,7 @@ function describeNativeTask(task: QueueTask): string {
     return `prepare worktree for ${task.change}`;
   }
   if (phase === "sync_main") {
-    return "synchronize main with origin";
+    return "synchronize base branch with origin";
   }
   if (phase === "push" && task.change) {
     return `push ${task.change} and open a pull request`;
@@ -998,11 +1053,8 @@ async function executeNativeTask(
 async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<string> {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
   if (phase === "sync_main") {
-    const syncStatus = await gitMainSyncStatus(config);
-    if (!syncStatus.ok) {
-      throw new Error(syncStatus.reason);
-    }
-    return "Main is synchronized with origin.\n";
+    const syncer = config.syncBaseBranch ?? synchronizeBaseBranchWithOrigin;
+    return await syncer(config.projectDir, configuredBaseBranch(config));
   }
 
   if (phase === "push" && task.change) {
@@ -1014,6 +1066,7 @@ async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<str
       changeName: task.change,
       branch,
       worktreeDir,
+      baseBranch: configuredBaseBranch(config),
     });
   }
 
@@ -1041,6 +1094,7 @@ async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<str
     changeName: task.change,
     branch,
     worktreeDir,
+    baseBranch: configuredBaseBranch(config),
   });
 }
 
@@ -1319,7 +1373,7 @@ export async function detectGitRemoteOrigin(projectDir: string): Promise<string 
 }
 
 export async function detectGitStatus(projectDir: string): Promise<string[]> {
-  const result = spawnSync("git", ["-C", projectDir, "status", "--short"], { encoding: "utf8" });
+  const result = spawnSync("git", ["-C", projectDir, "status", "--short", "--untracked-files=all"], { encoding: "utf8" });
   if (result.status !== 0) {
     return [];
   }
@@ -1330,40 +1384,27 @@ export async function detectGitStatus(projectDir: string): Promise<string[]> {
     .filter(Boolean);
 }
 
-export async function detectMainSyncStatus(projectDir: string): Promise<MainSyncStatus> {
+export async function detectMainSyncStatus(projectDir: string, baseBranch = "main"): Promise<MainSyncStatus> {
   const branch = runGit(projectDir, ["branch", "--show-current"]).trim();
-  if (branch !== "main") {
-    return { ok: false, reason: `Prepare must run from main; current branch is ${branch || "(detached)"}.` };
+  if (branch !== baseBranch) {
+    return { ok: false, reason: `Prepare must run from ${baseBranch}; current branch is ${branch || "(detached)"}.` };
   }
 
-  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin"], {
+  const remoteBranch = spawnSync("git", ["-C", projectDir, "ls-remote", "--exit-code", "--heads", "origin", baseBranch], {
     env: childEnvForCwd(projectDir),
     encoding: "utf8",
+    timeout: 10_000,
   });
-  if (fetch.status !== 0) {
+  if (remoteBranch.status !== 0) {
     return {
       ok: false,
-      reason: `Cannot verify main is up to date with origin before preparing a worktree: ${formatGitError(fetch)}`,
+      reason: `Cannot verify ${baseBranch} against origin/${baseBranch} before preparing a worktree: ${formatGitError(remoteBranch)}`,
     };
   }
 
-  const upstream = spawnSync("git", ["-C", projectDir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-  });
-  let upstreamRef = "@{u}";
-  if (upstream.status !== 0) {
-    const originMain = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", "refs/remotes/origin/main"], {
-      env: childEnvForCwd(projectDir),
-      encoding: "utf8",
-    });
-    if (originMain.status !== 0) {
-      return {
-        ok: false,
-        reason: "Main has no upstream configured and origin/main does not exist; push main before preparing a worktree.",
-      };
-    }
-    upstreamRef = "origin/main";
+  const upstreamRef = localUpstreamRef(projectDir, baseBranch);
+  if (!upstreamRef) {
+    return { ok: true };
   }
 
   const head = runGit(projectDir, ["rev-parse", "HEAD"]).trim();
@@ -1373,40 +1414,95 @@ export async function detectMainSyncStatus(projectDir: string): Promise<MainSync
   }
 
   const base = runGit(projectDir, ["merge-base", "HEAD", upstreamRef]).trim();
+  if (base === head || base === upstreamHead) {
+    return { ok: true };
+  }
+
+  return { ok: false, reason: `${baseBranch} has diverged from origin/${baseBranch}; reconcile ${baseBranch} before preparing a new worktree.` };
+}
+
+function localUpstreamRef(projectDir: string, baseBranch: string): string | undefined {
+  const upstream = spawnSync("git", ["-C", projectDir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (upstream.status === 0) {
+    return "@{u}";
+  }
+
+  const originBase = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", `refs/remotes/origin/${baseBranch}`], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  return originBase.status === 0 ? `origin/${baseBranch}` : undefined;
+}
+
+export async function synchronizeBaseBranchWithOrigin(projectDir: string, baseBranch = "main"): Promise<string> {
+  const messages = [`Synchronizing ${baseBranch} with origin/${baseBranch}`];
+  const branch = runGit(projectDir, ["branch", "--show-current"]).trim();
+  if (branch !== baseBranch) {
+    throw new Error(`Sync must run from ${baseBranch}; current branch is ${branch || "(detached)"}.`);
+  }
+
+  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin"], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (fetch.status !== 0) {
+    throw new Error(`Cannot fetch origin before synchronizing ${baseBranch}: ${formatGitError(fetch)}`);
+  }
+
+  const upstreamRef = localUpstreamRef(projectDir, baseBranch) ?? `origin/${baseBranch}`;
+  const originBase = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", upstreamRef], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (originBase.status !== 0) {
+    throw new Error(`${baseBranch} has no upstream configured and origin/${baseBranch} does not exist; push ${baseBranch} before preparing a worktree.`);
+  }
+
+  const head = runGit(projectDir, ["rev-parse", "HEAD"]).trim();
+  const upstreamHead = runGit(projectDir, ["rev-parse", upstreamRef]).trim();
+  if (head === upstreamHead) {
+    messages.push(`${baseBranch} is already synchronized.`);
+    return `${messages.join("\n")}\n`;
+  }
+
+  const base = runGit(projectDir, ["merge-base", "HEAD", upstreamRef]).trim();
   if (base === head) {
     const merge = spawnSync("git", ["-C", projectDir, "merge", "--ff-only", upstreamRef], {
       env: childEnvForCwd(projectDir),
       encoding: "utf8",
     });
     if (merge.status === 0) {
-      return { ok: true };
+      messages.push(merge.stdout.trim() || `${baseBranch} fast-forwarded to ${upstreamRef}.`);
+      return `${messages.filter(Boolean).join("\n")}\n`;
     }
 
-    return {
-      ok: false,
-      reason: `Main is behind origin/main but could not be fast-forwarded before preparing a worktree: ${formatGitError(merge)}`,
-    };
+    throw new Error(`${baseBranch} is behind ${upstreamRef} but could not be fast-forwarded: ${formatGitError(merge)}`);
   }
 
   if (base === upstreamHead) {
-    const push = spawnSync("git", ["-C", projectDir, "push", "origin", "main"], {
+    const push = spawnSync("git", ["-C", projectDir, "push", "origin", `HEAD:${baseBranch}`], {
       env: childEnvForCwd(projectDir),
       encoding: "utf8",
     });
     if (push.status === 0) {
-      return { ok: true };
+      messages.push(push.stdout.trim() || `${baseBranch} pushed to origin/${baseBranch}.`);
+      return `${messages.filter(Boolean).join("\n")}\n`;
     }
 
-    return { ok: false, reason: `Main has local commits but could not be pushed to origin/main: ${formatGitError(push)}` };
+    throw new Error(`${baseBranch} has local commits but could not be pushed to origin/${baseBranch}: ${formatGitError(push)}`);
   }
 
-  return { ok: false, reason: "Main has diverged from origin/main; reconcile main before preparing a new worktree." };
+  throw new Error(`${baseBranch} has diverged from origin/${baseBranch}; reconcile ${baseBranch} before preparing a new worktree.`);
 }
 
 async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
   const messages = [
     `Preparing ${input.changeName}`,
     `Project: ${input.projectDir}`,
+    `Base branch: ${input.baseBranch}`,
     `Branch: ${input.branch}`,
     `Worktree: ${input.worktreeDir}`,
   ];
@@ -1417,14 +1513,11 @@ async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
   }
 
   const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
-  if (currentBranch !== "main") {
-    throw new Error(`Prepare must run from main; current branch is ${currentBranch || "(detached)"}.`);
+  if (currentBranch !== input.baseBranch) {
+    throw new Error(`Prepare must run from ${input.baseBranch}; current branch is ${currentBranch || "(detached)"}.`);
   }
 
-  const syncStatus = await detectMainSyncStatus(input.projectDir);
-  if (!syncStatus.ok) {
-    throw new Error(syncStatus.reason);
-  }
+  messages.push((await synchronizeBaseBranchWithOrigin(input.projectDir, input.baseBranch)).trim());
 
   await mkdir(dirname(input.worktreeDir), { recursive: true });
   if (localBranchExists(input.projectDir, input.branch)) {
@@ -1451,9 +1544,15 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
   const messages = [
     `Pushing ${input.changeName}`,
     `Project: ${input.projectDir}`,
+    `Base branch: ${input.baseBranch}`,
     `Branch: ${input.branch}`,
     `Worktree: ${input.worktreeDir}`,
   ];
+
+  const gitIdentity = checkGitIdentity(input.worktreeDir);
+  if (!gitIdentity.ok) {
+    throw new Error(gitIdentity.reason);
+  }
 
   ensureChangeArtifacts(input.worktreeDir, input.changeName);
   if (!(await detectTasksComplete(input.projectDir, input.changeName))) {
@@ -1490,13 +1589,13 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
     `OpenSpec change: ${input.changeName}`,
     "",
     "Created by OpenSpec Shipper after the implementation branch was pushed.",
-    "Archive will run on main after this PR is merged.",
+    `Archive will run on ${input.baseBranch} after this PR is merged.`,
   ].join("\n");
   const created = runGh(input.worktreeDir, [
     "pr",
     "create",
     "--base",
-    "main",
+    input.baseBranch,
     "--head",
     effectiveBranch,
     "--title",
@@ -1512,6 +1611,114 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
   }
 
   return `${messages.filter(Boolean).join("\n")}\n`;
+}
+
+async function finalizeArchive(input: FinalizeArchiveInput): Promise<string> {
+  const config = readShipperConfigSync(input.projectDir);
+  if (config?.safety.enableArchive === false) {
+    throw new Error("OpenSpec Shipper archive safety is disabled in .openspec-shipper/config.json.");
+  }
+
+  const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
+  if (currentBranch !== input.baseBranch) {
+    throw new Error(`Archive finalization must run from ${input.baseBranch}; current branch is ${currentBranch || "(detached)"}.`);
+  }
+
+  if (!(await detectArchivedChange(input.projectDir, input.changeName))) {
+    throw new Error(`OpenSpec change ${input.changeName} was not archived by the archive agent.`);
+  }
+
+  const messages = [
+    `Finalizing archive for ${input.changeName}`,
+    `Project: ${input.projectDir}`,
+    `Base branch: ${input.baseBranch}`,
+  ];
+
+  const dirty = filterLocalStateStatus(await detectGitStatus(input.projectDir));
+  if (dirty.length === 0) {
+    messages.push("No archive/spec diff to commit; archive already appears finalized.");
+    return `${messages.join("\n")}\n`;
+  }
+
+  const unexpected = dirty.filter((entry) => !isAllowedArchiveStatus(entry));
+  if (unexpected.length > 0) {
+    throw new Error(`Archive produced non-OpenSpec changes; refusing to commit: ${formatDirtyStatus(unexpected)}.`);
+  }
+
+  const gitIdentity = checkGitIdentity(input.projectDir);
+  if (!gitIdentity.ok) {
+    throw new Error(gitIdentity.reason);
+  }
+
+  const stagePaths = ["openspec/changes", "openspec/specs"].filter((path) => fileExistsSync(join(input.projectDir, path)));
+  if (stagePaths.length === 0) {
+    throw new Error("Archive produced OpenSpec changes but no stageable OpenSpec paths were found.");
+  }
+
+  runGit(input.projectDir, ["add", "-A", ...stagePaths]);
+  const staged = filterLocalStateStatus(await gitStatusFromArgs(input.projectDir, ["diff", "--cached", "--name-only"]));
+  if (staged.length === 0) {
+    throw new Error("Archive produced no staged OpenSpec changes after staging archive/spec paths.");
+  }
+
+  messages.push(`Committing archive paths: ${formatDirtyStatus(dirty)}.`);
+  runGit(input.projectDir, ["commit", "-m", `chore: archive ${input.changeName}`]);
+
+  const fetch = spawnSync("git", ["-C", input.projectDir, "fetch", "--quiet", "origin"], {
+    env: childEnvForCwd(input.projectDir),
+    encoding: "utf8",
+  });
+  if (fetch.status !== 0) {
+    throw new Error(`Archive committed locally but origin fetch failed before push: ${formatGitError(fetch)}`);
+  }
+
+  const rebase = spawnSync("git", ["-C", input.projectDir, "rebase", `origin/${input.baseBranch}`], {
+    env: childEnvForCwd(input.projectDir),
+    encoding: "utf8",
+  });
+  if (rebase.status !== 0) {
+    throw new Error(`Archive committed locally but rebase on origin/${input.baseBranch} failed: ${formatGitError(rebase)}`);
+  }
+
+  const push = spawnSync("git", ["-C", input.projectDir, "push", "origin", `HEAD:${input.baseBranch}`], {
+    env: childEnvForCwd(input.projectDir),
+    encoding: "utf8",
+  });
+  if (push.status !== 0) {
+    throw new Error(`Archive committed locally but push to origin/${input.baseBranch} failed: ${formatGitError(push)}`);
+  }
+
+  messages.push(push.stdout.trim() || `Pushed archive commit to origin/${input.baseBranch}.`);
+  return `${messages.filter(Boolean).join("\n")}\n`;
+}
+
+function isAllowedArchiveStatus(entry: string): boolean {
+  const path = statusPath(entry);
+  return path.startsWith("openspec/changes/") || path.startsWith("openspec/specs/");
+}
+
+function statusPath(entry: string): string {
+  const renamed = entry.match(/^R\s+(.+?)\s+->\s+(.+)$/);
+  if (renamed?.[2]) {
+    return renamed[2].trim();
+  }
+
+  return entry.slice(3).trim();
+}
+
+async function gitStatusFromArgs(projectDir: string, args: string[]): Promise<string[]> {
+  const result = spawnSync("git", ["-C", projectDir, ...args], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    return [];
+  }
+
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
 }
 
 async function cleanupWorkspace(input: CleanupWorkspaceInput): Promise<string> {
@@ -1654,6 +1861,40 @@ function commandResult(command: string, args: string[], cwd: string): { ok: true
   }
 
   return { ok: true };
+}
+
+function checkGitIdentity(cwd: string): { ok: true } | { ok: false; reason: string } {
+  const name = commandOutput("git", ["config", "--get", "user.name"], cwd);
+  const email = commandOutput("git", ["config", "--get", "user.email"], cwd);
+  const missing = [
+    name.ok ? undefined : "user.name",
+    email.ok ? undefined : "user.email",
+  ].filter(Boolean);
+
+  return missing.length === 0
+    ? { ok: true }
+    : {
+        ok: false,
+        reason: `Git identity is not configured (${missing.join(", ")}). Run git config user.name "Your Name" and git config user.email "you@example.com", then openspec-shipper doctor.`,
+      };
+}
+
+function commandOutput(command: string, args: string[], cwd: string): { ok: true; output: string } | { ok: false; reason: string } {
+  const result = spawnSync(command, args, {
+    cwd,
+    env: childEnvForCwd(cwd),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (result.error) {
+    return { ok: false, reason: result.error.message };
+  }
+
+  if (result.status !== 0 || !result.stdout.trim()) {
+    return { ok: false, reason: formatGitError(result) };
+  }
+
+  return { ok: true, output: result.stdout.trim() };
 }
 
 async function changeHasExistingLocalClaim(projectDir: string, changeName: string): Promise<boolean> {

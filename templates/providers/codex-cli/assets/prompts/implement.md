@@ -40,7 +40,7 @@ test -d worktrees/{{CHANGE_NAME}}
 test -f worktrees/{{CHANGE_NAME}}/openspec/changes/{{CHANGE_NAME}}/tasks.md
 ```
 
-If root `main` is dirty, do not edit it. Continue only inside the already
+If the root base branch checkout is dirty, do not edit it. Continue only inside the already
 prepared `worktrees/{{CHANGE_NAME}}` checkout. If that worktree is missing,
 stop with:
 

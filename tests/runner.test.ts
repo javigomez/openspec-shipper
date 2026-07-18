@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { defaultConfig, detectMainSyncStatus, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
-import { BLOCKED_TASK_RETRY_HINT } from "../src/queue";
+import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { silenceConsoleDuringTests } from "./test-console";
 
@@ -351,7 +351,7 @@ describe("runner", () => {
     expect(queue).toContain("- [!] deliver test-20-migrate-notebook-access-button-rntl");
     expect(queue).toContain("phase: waiting_for_merge");
     expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
-    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
   test("advances deliver push phase to waiting for merge after opening a PR", async () => {
@@ -366,7 +366,7 @@ describe("runner", () => {
       pushBranchAndOpenPullRequest: async (input) => {
         pushedBranch = input.branch;
         baseBranch = input.baseBranch;
-        return "pushed and opened PR\n";
+        return "pushed and opened PR https://github.com/example/project/pull/2\n";
       },
       executor: cleanExecutor,
     });
@@ -377,8 +377,9 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).toContain("[PR](https://github.com/example/project/pull/2)");
     expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
-    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
   test("advances a deliver task to cleanup after archive succeeds", async () => {
@@ -520,7 +521,7 @@ describe("runner", () => {
     expect(queue).toContain("- [!] deliver change-b");
     expect(queue).toContain("phase: waiting_for_merge");
     expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
-    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
     expect(queue).toContain("- [ ] deliver change-c");
     expect(queue).not.toContain("phase: implement");
   });
@@ -560,7 +561,8 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
-    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(queue).toContain("[PR](https://github.com/example/project/pull/1)");
+    expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
   test("reconstructs sync from a bare deliver task when the PR is already merged", async () => {
@@ -771,7 +773,7 @@ describe("runner", () => {
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("phase: waiting_for_merge");
     expect(queue).toContain("waits for its PR to merge");
-    expect(queue).toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
   test("blocks a bare deliver task when no evidence of the change exists", async () => {

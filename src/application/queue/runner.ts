@@ -862,7 +862,8 @@ async function reconcileQueue(
       content = shipResultRequiresHuman(decision.phase)
         ? markTask(currentQueue.lines, { ...currentTask, phase: decision.phase }, "blocked", {
             timestamp,
-            reason: humanInterventionReason(decision.phase),
+            reason: humanInterventionReason(decision.phase, evidence.pullRequestUrl),
+            pullRequestUrl: evidence.pullRequestUrl,
           })
         : advanceDeliverTaskToPhase(currentQueue.lines, currentTask, decision.phase, {
             timestamp,
@@ -894,9 +895,11 @@ function shipResultRequiresHuman(phase: DeliverPhase): boolean {
   return phase === "waiting_for_merge";
 }
 
-function humanInterventionReason(phase: DeliverPhase): string {
+function humanInterventionReason(phase: DeliverPhase, pullRequestUrl?: string): string {
   if (phase === "waiting_for_merge") {
-    return "PR is ready and waits for a human to merge it";
+    return pullRequestUrl
+      ? `PR is ready and waits for a human to merge it: ${pullRequestUrl}`
+      : "PR is ready and waits for a human to merge it";
   }
 
   return "Human intervention required";
@@ -951,6 +954,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     localClaimPublished,
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
+    pullRequestUrl: openPullRequest,
     hasMergedPullRequest: Boolean(mergedPullRequest),
     tasksComplete,
   };
@@ -1058,7 +1062,8 @@ async function executeNativeTask(
       task.action === "deliver" && deliverPhase(task) === "push"
         ? markTask(lines, { ...task, phase: "waiting_for_merge" }, "blocked", {
             timestamp,
-            reason: humanInterventionReason("waiting_for_merge"),
+            reason: humanInterventionReason("waiting_for_merge", extractPullRequestUrl(output)),
+            pullRequestUrl: extractPullRequestUrl(output),
             logPath: relativeLogPath,
             checkedAt: activity.checkedAt,
             startedAt,
@@ -2118,6 +2123,11 @@ export async function detectOpenPullRequest(projectDir: string, branch: string):
   } catch {
     return undefined;
   }
+}
+
+function extractPullRequestUrl(output: string): string | undefined {
+  const match = output.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/);
+  return match?.[0];
 }
 
 export async function detectMergedPullRequest(projectDir: string, branch: string): Promise<string | undefined> {

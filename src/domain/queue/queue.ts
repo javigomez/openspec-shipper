@@ -29,7 +29,7 @@ export type QueueParseResult = {
 
 const TASK_PATTERN = /^(\s*)-\s+\[( |x|X|!)\]\s+(.+?)\s*$/;
 const COMMENT_PATTERN = /<!--(.*?)-->/;
-const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*_\(\[log]\([^)]+\)\)_)?\s*$/;
+const VISUAL_DECORATION_PATTERN = /\s+!\[[^\]]*]\([^)]+\)(?:\s*·\s*\[PR]\([^)]+\))?(?:\s*·\s*_\(\[log]\([^)]+\)\)_)?\s*$/;
 const CHANGE_PREFIX_PATTERN = /^openspec\/changes\//;
 const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DELIVER_PHASES: DeliverPhase[] = [
@@ -42,6 +42,7 @@ const DELIVER_PHASES: DeliverPhase[] = [
   "cleanup_worktree",
 ];
 export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
+export const WAITING_FOR_MERGE_RETRY_HINT = "  > Merged PR? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 
 export function parseQueue(content: string): QueueParseResult {
   const lines = content.split(/\r?\n/);
@@ -164,7 +165,7 @@ export function markTask(
   lines: string[],
   task: QueueTask,
   status: Exclude<TaskStatus, "pending">,
-  details: { timestamp: string; logPath?: string; reason?: string; checkedAt?: string; startedAt?: string },
+  details: { timestamp: string; logPath?: string; reason?: string; checkedAt?: string; startedAt?: string; pullRequestUrl?: string },
 ): string {
   const marker = status === "done" ? "x" : "!";
   const detailParts = [
@@ -182,8 +183,12 @@ export function markTask(
     status,
     phase: deliverPhase(task),
     logPath: details.logPath,
+    pullRequestUrl: details.pullRequestUrl,
   });
-  return replaceTaskLine(nextLines, task, nextLine, { retryHint: status === "blocked" });
+  return replaceTaskLine(nextLines, task, nextLine, {
+    retryHint: status === "blocked",
+    retryHintText: deliverPhase(task) === "waiting_for_merge" ? WAITING_FOR_MERGE_RETRY_HINT : BLOCKED_TASK_RETRY_HINT,
+  });
 }
 
 export function markTaskChecking(
@@ -284,7 +289,7 @@ export function removeRetryHintsForUnblockedTasks(content: string): string {
     const line = lines[index] ?? "";
     const task = line.match(TASK_PATTERN);
     const nextLine = lines[index + 1];
-    if (task && task[2] !== "!" && nextLine === BLOCKED_TASK_RETRY_HINT) {
+    if (task && task[2] !== "!" && (nextLine === BLOCKED_TASK_RETRY_HINT || nextLine === WAITING_FOR_MERGE_RETRY_HINT)) {
       nextLines.push(line);
       index += 1;
       changed = true;
@@ -379,7 +384,7 @@ function formatTaskLine(
   marker: " " | "x" | "!",
   rawCommand: string,
   detailParts: Array<string | undefined>,
-  visual: { status: Exclude<TaskStatus, "pending"> | "pending" | "checking" | "running"; phase?: DeliverPhase; logPath?: string },
+  visual: { status: Exclude<TaskStatus, "pending"> | "pending" | "checking" | "running"; phase?: DeliverPhase; logPath?: string; pullRequestUrl?: string },
 ): string {
   const metadata = detailParts.length > 0 ? ` <!-- ${detailParts.join("; ")} -->` : "";
   return `- [${marker}] ${rawCommand}${metadata}${formatVisualDecoration(visual)}`;
@@ -389,17 +394,20 @@ function replaceTaskLine(
   lines: string[],
   task: QueueTask,
   nextLine: string,
-  options: { retryHint?: boolean } = {},
+  options: { retryHint?: boolean; retryHintText?: string } = {},
 ): string {
   const nextLines = [...lines];
   nextLines[task.lineIndex] = nextLine;
 
-  if (nextLines[task.lineIndex + 1] === BLOCKED_TASK_RETRY_HINT) {
+  if (
+    nextLines[task.lineIndex + 1] === BLOCKED_TASK_RETRY_HINT ||
+    nextLines[task.lineIndex + 1] === WAITING_FOR_MERGE_RETRY_HINT
+  ) {
     nextLines.splice(task.lineIndex + 1, 1);
   }
 
   if (options.retryHint) {
-    nextLines.splice(task.lineIndex + 1, 0, BLOCKED_TASK_RETRY_HINT);
+    nextLines.splice(task.lineIndex + 1, 0, options.retryHintText ?? BLOCKED_TASK_RETRY_HINT);
   }
 
   return ensureTrailingNewline(nextLines.join("\n"));
@@ -409,10 +417,12 @@ function formatVisualDecoration(visual: {
   status: Exclude<TaskStatus, "pending"> | "pending" | "checking" | "running";
   phase?: DeliverPhase;
   logPath?: string;
+  pullRequestUrl?: string;
 }): string {
   const badge = badgeForVisual(visual);
+  const pr = visual.pullRequestUrl ? ` · [PR](${visual.pullRequestUrl})` : "";
   const log = visual.logPath ? ` · _([log](${visual.logPath}))_` : "";
-  return ` ${badge}${log}`;
+  return ` ${badge}${pr}${log}`;
 }
 
 function badgeForVisual(visual: {

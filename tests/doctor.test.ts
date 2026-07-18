@@ -67,6 +67,38 @@ describe("doctor", () => {
     expect(checks.some((check) => check.name === ".openspec-shipper/codex/prompts/implement.md" && !check.ok)).toBe(true);
     expect(checks.some((check) => check.name === ".opencode/commands/openspec-apply-worktree.md")).toBe(false);
   });
+
+  test("checks Claude authentication, assets, and strict sandbox settings", async () => {
+    const projectDir = await createGitRepo();
+    const claudeDir = join(projectDir, ".openspec-shipper/claude");
+    await mkdir(join(claudeDir, "prompts"), { recursive: true });
+    await writeFile(join(claudeDir, "workflow.md"), "workflow\n");
+    await writeFile(join(claudeDir, "prompts/implement.md"), "implement\n");
+    await writeFile(join(claudeDir, "prompts/archive.md"), "archive\n");
+    await writeFile(join(claudeDir, "settings.json"), JSON.stringify({
+      sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false },
+    }));
+    await writeFile(join(projectDir, ".openspec-shipper/config.json"), `${JSON.stringify({
+      version: 1,
+      profile: "node-npm",
+      baseBranch: "main",
+      packageManager: "npm",
+      executor: {
+        provider: "claude-code",
+        claude: { bin: "/usr/bin/true", model: "sonnet", effort: "low", permissionMode: "dontAsk" },
+      },
+      github: { autoOpenPr: false, prChecks: false },
+      checks: {},
+      safety: { enablePush: true, enableArchive: true },
+    })}\n`);
+
+    const checks = await runDoctor(projectDir);
+
+    expect(checks.some((check) => check.name === "claude-code provider" && check.severity === "warning")).toBe(true);
+    expect(checks.some((check) => check.name === "/usr/bin/true" && check.message === "Claude Code is authenticated")).toBe(true);
+    expect(checks.some((check) => check.name === "claude sandbox" && check.ok)).toBe(true);
+    expect(checks.some((check) => check.name.includes(".opencode/"))).toBe(false);
+  });
 });
 
 async function createGitRepo(): Promise<string> {

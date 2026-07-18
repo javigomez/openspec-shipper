@@ -1,10 +1,11 @@
 import type { DeliverPhase, QueueTask } from "../queue/queue.js";
-export type ExecutorProviderId = "opencode" | "codex-cli";
+export type ExecutorProviderId = "opencode" | "codex-cli" | "claude-code";
 
 export type ProviderCommand = {
   command: string;
   args: string[];
   cwd: string;
+  stdin?: string;
 };
 
 export type BuildCommandInput = {
@@ -25,6 +26,14 @@ export type ProviderRuntimeConfig = {
       bin: string;
       model?: string;
       reasoningEffort?: string;
+    };
+    claude: {
+      bin: string;
+      model?: string;
+      effort?: string;
+      permissionMode?: string;
+      maxTurns?: number;
+      maxBudgetUsd?: number;
     };
   };
   opencodePrintLogs?: boolean;

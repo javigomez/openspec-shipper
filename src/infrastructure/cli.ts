@@ -81,7 +81,7 @@ export async function runCli(argv: string[]): Promise<void> {
 }
 
 function providerFlag(value: string | undefined): ExecutorProviderId | undefined {
-  if (value === "opencode" || value === "codex-cli") {
+  if (value === "opencode" || value === "codex-cli" || value === "claude-code") {
     return value;
   }
 
@@ -146,13 +146,13 @@ function parseTargetOptions(argv: string[]): {
 
     if (arg === "--provider") {
       const next = argv[index + 1];
-      if (next === "opencode" || next === "codex-cli") {
+      if (next === "opencode" || next === "codex-cli" || next === "claude-code") {
         provider = next;
         index += 1;
         continue;
       }
 
-      throw new Error("Expected --provider to be one of opencode, codex-cli.");
+      throw new Error("Expected --provider to be one of opencode, codex-cli, claude-code.");
     }
 
     if (arg === "--package-manager") {
@@ -217,7 +217,7 @@ async function promptInitOptions(
     );
     const provider = parseProvider(
       answerOrDefault(
-        await rl.question(`Provider opencode|codex-cli (${parsed.provider ?? providerFlag(flags.provider) ?? "opencode"}): `),
+        await rl.question(`Provider opencode|codex-cli|claude-code (${parsed.provider ?? providerFlag(flags.provider) ?? "opencode"}): `),
         parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
       ),
       parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
@@ -240,7 +240,7 @@ function answerOrDefault(answer: string, fallback: string): string {
 }
 
 function parseProvider(value: string, fallback: ExecutorProviderId): ExecutorProviderId {
-  return value === "opencode" || value === "codex-cli" ? value : fallback;
+  return value === "opencode" || value === "codex-cli" || value === "claude-code" ? value : fallback;
 }
 
 function parsePackageManager(value: string, fallback: PackageManager): PackageManager {

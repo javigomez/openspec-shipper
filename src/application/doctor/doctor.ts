@@ -22,6 +22,13 @@ const REQUIRED_CODEX_ASSETS = [
   ".openspec-shipper/codex/prompts/archive.md",
 ];
 
+const REQUIRED_CLAUDE_ASSETS = [
+  ".openspec-shipper/claude/workflow.md",
+  ".openspec-shipper/claude/prompts/implement.md",
+  ".openspec-shipper/claude/prompts/archive.md",
+  ".openspec-shipper/claude/settings.json",
+];
+
 const REQUIRED_PACKAGE_SCRIPTS = [
   "openspec:cli",
   "openspec:validate-proposal",
@@ -41,6 +48,10 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   checks.push(checkGitHubCliAuth(projectDir));
   checks.push(checkGitHubPullRequestAccess(projectDir));
   checks.push(checkProviderCommand(projectDir, config));
+  if (config?.executor.provider === "claude-code") {
+    checks.push(checkCommand(config.executor.claude.bin, ["auth", "status"], projectDir, "Claude Code is authenticated"));
+    checks.push(asWarning(checkCommand(config.executor.claude.bin, ["doctor"], projectDir, "Claude Code diagnostics passed")));
+  }
   checks.push(checkCommand(packageManagerCommand(config), ["--version"], projectDir, "Configured package manager is available"));
 
   checks.push(
@@ -82,6 +93,10 @@ function checkProviderCommand(projectDir: string, config: ShipperConfig | undefi
     return checkCommand(config?.executor.codex.bin ?? "codex", ["--version"], projectDir, "Codex CLI is available");
   }
 
+  if (provider === "claude-code") {
+    return checkCommand(config?.executor.claude.bin ?? "claude", ["--version"], projectDir, "Claude Code CLI is available");
+  }
+
   return checkCommand(config?.executor.opencode.bin ?? "opencode", ["--version"], projectDir, "OpenCode CLI is available");
 }
 
@@ -97,11 +112,46 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
     return checks;
   }
 
+  if (provider === "claude-code") {
+    const checks: DoctorCheck[] = [
+      warning("claude-code provider", "Claude Code provider is experimental; validate it in a demo repo before relying on it"),
+    ];
+    for (const file of REQUIRED_CLAUDE_ASSETS) {
+      checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
+    }
+    checks.push(await checkClaudeSettings(projectDir));
+    return checks;
+  }
+
   const checks: DoctorCheck[] = [];
   for (const file of REQUIRED_OPENCODE_COMMANDS) {
     checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
   }
   return checks;
+}
+
+async function checkClaudeSettings(projectDir: string): Promise<DoctorCheck> {
+  const path = join(projectDir, ".openspec-shipper/claude/settings.json");
+  try {
+    const settings = JSON.parse(await readFile(path, "utf8")) as {
+      sandbox?: { enabled?: boolean; failIfUnavailable?: boolean; allowUnsandboxedCommands?: boolean };
+    };
+    if (
+      settings.sandbox?.enabled !== true ||
+      settings.sandbox.failIfUnavailable !== true ||
+      settings.sandbox.allowUnsandboxedCommands !== false
+    ) {
+      return error("claude sandbox", "Claude settings must enable a strict sandbox and disable unsandboxed commands");
+    }
+    return ok("claude sandbox", "Claude Code strict sandbox is configured");
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return error("claude sandbox", `Cannot read Claude settings: ${message}`);
+  }
+}
+
+function asWarning(check: DoctorCheck): DoctorCheck {
+  return check.ok ? check : { ...check, severity: "warning" };
 }
 
 export function printDoctorReport(checks: DoctorCheck[]): number {

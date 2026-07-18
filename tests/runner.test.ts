@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { defaultConfig, detectMainSyncStatus, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT } from "../src/queue";
-import { installCodexTemplates } from "../src/application/init/setup";
+import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -1043,6 +1043,67 @@ describe("runner", () => {
     expect(receivedArgs).toContain('model_reasoning_effort="low"');
     expect(receivedArgs.at(-1)).toContain("OpenSpec Shipper Codex Phase: implement");
     expect(receivedArgs.at(-1)).toContain("add-name-greeting");
+  });
+
+  test("runs Claude Code with installed prompts and sends the phase prompt through stdin", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
+    await installClaudeTemplates({ rootDir: join(import.meta.dir, ".."), projectDir: harness.rootDir });
+    let receivedCommand = "";
+    let receivedArgs: string[] = [];
+    let receivedStdin = "";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      providerId: "claude-code",
+      claudeBin: "claude",
+      claudeModel: "sonnet",
+      claudeEffort: "low",
+      claudePermissionMode: "dontAsk",
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async (command, args, options) => {
+        receivedCommand = command;
+        receivedArgs = args;
+        receivedStdin = options.stdin ?? "";
+        return {
+          exitCode: 0,
+          output: JSON.stringify({
+            type: "result",
+            is_error: false,
+            structured_output: { status: "completed", summary: "Done", reason: null },
+          }),
+        };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedCommand).toBe("claude");
+    expect(receivedArgs).toContain("--json-schema");
+    expect(receivedArgs).toContain("sonnet");
+    expect(receivedArgs).toContain("low");
+    expect(receivedStdin).toContain("OpenSpec Shipper Claude Phase: implement");
+    expect(receivedStdin).toContain("add-name-greeting");
+  });
+
+  test("blocks Claude Code before execution when provider assets are missing", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      providerId: "claude-code",
+      claudeBin: "claude",
+      localClaimDetector: async () => true,
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("Claude Code provider asset not found");
   });
 
   test("blocks ship before execution when git remote origin is missing", async () => {

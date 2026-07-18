@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 export type PackageManager = "npm" | "pnpm" | "bun";
 export type ShipperProfile = "generic" | "node-npm" | "node-pnpm" | "bun";
-export type ExecutorProviderId = "opencode" | "codex-cli";
+export type ExecutorProviderId = "opencode" | "codex-cli" | "claude-code";
 
 export type ShipperConfig = {
   version: 1;
@@ -21,6 +21,14 @@ export type ShipperConfig = {
       bin: string;
       model?: string;
       reasoningEffort?: string;
+    };
+    claude: {
+      bin: string;
+      model?: string;
+      effort?: string;
+      permissionMode?: "dontAsk" | "bypassPermissions";
+      maxTurns?: number;
+      maxBudgetUsd?: number;
     };
   };
   github: {
@@ -71,6 +79,12 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
         bin: "codex",
         model: "gpt-5.5",
         reasoningEffort: "low",
+      },
+      claude: {
+        bin: "claude",
+        model: "sonnet",
+        effort: "low",
+        permissionMode: "dontAsk",
       },
     },
     github: {
@@ -167,6 +181,10 @@ function migrateConfig(config: Partial<ShipperConfig>): ShipperConfig {
       codex: {
         ...defaults.executor.codex,
         ...(config.executor?.codex ?? {}),
+      },
+      claude: {
+        ...defaults.executor.claude,
+        ...(config.executor?.claude ?? {}),
       },
     },
     github: {

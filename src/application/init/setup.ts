@@ -29,6 +29,8 @@ const OPENCODE_TEMPLATE_DIR = "templates/providers/opencode/assets";
 const OPENCODE_TARGET_DIR = ".opencode";
 const CODEX_TEMPLATE_DIR = "templates/providers/codex-cli/assets";
 const CODEX_TARGET_DIR = ".openspec-shipper/codex";
+const CLAUDE_TEMPLATE_DIR = "templates/providers/claude-code/assets";
+const CLAUDE_TARGET_DIR = ".openspec-shipper/claude";
 const TARGET_TEMPLATE_DIR = "templates/target";
 const MANIFEST_PATH = ".openspec-shipper/installed.json";
 const SHIPPER_GITIGNORE_HEADER = "# OpenSpec Shipper local state";
@@ -65,12 +67,18 @@ export async function installCodexTemplates(config: SetupConfig): Promise<Instal
   return await installTemplateTree(config, sourceRoot, targetRoot);
 }
 
+export async function installClaudeTemplates(config: SetupConfig): Promise<InstalledFile[]> {
+  const sourceRoot = join(config.rootDir, CLAUDE_TEMPLATE_DIR);
+  const targetRoot = join(config.projectDir, CLAUDE_TARGET_DIR);
+  return await installTemplateTree(config, sourceRoot, targetRoot);
+}
+
 export async function installShipperKit(config: SetupConfig): Promise<InstalledFile[]> {
   const profile = config.profile ?? "node-npm";
   const existingConfig = await readShipperConfig(config.projectDir);
   const selectedProvider = config.provider ?? existingConfig?.executor.provider ?? "opencode";
   const installed = [
-    ...(selectedProvider === "codex-cli" ? await installCodexTemplates(config) : await installOpenCodeTemplates(config)),
+    ...(await installProviderTemplates(selectedProvider, config)),
     ...(await installTemplateTree(config, join(config.rootDir, TARGET_TEMPLATE_DIR), config.projectDir)),
   ];
 
@@ -91,6 +99,17 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   installed.push(await updatePackageJson(config));
 
   return installed;
+}
+
+async function installProviderTemplates(provider: ExecutorProviderId, config: SetupConfig): Promise<InstalledFile[]> {
+  switch (provider) {
+    case "opencode":
+      return await installOpenCodeTemplates(config);
+    case "codex-cli":
+      return await installCodexTemplates(config);
+    case "claude-code":
+      return await installClaudeTemplates(config);
+  }
 }
 
 async function ensureShipperGitignore(config: SetupConfig, gitignorePath: string): Promise<InstalledFile> {
@@ -317,6 +336,12 @@ function defaultEnvExample(provider: ExecutorProviderId = "opencode"): string {
     "OPENSPEC_SHIPPER_CODEX_BIN=codex",
     "OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.5",
     "OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=low",
+    "OPENSPEC_SHIPPER_CLAUDE_BIN=claude",
+    "OPENSPEC_SHIPPER_CLAUDE_MODEL=sonnet",
+    "OPENSPEC_SHIPPER_CLAUDE_EFFORT=low",
+    "OPENSPEC_SHIPPER_CLAUDE_PERMISSION_MODE=dontAsk",
+    "OPENSPEC_SHIPPER_CLAUDE_MAX_TURNS=",
+    "OPENSPEC_SHIPPER_CLAUDE_MAX_BUDGET_USD=",
     "OPENSPEC_SHIPPER_LOOP_DELAY_MS=5000",
     "OPENSPEC_SHIPPER_BUSY_DELAY_MS=60000",
     "OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=2",

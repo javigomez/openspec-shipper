@@ -72,6 +72,32 @@ describe("target setup", () => {
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
   });
 
+  test("installs Claude Code assets without modifying the target .claude directory", async () => {
+    const harness = await createHarness();
+    await mkdir(join(harness.projectDir, ".claude"), { recursive: true });
+    await writeFile(join(harness.projectDir, ".claude/settings.json"), "{\"custom\":true}\n");
+
+    const result = await installShipperKit({
+      rootDir: harness.rootDir,
+      projectDir: harness.projectDir,
+      provider: "claude-code",
+    });
+
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/claude/prompts/implement.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/claude/prompts/archive.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/claude/settings.json"))).toBe(true);
+    expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
+    expect(await readFile(join(harness.projectDir, ".claude/settings.json"), "utf8")).toBe("{\"custom\":true}\n");
+    const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
+    expect(shipperConfig.executor.provider).toBe("claude-code");
+    expect(shipperConfig.executor.claude).toEqual({
+      bin: "claude",
+      model: "sonnet",
+      effort: "low",
+      permissionMode: "dontAsk",
+    });
+  });
+
   test("update preserves the already configured provider when --provider is omitted", async () => {
     const harness = await createHarness();
 

@@ -32,6 +32,11 @@ import {
 import { providerById } from "../../infrastructure/providers/registry.js";
 import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
 import { codexPromptPath, codexWorkflowPath } from "../../infrastructure/providers/codex-cli/provider.js";
+import {
+  claudePromptPath,
+  claudeSettingsPath,
+  claudeWorkflowPath,
+} from "../../infrastructure/providers/claude-code/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
@@ -48,6 +53,12 @@ export type RunnerConfig = {
   codexBin?: string;
   codexModel?: string;
   codexReasoningEffort?: string;
+  claudeBin?: string;
+  claudeModel?: string;
+  claudeEffort?: string;
+  claudePermissionMode?: string;
+  claudeMaxTurns?: number;
+  claudeMaxBudgetUsd?: number;
   opencodePrintLogs?: boolean;
   opencodeLogLevel?: string;
   opencodeStats?: boolean;
@@ -95,6 +106,7 @@ type ExecutorOptions = {
   logPath: string;
   timeoutMs: number;
   heartbeatMs: number;
+  stdin?: string;
   stats?: StatsOptions;
 };
 
@@ -191,6 +203,12 @@ export function defaultConfig(): RunnerConfig {
     codexBin: process.env.OPENSPEC_SHIPPER_CODEX_BIN ?? shipperConfig?.executor.codex.bin ?? "codex",
     codexModel: optionalEnv("OPENSPEC_SHIPPER_CODEX_MODEL") ?? shipperConfig?.executor.codex.model,
     codexReasoningEffort: optionalEnv("OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT") ?? shipperConfig?.executor.codex.reasoningEffort,
+    claudeBin: process.env.OPENSPEC_SHIPPER_CLAUDE_BIN ?? shipperConfig?.executor.claude.bin ?? "claude",
+    claudeModel: optionalEnv("OPENSPEC_SHIPPER_CLAUDE_MODEL") ?? shipperConfig?.executor.claude.model,
+    claudeEffort: optionalEnv("OPENSPEC_SHIPPER_CLAUDE_EFFORT") ?? shipperConfig?.executor.claude.effort,
+    claudePermissionMode: optionalEnv("OPENSPEC_SHIPPER_CLAUDE_PERMISSION_MODE") ?? shipperConfig?.executor.claude.permissionMode,
+    claudeMaxTurns: optionalPositiveNumber("OPENSPEC_SHIPPER_CLAUDE_MAX_TURNS") ?? shipperConfig?.executor.claude.maxTurns,
+    claudeMaxBudgetUsd: optionalPositiveNumber("OPENSPEC_SHIPPER_CLAUDE_MAX_BUDGET_USD") ?? shipperConfig?.executor.claude.maxBudgetUsd,
     opencodePrintLogs: (process.env.OPENSPEC_SHIPPER_PRINT_LOGS ?? process.env.OPENCODE_PRINT_LOGS) === "1",
     opencodeLogLevel: optionalEnv("OPENSPEC_SHIPPER_LOG_LEVEL") ?? optionalEnv("OPENCODE_LOG_LEVEL"),
     opencodeStats: (process.env.OPENSPEC_SHIPPER_STATS ?? process.env.OPENCODE_STATS) === "1",
@@ -557,7 +575,9 @@ async function validateTaskPreflight(
       ? `(native ${phase} phase)`
       : currentProvider.id === "opencode"
       ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
-      : codexPromptPath(config.projectDir, phase);
+      : currentProvider.id === "codex-cli"
+      ? codexPromptPath(config.projectDir, phase)
+      : claudePromptPath(config.projectDir, phase);
 
   if (phase === "prepare_worktree") {
     const prepareBlocker = await validatePrepareCanCreateWorktree(config, task);
@@ -599,6 +619,20 @@ async function validateTaskPreflight(
       };
     }
 
+    return { ok: true, commandPath };
+  }
+
+  if (currentProvider.id === "claude-code") {
+    const requiredAssets = [claudeWorkflowPath(config.projectDir), claudeSettingsPath(config.projectDir), commandPath];
+    for (const path of requiredAssets) {
+      if (!(await fileExists(path))) {
+        return {
+          ok: false,
+          commandPath,
+          reason: `Claude Code provider asset not found at ${path}. Run openspec-shipper init --provider claude-code.`,
+        };
+      }
+    }
     return { ok: true, commandPath };
   }
 
@@ -737,6 +771,7 @@ async function executeTask(
     logPath,
     timeoutMs: config.taskTimeoutMs,
     heartbeatMs: config.heartbeatMs,
+    stdin: providerCommand.stdin,
     stats: buildStatsOptions(config),
   }).catch((error: unknown) => ({
     exitCode: null,
@@ -1216,6 +1251,14 @@ function buildConfiguredProviderCommand(config: RunnerConfig, task: QueueTask): 
           model: config.codexModel,
           reasoningEffort: config.codexReasoningEffort,
         },
+        claude: {
+          bin: config.claudeBin ?? "claude",
+          model: config.claudeModel,
+          effort: config.claudeEffort,
+          permissionMode: config.claudePermissionMode,
+          maxTurns: config.claudeMaxTurns,
+          maxBudgetUsd: config.claudeMaxBudgetUsd,
+        },
       },
       opencodePrintLogs: config.opencodePrintLogs,
       opencodeLogLevel: config.opencodeLogLevel,
@@ -1240,8 +1283,11 @@ export async function spawnExecutor(
       cwd: options.cwd,
       env: childEnvForCwd(options.cwd),
       detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
+    if (options.stdin !== undefined) {
+      child.stdin?.end(options.stdin);
+    }
     activeChildProcess = child;
     const log = createWriteStream(options.logPath, { flags: "a" });
     let output = "";
@@ -1310,8 +1356,8 @@ export async function spawnExecutor(
       log.write(text);
     };
 
-    child.stdout.on("data", (chunk: Buffer) => capture(chunk, process.stdout));
-    child.stderr.on("data", (chunk: Buffer) => capture(chunk, process.stderr));
+    child.stdout!.on("data", (chunk: Buffer) => capture(chunk, process.stdout));
+    child.stderr!.on("data", (chunk: Buffer) => capture(chunk, process.stderr));
     child.on("error", (error) => {
       settled = true;
       clearTimers();
@@ -2337,6 +2383,15 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function optionalPositiveNumber(name: string): number | undefined {
+  const value = optionalEnv(name);
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function requiredEnv(name: string): string {

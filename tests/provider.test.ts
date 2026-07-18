@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { parseQueue } from "../src/domain/queue/queue";
 import { codexCliProvider } from "../src/infrastructure/providers/codex-cli/provider";
+import { claudeCodeProvider, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
 import { opencodeProvider } from "../src/infrastructure/providers/opencode/provider";
-import { installCodexTemplates } from "../src/application/init/setup";
+import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 
 const config = {
   executor: {
@@ -18,6 +19,12 @@ const config = {
       bin: "codex",
       model: "gpt-5.5",
       reasoningEffort: "low",
+    },
+    claude: {
+      bin: "claude",
+      model: "sonnet",
+      effort: "low",
+      permissionMode: "dontAsk",
     },
   },
   opencodePrintLogs: true,
@@ -146,6 +153,50 @@ describe("executor providers", () => {
     ].join("\n");
 
     expect(codexCliProvider.detectFailureSignal(output)).toBe("Worker reported a blocker: dirty root main checkout");
+  });
+
+  test("Claude Code provider builds a sandboxed non-interactive command with prompt on stdin", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "shipper-claude-provider-"));
+    await installClaudeTemplates({ rootDir: join(import.meta.dir, ".."), projectDir });
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
+
+    const command = claudeCodeProvider.buildCommand({
+      phase: "implement",
+      task,
+      projectDir,
+      config: {
+        ...config,
+        executor: { ...config.executor, provider: "claude-code" },
+      },
+    });
+
+    expect(command.command).toBe("claude");
+    expect(command.args).toContain("-p");
+    expect(command.args).toContain("dontAsk");
+    expect(command.args).toContain("sonnet");
+    expect(command.args).toContain("low");
+    expect(command.args).toContain("--json-schema");
+    expect(command.args).toContain("--strict-mcp-config");
+    expect(command.args.join(" ")).toContain(".openspec-shipper/claude/settings.json");
+    expect(command.stdin).toContain("OpenSpec Shipper Claude Phase: implement");
+    expect(command.stdin).toContain("add-name-greeting");
+  });
+
+  test("Claude Code provider detects structured blockers and successful results", () => {
+    const blocked = JSON.stringify({
+      type: "result",
+      is_error: false,
+      structured_output: { status: "blocked", summary: "Cannot continue", reason: "tests fail" },
+    });
+    const completed = JSON.stringify({
+      type: "result",
+      is_error: false,
+      structured_output: { status: "completed", summary: "Done", reason: null },
+    });
+
+    expect(claudeCodeProvider.detectFailureSignal(blocked)).toBe("Worker reported a blocker: tests fail");
+    expect(claudeCodeProvider.detectFailureSignal(completed)).toBeUndefined();
+    expect(parseClaudeResult(`heartbeat\n${completed}\n` )?.structured_output?.status).toBe("completed");
   });
 
   test("OpenCode provider treats blocked sentinel lines as failures", () => {

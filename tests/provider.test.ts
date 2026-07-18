@@ -51,17 +51,17 @@ describe("executor providers", () => {
     });
   });
 
-  test("OpenCode provider builds cleanup command with the target change", () => {
-    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: cleanup_worktree -->\n").tasks[0]!;
+  test("OpenCode provider builds archive command with the target change", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n").tasks[0]!;
 
     const command = opencodeProvider.buildCommand({
-      phase: "cleanup_worktree",
+      phase: "archive",
       task,
       projectDir: "/repo",
       config,
     });
 
-    expect(command.args).toContain("openspec-cleanup-worktree");
+    expect(command.args).toContain("openspec-archive-merged");
     expect(command.args.at(-1)).toBe("add-name-greeting");
   });
 
@@ -146,12 +146,6 @@ describe("executor providers", () => {
     expect(codexCliProvider.detectFailureSignal(output)).toBe("Worker reported a blocker: dirty root main checkout");
   });
 
-  test("OpenCode provider treats missing pull requests as a ship failure", () => {
-    expect(opencodeProvider.detectFailureSignal("No pull request exists yet — branch-push automation should create it.")).toBe(
-      "Ship worker did not find an open pull request",
-    );
-  });
-
   test("OpenCode provider treats blocked sentinel lines as failures", () => {
     expect(opencodeProvider.detectFailureSignal("All checks passed\nOPENSPEC_SHIPPER_BLOCKED: no open pull request exists")).toBe(
       "Worker reported a blocker: no open pull request exists",
@@ -159,11 +153,8 @@ describe("executor providers", () => {
   });
 
   test("OpenCode provider treats worker blocked summaries as failures", () => {
-    expect(opencodeProvider.detectFailureSignal("## Blocked: `add-name-greeting` is not push-ready")).toBe(
-      "Worker reported a blocker",
-    );
-    expect(opencodeProvider.detectFailureSignal("The target change is not eligible for push.")).toBe(
-      "Worker reported a blocker",
+    expect(opencodeProvider.detectFailureSignal("Archive blocked because the change was not merged")).toBe(
+      "OpenSpec archive worker reported a blocker",
     );
   });
 });

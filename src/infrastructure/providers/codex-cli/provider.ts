@@ -102,18 +102,14 @@ function codexPromptFileName(phase: DeliverPhase): string {
   switch (phase) {
     case "implement":
       return "implement.md";
-    case "push":
-      return "push.md";
-    case "sync_main":
-      return "sync-main.md";
     case "archive":
       return "archive.md";
-    case "cleanup_worktree":
-      return "cleanup-worktree.md";
     case "prepare_worktree":
-    case "waiting_for_pr":
+    case "push":
+    case "sync_main":
+    case "cleanup_worktree":
     case "waiting_for_merge":
-      return `${phase}.md`;
+      throw new Error(`${phase} is native OpenSpec Shipper runner logic and has no Codex prompt`);
   }
 }
 

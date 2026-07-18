@@ -17,7 +17,6 @@ The installer created or updated these project assets:
 - provider assets:
   - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
   - Codex CLI: `.openspec-shipper/codex/`
-- `.github/workflows/open-pr-on-branch-push.yml`
 - `package.json`
 - `.gitignore`
 
@@ -26,7 +25,7 @@ The installer created or updated these project assets:
 Review and commit the installed project assets on `main` before running the
 queue. The native `prepare_worktree` phase creates feature worktrees from `HEAD`; if `main` is
 dirty after `init`, the new worktree would miss the freshly installed scripts,
-workflows, provider commands, and package changes.
+provider commands, and package changes.
 
 `openspec-shipper doctor` checks this and fails when `main` has non-runtime
 changes. Ignored runtime files such as `.openspec-shipper/queue.md`, logs, lock
@@ -52,26 +51,16 @@ git commit -m "chore: install openspec shipper"
 
 ## Check The Installation
 
-Before running the queue, enable the repository setting that lets the auto-PR
-workflow create pull requests:
-
-```text
-GitHub Settings > Actions > General > Workflow permissions >
-Allow GitHub Actions to create and approve pull requests
-```
-
-If this is disabled, `push` can push the branch but GitHub will reject the
-workflow that opens the PR.
-
-OpenSpec Shipper also requires the GitHub CLI for PR state reconciliation:
+OpenSpec Shipper requires GitHub CLI for pull request creation and PR state
+reconciliation:
 
 ```bash
+gh auth login
 gh auth status
 ```
 
-The runner uses `gh` to detect when the auto-PR has been created and when it has
-merged, so `waiting_for_pr` and `waiting_for_merge` can advance without asking
-the AI executor to guess.
+The runner uses `gh` to create the PR after pushing the implementation branch
+and to detect when that PR has merged.
 
 ```bash
 npx openspec-shipper doctor
@@ -105,15 +94,15 @@ npx openspec-shipper queue run
 The default `deliver` flow is:
 
 ```text
-prepare_worktree -> implement -> push -> waiting_for_pr -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
+prepare_worktree -> implement -> push -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
 ```
 
 `prepare_worktree` is native runner logic: it creates or reconnects
 `worktrees/<change-name>` and the deterministic implementation branch before
 any model call. `implement` then implements inside that prepared workspace. `push`
-pushes the implementation branch and waits for the auto-PR workflow to open a
-pull request. After the PR merges, the queue can continue through `sync_main`
-and `archive`, then `cleanup_worktree`.
+pushes the implementation branch and opens or reuses a pull request with `gh`.
+After the PR merges, the queue can continue through `sync_main` and `archive`,
+then `cleanup_worktree`.
 
 `archive` is the OpenSpec-native step. `cleanup_worktree` is OpenSpec Shipper
 housekeeping: it removes clean local implementation worktrees and merged local

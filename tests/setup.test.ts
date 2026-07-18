@@ -15,18 +15,15 @@ describe("target setup", () => {
     });
 
     expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-apply-worktree.md"))).toBe(true);
-    expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-cleanup-worktree.md"))).toBe(true);
-    expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(true);
-    expect(await readFile(join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml"), "utf8")).toContain("actions/github-script@v8");
+    expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-archive-merged.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(false);
     expect(await readFile(join(harness.projectDir, ".opencode/agents/openspec-archive-worker.md"), "utf8")).toContain(
       "Do not clean local worktrees or branches",
-    );
-    expect(await readFile(join(harness.projectDir, ".opencode/agents/openspec-cleanup-worker.md"), "utf8")).toContain(
-      "Missing worktree and missing local branch are successful no-ops",
     );
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.profile).toBe("node-npm");
     expect(shipperConfig.safety).toEqual({ enablePush: true, enableArchive: true });
+    expect(shipperConfig.github.autoOpenPr).toBe(false);
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
     const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");
     expect(installedReadme).toContain("Required After Init");
@@ -68,10 +65,8 @@ describe("target setup", () => {
 
     expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/workflow.md"))).toBe(true);
     expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/prompts/implement.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/prompts/archive.md"))).toBe(true);
     expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
-    expect(await readFile(join(harness.projectDir, ".openspec-shipper/codex/prompts/push.md"), "utf8")).toContain(
-      "OpenSpec Shipper Codex Phase: push",
-    );
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.executor.provider).toBe("codex-cli");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
@@ -98,28 +93,28 @@ describe("target setup", () => {
 
   test("does not overwrite target files that drifted after installation", async () => {
     const harness = await createHarness();
-    const workflowPath = join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml");
+    const readmePath = join(harness.projectDir, ".openspec-shipper/README.md");
 
     await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
-    await writeFile(workflowPath, "name: Custom Checks\n");
+    await writeFile(readmePath, "Custom Shipper README\n");
 
     const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
 
-    expect(result.find((file) => file.target === workflowPath)?.status).toBe("drifted");
-    expect(await readFile(workflowPath, "utf8")).toBe("name: Custom Checks\n");
+    expect(result.find((file) => file.target === readmePath)?.status).toBe("drifted");
+    expect(await readFile(readmePath, "utf8")).toBe("Custom Shipper README\n");
   });
 
   test("force overwrites target files that drifted", async () => {
     const harness = await createHarness();
-    const workflowPath = join(harness.projectDir, ".github/workflows/open-pr-on-branch-push.yml");
+    const readmePath = join(harness.projectDir, ".openspec-shipper/README.md");
 
     await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir });
-    await writeFile(workflowPath, "name: Custom Checks\n");
+    await writeFile(readmePath, "Custom Shipper README\n");
 
     const result = await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir, force: true });
 
-    expect(result.find((file) => file.target === workflowPath)?.status).toBe("updated");
-    expect(await readFile(workflowPath, "utf8")).toContain("name: Auto Open PR");
+    expect(result.find((file) => file.target === readmePath)?.status).toBe("updated");
+    expect(await readFile(readmePath, "utf8")).toContain("Required After Init");
   });
 
   test("does not overwrite an existing queue", async () => {

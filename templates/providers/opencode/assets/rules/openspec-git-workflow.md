@@ -140,20 +140,13 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 6. Mark tasks complete only when actually implemented and validated.
 7. Commit progress with a valid Conventional Commit.
 
-## Push Phase
+## Native Push Phase
 
-1. Inspect registered `worktrees/*`.
-2. Select only worktrees whose `tasks.md` is 100% complete.
-3. Validate OpenSpec artifacts.
-4. Run local checks.
-5. Commit final verification changes if needed.
-6. Validate commit messages.
-7. Push the branch.
-8. After push, verify whether an open PR already exists when `gh` is available.
-   If no PR exists yet, that is not a blocker: the branch-push workflow owns PR
-   creation and the queue will move to `waiting_for_pr`.
-9. Do not call `gh pr create` or any other manual PR creation path from the
-   ship worker.
+OpenSpec Shipper owns `push` in runner code. OpenCode agents must not push
+branches, create pull requests, or call `gh pr create`. After `implement`
+finishes all tasks and commits progress in `worktrees/<change-name>`, the
+runner validates the completed worktree, pushes the branch, and opens or reuses
+the pull request with GitHub CLI.
 
 ## Archive Phase
 
@@ -171,20 +164,8 @@ git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 12. If push fails, stop with at most one local archive commit.
 13. Do not clean local worktrees or branches in this phase.
 
-## Cleanup Phase
+## Native Cleanup And Main Sync Phases
 
-1. Run only from root `main`.
-2. Verify the target change exists under `openspec/changes/archive/`.
-3. Remove only clean local `worktrees/<change-name>` worktrees.
-4. Delete only merged local implementation branches with `git branch -d`.
-5. Never force-delete local branches and never delete remote branches.
-6. Missing worktree or branch is a successful no-op.
-
-## Main Sync Phase
-
-1. Run only from root `main`.
-2. Verify `main` is clean.
-3. Fetch `origin/main`.
-4. Fast-forward, push local-only commits, or rebase local archive/proposal
-   commits on top of `origin/main` when local and remote diverged.
-5. Do not edit files, create commits, run OpenSpec commands, or create PRs.
+OpenSpec Shipper owns `cleanup_worktree` and `sync_main` in runner code. OpenCode
+agents must not remove worktrees, delete branches, reconcile `main`, or call
+GitHub APIs for these phases.

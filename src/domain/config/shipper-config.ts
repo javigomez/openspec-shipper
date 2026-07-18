@@ -72,7 +72,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
       },
     },
     github: {
-      autoOpenPr: true,
+      autoOpenPr: false,
       prChecks: false,
     },
     checks: {

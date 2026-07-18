@@ -38,22 +38,16 @@ export const opencodeProvider: ExecutorProvider = {
 
 export function openCodeCommandName(phase: DeliverPhase): string {
   switch (phase) {
-    case "prepare_worktree":
-      return "openspec-prepare-worktree";
     case "implement":
       return "openspec-apply-worktree";
-    case "push":
-      return "openspec-ship-worktree";
-    case "sync_main":
-      return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
+    case "prepare_worktree":
+    case "push":
+    case "sync_main":
     case "cleanup_worktree":
-      return "openspec-cleanup-worktree";
-    case "waiting_for_pr":
-      return "openspec-main-sync";
     case "waiting_for_merge":
-      return "openspec-main-sync";
+      throw new Error(`${phase} is native OpenSpec Shipper runner logic and has no OpenCode command`);
   }
 }
 
@@ -77,8 +71,6 @@ export function detectFailureSignal(output: string): string | undefined {
     [/\bnot eligible for push\b/i, "Worker reported a blocker"],
     [/\bArchive blocked\b/i, "OpenSpec archive worker reported a blocker"],
     [/\bnot archive-ready\b/i, "OpenSpec archive worker reported a blocker"],
-    [/\bCleanup blocked\b/i, "OpenSpec cleanup worker reported a blocker"],
-    [/\bnot cleanup-ready\b/i, "OpenSpec cleanup worker reported a blocker"],
     [/\b(worker reported a blocker|task is blocked|cannot continue without)\b/i, "Worker reported a blocker"],
   ];
 

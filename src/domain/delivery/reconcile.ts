@@ -95,8 +95,8 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("waiting_for_merge", "open pull request exists");
   }
 
-  if (evidence.hasRemoteBranch && phasePrecedes(evidence.declaredPhase, "waiting_for_pr")) {
-    return transitionInference("waiting_for_pr", "remote implementation branch exists");
+  if (evidence.hasRemoteBranch && phasePrecedes(evidence.declaredPhase, "waiting_for_merge")) {
+    return transitionInference("push", "remote implementation branch exists without an open pull request");
   }
 
   if (evidence.hasActiveChange || evidence.hasLocalClaim) {
@@ -141,15 +141,13 @@ function phaseRank(phase: DeliverPhase): number {
       return 0;
     case "push":
       return 2;
-    case "waiting_for_pr":
-      return 3;
     case "waiting_for_merge":
-      return 4;
+      return 3;
     case "sync_main":
-      return 5;
+      return 4;
     case "archive":
-      return 6;
+      return 5;
     case "cleanup_worktree":
-      return 7;
+      return 6;
   }
 }

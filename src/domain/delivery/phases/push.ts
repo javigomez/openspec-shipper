@@ -24,7 +24,7 @@ export const pushPhase: DeliveryPhaseDefinition = {
     }
 
     if (evidence.hasRemoteBranch) {
-      return transition("waiting_for_pr", "remote implementation branch exists");
+      return ready("push");
     }
 
     return ready("push");
@@ -39,6 +39,6 @@ export const pushPhase: DeliveryPhaseDefinition = {
 
     return evidence.hasOpenPullRequest
       ? transition("waiting_for_merge", "open pull request exists")
-      : transition("waiting_for_pr", "push phase pushed branch and PR creation is external");
+      : blocked("push", "push phase completed but no pull request exists");
   },
 };

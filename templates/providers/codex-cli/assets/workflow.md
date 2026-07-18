@@ -9,9 +9,11 @@ execution surface for implementation agents.
 - Implementation work runs only in `worktrees/<change-name>`.
 - The shipper runner owns the native `prepare_worktree` phase. Codex must not
   create branches or worktrees during `implement`.
-- Pull requests are created after implementation and before archive.
+- The shipper runner owns branch push and pull request creation through `git`
+  and `gh`. Codex must not push branches or create PRs during `implement`.
 - Archive runs only after the implementation PR has merged.
-- Cleanup runs only after OpenSpec archive has completed and pushed.
+- Cleanup is native shipper housekeeping after OpenSpec archive has completed
+  and pushed.
 
 ## Branches And Worktrees
 
@@ -66,11 +68,12 @@ invent a scope.
 
 - `implement` may edit product code and OpenSpec task checkboxes inside the
   selected worktree.
-- `push` validates, commits final verification changes, and pushes the selected
-  implementation branch. It must not create PRs manually.
-- `sync_main` only reconciles root `main` with `origin/main`.
+- `push` is native OpenSpec Shipper logic: it validates the completed worktree,
+  pushes the selected implementation branch, and creates or reuses a PR with
+  `gh`.
+- `sync_main` is native OpenSpec Shipper logic: it reconciles root `main` with
+  `origin/main`.
 - `archive` runs OpenSpec archive from root `main` and pushes the archive/spec
   diff. It must not clean worktrees.
-- `cleanup_worktree` removes only clean local implementation worktrees and
-  merged local branches. It must not edit files, commit, push, or delete remote
-  branches.
+- `cleanup_worktree` is native OpenSpec Shipper logic: it removes only clean
+  local implementation worktrees and merged local branches.

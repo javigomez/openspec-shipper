@@ -24,7 +24,7 @@ export const implementPhase: DeliveryPhaseDefinition = {
     }
 
     if (evidence.hasRemoteBranch) {
-      return transition("waiting_for_pr", "remote implementation branch exists");
+      return transition("push", "remote implementation branch exists without an open pull request");
     }
 
     return transition("push", "local implementation is complete");

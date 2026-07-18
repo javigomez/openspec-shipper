@@ -13,19 +13,13 @@ export type DoctorCheck = {
 
 const REQUIRED_OPENCODE_COMMANDS = [
   ".opencode/commands/openspec-apply-worktree.md",
-  ".opencode/commands/openspec-ship-worktree.md",
-  ".opencode/commands/openspec-main-sync.md",
   ".opencode/commands/openspec-archive-merged.md",
-  ".opencode/commands/openspec-cleanup-worktree.md",
 ];
 
 const REQUIRED_CODEX_ASSETS = [
   ".openspec-shipper/codex/workflow.md",
   ".openspec-shipper/codex/prompts/implement.md",
-  ".openspec-shipper/codex/prompts/push.md",
-  ".openspec-shipper/codex/prompts/sync-main.md",
   ".openspec-shipper/codex/prompts/archive.md",
-  ".openspec-shipper/codex/prompts/cleanup-worktree.md",
 ];
 
 const REQUIRED_PACKAGE_SCRIPTS = [
@@ -42,8 +36,9 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   checks.push(checkCommand("git", ["rev-parse", "--is-inside-work-tree"], projectDir, "Git repository detected"));
   checks.push(checkCommand("git", ["rev-parse", "--verify", config?.baseBranch ?? "main"], projectDir, "Base branch exists"));
   checks.push(checkWorkingTreeClean(projectDir));
-  checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for PR state reconciliation"));
+  checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for pull request management"));
   checks.push(checkGitHubCliAuth(projectDir));
+  checks.push(checkGitHubPullRequestAccess(projectDir));
   checks.push(checkProviderCommand(projectDir, config));
   checks.push(checkCommand(packageManagerCommand(config), ["--version"], projectDir, "Configured package manager is available"));
 
@@ -76,17 +71,6 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
       ? ok(".gitignore worktrees", "worktrees/ is ignored")
       : warning(".gitignore worktrees", "Add worktrees/ to .gitignore before running implement workers"),
   );
-
-  checks.push(
-    (await fileExists(join(projectDir, ".github/workflows/open-pr-on-branch-push.yml"))) ||
-      config?.github.autoOpenPr === false
-      ? ok("auto PR workflow", "Auto PR workflow is installed or disabled")
-      : warning("auto PR workflow", "Auto PR workflow missing; push workers push but do not create PRs themselves"),
-  );
-
-  if (config?.github.autoOpenPr !== false && (await fileExists(join(projectDir, ".github/workflows/open-pr-on-branch-push.yml")))) {
-    checks.push(checkGitHubActionsPullRequestPermission(projectDir));
-  }
 
   return checks;
 }
@@ -178,62 +162,43 @@ export function checkWorkingTreeClean(projectDir: string): DoctorCheck {
   );
 }
 
-function checkGitHubActionsPullRequestPermission(projectDir: string): DoctorCheck {
-  const repository = detectGitHubRepository(projectDir);
-  if (repository === "missing") {
-    return warning("github actions PR permission", "Cannot verify auto-PR permission because git remote origin is missing");
-  }
-
-  if (!repository) {
-    return warning("github actions PR permission", "Cannot verify auto-PR permission because origin is not a GitHub repo URL");
-  }
-
-  const result = spawnSync(
-    "gh",
-    ["api", `repos/${repository.owner}/${repository.repo}/actions/permissions/workflow`],
-    { cwd: projectDir, encoding: "utf8", timeout: 10_000 },
-  );
-  if (result.error) {
-    return warning("github actions PR permission", `Cannot verify auto-PR permission: ${result.error.message}`);
-  }
-
-  if (result.status !== 0) {
-    const message = firstLine(result.stderr || result.stdout) ?? `gh api exited with code ${result.status}`;
-    return warning(
-      "github actions PR permission",
-      `Cannot verify auto-PR permission with gh api: ${message}. Check Settings > Actions > General manually.`,
-    );
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout) as {
-      can_approve_pull_request_reviews?: unknown;
-      default_workflow_permissions?: unknown;
-    };
-    if (parsed.can_approve_pull_request_reviews !== true) {
-      return warning(
-        "github actions PR permission",
-        "Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests",
-      );
-    }
-
-    return ok("github actions PR permission", "GitHub Actions may create pull requests");
-  } catch {
-    return warning("github actions PR permission", "Cannot parse gh api workflow permission response");
-  }
-}
-
 function checkGitHubCliAuth(projectDir: string): DoctorCheck {
   const repository = detectGitHubRepository(projectDir);
   if (repository === "missing") {
-    return warning("gh auth", "Cannot verify GitHub CLI authentication because git remote origin is missing");
+    return error("gh auth", "Cannot verify GitHub CLI authentication because git remote origin is missing");
   }
 
   if (!repository) {
-    return warning("gh auth", "Cannot verify GitHub CLI authentication because origin is not a GitHub repo URL");
+    return error("gh auth", "Cannot verify GitHub CLI authentication because origin is not a GitHub repo URL");
   }
 
   return checkCommand("gh", ["auth", "status"], projectDir, "GitHub CLI is authenticated");
+}
+
+function checkGitHubPullRequestAccess(projectDir: string): DoctorCheck {
+  const repository = detectGitHubRepository(projectDir);
+  if (repository === "missing") {
+    return error("gh pr access", "Git remote origin is required so OpenSpec Shipper can create pull requests with gh");
+  }
+
+  if (!repository) {
+    return error("gh pr access", "Git remote origin must be a GitHub repository URL so OpenSpec Shipper can create pull requests with gh");
+  }
+
+  const result = spawnSync("gh", ["pr", "list", "--limit", "1"], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (result.error) {
+    return error("gh pr access", result.error.message);
+  }
+
+  if (result.status !== 0) {
+    return error("gh pr access", firstLine(result.stderr || result.stdout) ?? `gh pr list exited with code ${result.status}`);
+  }
+
+  return ok("gh pr access", "GitHub pull requests are accessible through gh");
 }
 
 function detectGitHubRepository(projectDir: string): { owner: string; repo: string } | undefined | "missing" {

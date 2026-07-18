@@ -24,9 +24,10 @@ such as `.opencode/`.
 - OpenCode for the stable v1 provider
 - The package manager configured during `init`
 
-`gh` is used by the runner to reconcile PR state before spending tokens. That is
-how `waiting_for_pr` becomes `waiting_for_merge`, and how `waiting_for_merge`
-becomes `sync_main` after a PR has been merged.
+`gh` is used by the runner to create pull requests after branch push and to
+reconcile PR state before spending tokens. That is how `push` becomes
+`waiting_for_merge`, and how `waiting_for_merge` becomes `sync_main` after a PR
+has been merged.
 
 Before running the queue, `main` should be clean except for ignored shipper
 runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
@@ -153,7 +154,7 @@ npx openspec-shipper init --profile node-npm
 - provider assets:
   - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
   - Codex CLI: `.openspec-shipper/codex/`
-- GitHub workflow for auto PR creation after branch push
+- GitHub CLI (`gh`) based pull request creation after branch push
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees
 
@@ -163,8 +164,16 @@ belongs to the application. A repo-local usage guide is installed at
 
 Commit the installed project assets on `main` before running the queue. The
 native `prepare_worktree` phase creates feature worktrees from `HEAD`; if `main` is dirty after
-`init`, the new worktree would miss the freshly installed scripts, workflows,
+`init`, the new worktree would miss the freshly installed scripts,
 provider commands, and package changes. Local queue state remains ignored.
+
+OpenSpec Shipper uses GitHub CLI to create and inspect pull requests. Authenticate
+once before running the queue:
+
+```bash
+gh auth login
+openspec-shipper doctor
+```
 
 ```bash
 git status --short
@@ -197,7 +206,7 @@ Queue format:
 phase as metadata on that task and advances it through:
 
 ```text
-prepare_worktree -> implement -> push -> waiting_for_pr -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
+prepare_worktree -> implement -> push -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
 ```
 
 ```mermaid
@@ -210,7 +219,7 @@ sequenceDiagram
   Human->>Shipper: Add change to queue.md
   Shipper->>Shipper: prepare_worktree
   Shipper->>Shipper: implement in worktree
-  Shipper->>Shipper: push branch and wait for PR
+  Shipper->>Shipper: push branch and open PR with gh
   Human->>Shipper: Review and merge PR
   Shipper->>Shipper: sync_main
   Shipper->>OpenSpec: archive merged change
@@ -244,7 +253,7 @@ archived and locally clean -> done
 archived but local work remains -> cleanup_worktree
 merged PR -> sync_main
 open PR -> waiting_for_merge
-remote branch -> waiting_for_pr
+remote branch without PR -> push
 local work complete -> push
 local work incomplete -> implement
 active change without local work -> prepare_worktree
@@ -285,15 +294,12 @@ cleanup succeeds as a no-op.
 ### OpenCode
 
 OpenCode is the stable v1 provider. It keeps the provider command filenames
-from the original runner, even though the public shipper phases now use clearer
-names:
+for the phases that still need an agent. Git/GitHub housekeeping phases are
+native runner logic and do not call OpenCode:
 
 ```bash
 opencode run --command openspec-apply-worktree <change>
-opencode run --command openspec-ship-worktree <change>
-opencode run --command openspec-main-sync
 opencode run --command openspec-archive-merged <change>
-opencode run --command openspec-cleanup-worktree <change>
 ```
 
 With config enabled, it also adds:

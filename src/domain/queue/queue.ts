@@ -6,7 +6,6 @@ export type DeliverPhase =
   | "prepare_worktree"
   | "implement"
   | "push"
-  | "waiting_for_pr"
   | "waiting_for_merge"
   | "sync_main"
   | "archive"
@@ -37,7 +36,6 @@ const DELIVER_PHASES: DeliverPhase[] = [
   "prepare_worktree",
   "implement",
   "push",
-  "waiting_for_pr",
   "waiting_for_merge",
   "sync_main",
   "archive",
@@ -145,22 +143,16 @@ export function openCodeCommandName(task: QueueTask): string {
   const action = deliverPhase(task);
 
   switch (action) {
-    case "prepare_worktree":
-      return "openspec-prepare-worktree";
     case "implement":
       return "openspec-apply-worktree";
-    case "push":
-      return "openspec-ship-worktree";
-    case "sync_main":
-      return "openspec-main-sync";
     case "archive":
       return "openspec-archive-merged";
+    case "prepare_worktree":
+    case "push":
+    case "sync_main":
     case "cleanup_worktree":
-      return "openspec-cleanup-worktree";
-    case "waiting_for_pr":
-      return "openspec-main-sync";
     case "waiting_for_merge":
-      return "openspec-main-sync";
+      throw new Error(`${action} is native OpenSpec Shipper runner logic and has no OpenCode command`);
   }
 }
 
@@ -244,7 +236,7 @@ export function advanceDeliverTask(
     return markTask(lines, task, "done", details);
   }
 
-  const nextPhase = DELIVER_PHASES[DELIVER_PHASES.indexOf(phase) + 1]!;
+  const nextPhase = phase === "push" ? "waiting_for_merge" : DELIVER_PHASES[DELIVER_PHASES.indexOf(phase) + 1]!;
   const detailParts = [
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
     `phase: ${nextPhase}`,
@@ -372,11 +364,11 @@ function taskIsRunnable(task: QueueTask, tasks: QueueTask[]): boolean {
     return false;
   }
 
-  return !["waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
+  return deliverPhase(task) !== "waiting_for_merge";
 }
 
 export function commandAcceptsChangeArgument(task: QueueTask): boolean {
-  return !["prepare_worktree", "sync_main", "waiting_for_pr", "waiting_for_merge"].includes(deliverPhase(task));
+  return !["prepare_worktree", "sync_main", "waiting_for_merge"].includes(deliverPhase(task));
 }
 
 function normalizeDeliverPhase(value: string): DeliverPhase | undefined {
@@ -448,10 +440,6 @@ function badgeForVisual(visual: {
   }
 
   const phase = visual.phase ?? "pending";
-  if (phase === "waiting_for_pr") {
-    return "![waiting_for_pr waiting](https://img.shields.io/badge/waiting_for_pr-waiting-orange)";
-  }
-
   if (phase === "waiting_for_merge") {
     return "![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)";
   }

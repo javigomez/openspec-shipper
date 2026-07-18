@@ -85,13 +85,6 @@ describe("queue parser", () => {
     expect(task.change).toBe("test-20-migrate-notebook-access-button-rntl");
     expect(deliverPhase(task)).toBe("push");
     expect(task.dependsOn).toEqual(["test-08-add-rntl-test-infra"]);
-    expect(openCodeCommandName(task)).toBe("openspec-ship-worktree");
-    expect(buildOpenCodeArgs(task)).toEqual([
-      "run",
-      "--command",
-      "openspec-ship-worktree",
-      "test-20-migrate-notebook-access-button-rntl",
-    ]);
   });
 
   test("advances deliver phases before marking done", () => {
@@ -113,7 +106,7 @@ describe("queue parser", () => {
     );
   });
 
-  test("advances push to waiting for PR when PR creation is external", () => {
+  test("advances push to waiting for merge after PR creation", () => {
     const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     const task = result.tasks[0]!;
 
@@ -121,10 +114,10 @@ describe("queue parser", () => {
       timestamp: "2026-07-13T08:21:00.000Z",
     });
 
-    expect(next).toContain("phase: waiting_for_pr");
-    expect(next).toContain("![waiting_for_pr waiting](https://img.shields.io/badge/waiting_for_pr-waiting-orange)");
+    expect(next).toContain("phase: waiting_for_merge");
+    expect(next).toContain("![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)");
     const parsed = parseQueue(next).tasks[0]!;
-    expect(deliverPhase(parsed)).toBe("waiting_for_pr");
+    expect(deliverPhase(parsed)).toBe("waiting_for_merge");
     expect(findFirstRunnableTask([parsed])).toBeUndefined();
   });
 

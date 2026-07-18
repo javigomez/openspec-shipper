@@ -569,7 +569,8 @@ async function validateTaskPreflight(
 ): Promise<{ ok: true; commandPath: string } | { ok: false; commandPath: string; reason: string }> {
   const phase = deliverPhase(task);
   const currentProvider = provider(config);
-  const commandName = isNativePhase(phase) ? "" : openCodeCommandName(phase);
+  const commandName =
+    currentProvider.id === "opencode" && !isNativePhase(phase) ? openCodeCommandName(phase) : "";
   const commandPath =
     isNativePhase(phase)
       ? `(native ${phase} phase)`

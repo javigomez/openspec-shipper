@@ -16,6 +16,10 @@ export type SetupConfig = {
   projectDir: string;
   profile?: ShipperProfile;
   provider?: ExecutorProviderId;
+  providerBin?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: "dontAsk" | "bypassPermissions";
   force?: boolean;
 };
 
@@ -85,6 +89,7 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   const configPath = join(config.projectDir, CONFIG_PATH);
   const shipperConfig = defaultShipperConfig(profile);
   shipperConfig.executor.provider = selectedProvider;
+  applyProviderOptions(shipperConfig, selectedProvider, config);
   const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
   installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample(selectedProvider)));
@@ -99,6 +104,29 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   installed.push(await updatePackageJson(config));
 
   return installed;
+}
+
+function applyProviderOptions(
+  shipperConfig: ReturnType<typeof defaultShipperConfig>,
+  provider: ExecutorProviderId,
+  config: SetupConfig,
+): void {
+  switch (provider) {
+    case "opencode":
+      shipperConfig.executor.opencode.bin = config.providerBin ?? shipperConfig.executor.opencode.bin;
+      shipperConfig.executor.opencode.model = config.model ?? shipperConfig.executor.opencode.model;
+      return;
+    case "codex-cli":
+      shipperConfig.executor.codex.bin = config.providerBin ?? shipperConfig.executor.codex.bin;
+      shipperConfig.executor.codex.model = config.model ?? shipperConfig.executor.codex.model;
+      shipperConfig.executor.codex.reasoningEffort = config.effort ?? shipperConfig.executor.codex.reasoningEffort;
+      return;
+    case "claude-code":
+      shipperConfig.executor.claude.bin = config.providerBin ?? shipperConfig.executor.claude.bin;
+      shipperConfig.executor.claude.model = config.model ?? shipperConfig.executor.claude.model;
+      shipperConfig.executor.claude.effort = config.effort ?? shipperConfig.executor.claude.effort;
+      shipperConfig.executor.claude.permissionMode = config.permissionMode ?? shipperConfig.executor.claude.permissionMode;
+  }
 }
 
 async function installProviderTemplates(provider: ExecutorProviderId, config: SetupConfig): Promise<InstalledFile[]> {

@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
 import { printDoctorReport, runDoctor } from "../application/doctor/doctor.js";
-import { isShipperProfile, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
+import { isShipperProfile, readShipperConfig, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
 import { defaultConfig, runQueue, type RunnerMode } from "../application/queue/runner.js";
 import { installShipperKit } from "../application/init/setup.js";
 import { loadShipperEnv, type ShipperCliFlags } from "./env/load-shipper-env.js";
@@ -35,6 +35,10 @@ export async function runCli(argv: string[]): Promise<void> {
       projectDir,
       profile: options.profile,
       provider: options.provider ?? providerFlag(global.flags.provider),
+      providerBin: options.providerBin,
+      model: options.model,
+      effort: options.effort,
+      permissionMode: options.permissionMode,
       force: options.force,
     });
     console.log(`Processed ${installed.length} OpenSpec Shipper file(s) for ${projectDir}:`);
@@ -45,6 +49,11 @@ export async function runCli(argv: string[]): Promise<void> {
     console.log("Next steps:");
     console.log("  Authenticate GitHub CLI if this machine is not already authenticated:");
     console.log("  gh auth login");
+    const installedConfig = await readShipperConfig(projectDir);
+    if (installedConfig?.executor.provider === "claude-code") {
+      console.log("  Authenticate Claude Code if this machine is not already authenticated:");
+      console.log(`  ${installedConfig.executor.claude.bin} auth login`);
+    }
     console.log("  Review and commit the installed files on the configured base branch before running the queue.");
     console.log("  Do not commit .openspec-shipper/.env, queue.md, shipper.lock, stop, runs/, tmp/, or worktrees/.");
     console.log("  git status --short");
@@ -53,7 +62,7 @@ export async function runCli(argv: string[]): Promise<void> {
     console.log("  openspec-shipper doctor");
     console.log("  openspec-shipper queue add <change-name>");
     console.log("  openspec-shipper queue dry-run");
-    console.log("  openspec-shipper queue next");
+    console.log("  openspec-shipper queue run");
     process.exitCode = 0;
     return;
   }
@@ -119,12 +128,20 @@ function parseTargetOptions(argv: string[]): {
   projectDir?: string;
   profile: ShipperProfile;
   provider?: ExecutorProviderId;
+  providerBin?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: "dontAsk" | "bypassPermissions";
   force: boolean;
   yes: boolean;
 } {
   let projectDir: string | undefined;
   let profile: ShipperProfile = "node-npm";
   let provider: ExecutorProviderId | undefined;
+  let providerBin: string | undefined;
+  let model: string | undefined;
+  let effort: string | undefined;
+  let permissionMode: "dontAsk" | "bypassPermissions" | undefined;
   let force = false;
   let yes = false;
 
@@ -155,6 +172,34 @@ function parseTargetOptions(argv: string[]): {
       throw new Error("Expected --provider to be one of opencode, codex-cli, claude-code.");
     }
 
+    if (arg === "--provider-bin" && argv[index + 1]) {
+      providerBin = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--model" && argv[index + 1]) {
+      model = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--effort" && argv[index + 1]) {
+      effort = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--permission-mode") {
+      const next = argv[index + 1];
+      if (next === "dontAsk" || next === "bypassPermissions") {
+        permissionMode = next;
+        index += 1;
+        continue;
+      }
+      throw new Error("Expected --permission-mode to be one of dontAsk, bypassPermissions.");
+    }
+
     if (arg === "--package-manager") {
       const next = argv[index + 1];
       if (next === "npm" || next === "pnpm" || next === "bun") {
@@ -182,7 +227,7 @@ function parseTargetOptions(argv: string[]): {
     }
   }
 
-  return { projectDir, profile, provider, force, yes };
+  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, force, yes };
 }
 
 function profileForPackageManager(packageManager: PackageManager): ShipperProfile {
@@ -222,16 +267,32 @@ async function promptInitOptions(
       ),
       parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
     );
+    const providerBin = provider === "claude-code"
+      ? answerOrDefault(await rl.question(`Claude Code binary (${parsed.providerBin ?? "claude"}): `), parsed.providerBin ?? "claude")
+      : parsed.providerBin;
+    const model = provider === "claude-code"
+      ? answerOrDefault(await rl.question(`Claude model (${parsed.model ?? "sonnet"}): `), parsed.model ?? "sonnet")
+      : parsed.model;
+    const effort = provider === "claude-code"
+      ? parseClaudeEffort(answerOrDefault(await rl.question(`Claude effort low|medium|high (${parsed.effort ?? "low"}): `), parsed.effort ?? "low"), parsed.effort ?? "low")
+      : parsed.effort;
 
     return {
       ...parsed,
       projectDir,
       profile: profileForPackageManager(packageManager),
       provider,
+      providerBin,
+      model,
+      effort,
     };
   } finally {
     rl.close();
   }
+}
+
+function parseClaudeEffort(value: string, fallback: string): string {
+  return value === "low" || value === "medium" || value === "high" ? value : fallback;
 }
 
 function answerOrDefault(answer: string, fallback: string): string {

@@ -54,6 +54,7 @@ export const claudeCodeProvider: ExecutorProvider = {
     if (claude.maxBudgetUsd) {
       args.push("--max-budget-usd", String(claude.maxBudgetUsd));
     }
+    args.push("Execute the OpenSpec Shipper phase described in stdin.");
 
     return {
       command: claude.bin,
@@ -80,6 +81,9 @@ export const claudeCodeProvider: ExecutorProvider = {
     if (/\b(permission denied|permission required|not logged in|max(?:imum)? turns|max budget)\b/i.test(assistantOutput)) {
       return "Claude Code reported a blocker";
     }
+    if (!result?.structured_output || result.structured_output.status !== "completed") {
+      return "Claude Code did not return the required structured completion result";
+    }
     return undefined;
   },
 };
@@ -97,18 +101,42 @@ type ClaudeResult = {
 };
 
 export function parseClaudeResult(output: string): ClaudeResult | undefined {
+  try {
+    const parsed = JSON.parse(output.trim()) as ClaudeResult;
+    if (isClaudeResult(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Continue with line and suffix parsing for interleaved heartbeats/stderr.
+  }
+
   const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     try {
       const parsed = JSON.parse(lines[index]!) as ClaudeResult;
-      if (parsed.type === "result" || parsed.structured_output || typeof parsed.result === "string") {
+      if (isClaudeResult(parsed)) {
         return parsed;
       }
     } catch {
       // Heartbeats and stderr can be interleaved with the final JSON result.
     }
   }
+
+  for (let index = output.lastIndexOf("\n{"); index >= 0; index = output.lastIndexOf("\n{", index - 1)) {
+    try {
+      const parsed = JSON.parse(output.slice(index + 1).trim()) as ClaudeResult;
+      if (isClaudeResult(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Try the preceding JSON object boundary.
+    }
+  }
   return undefined;
+}
+
+function isClaudeResult(value: ClaudeResult): boolean {
+  return value.type === "result" || Boolean(value.structured_output) || typeof value.result === "string";
 }
 
 function buildClaudePrompt(input: BuildCommandInput): string {

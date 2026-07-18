@@ -199,6 +199,18 @@ describe("executor providers", () => {
     expect(parseClaudeResult(`heartbeat\n${completed}\n` )?.structured_output?.status).toBe("completed");
   });
 
+  test("Claude Code provider detects structured CLI errors and sentinel fallback", () => {
+    const cliError = JSON.stringify({ type: "result", is_error: true, subtype: "error_max_turns", result: "turn limit reached" });
+    expect(claudeCodeProvider.detectFailureSignal(cliError)).toBe("Claude Code reported an error: turn limit reached");
+    expect(claudeCodeProvider.detectFailureSignal("OPENSPEC_SHIPPER_BLOCKED: missing worktree")).toBe(
+      "Worker reported a blocker: missing worktree",
+    );
+    expect(parseClaudeResult("not json")).toBeUndefined();
+    expect(claudeCodeProvider.detectFailureSignal("Implemented successfully")).toBe(
+      "Claude Code did not return the required structured completion result",
+    );
+  });
+
   test("OpenCode provider treats blocked sentinel lines as failures", () => {
     expect(opencodeProvider.detectFailureSignal("All checks passed\nOPENSPEC_SHIPPER_BLOCKED: no open pull request exists")).toBe(
       "Worker reported a blocker: no open pull request exists",

@@ -49,6 +49,8 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   checks.push(checkGitHubPullRequestAccess(projectDir));
   checks.push(checkProviderCommand(projectDir, config));
   if (config?.executor.provider === "claude-code") {
+    checks.push(checkClaudePlatform());
+    checks.push(checkClaudeConfig(config));
     checks.push(checkCommand(config.executor.claude.bin, ["auth", "status"], projectDir, "Claude Code is authenticated"));
     checks.push(asWarning(checkCommand(config.executor.claude.bin, ["doctor"], projectDir, "Claude Code diagnostics passed")));
   }
@@ -87,6 +89,12 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   return checks;
 }
 
+export function checkClaudePlatform(platform = process.platform): DoctorCheck {
+  return platform === "win32"
+    ? error("claude sandbox", "Claude Code strict sandbox requires macOS, Linux, or WSL2; native Windows is not supported")
+    : ok("claude platform", "Claude Code sandbox is supported on this platform");
+}
+
 function checkProviderCommand(projectDir: string, config: ShipperConfig | undefined): DoctorCheck {
   const provider = config?.executor.provider ?? "opencode";
   if (provider === "codex-cli") {
@@ -94,10 +102,56 @@ function checkProviderCommand(projectDir: string, config: ShipperConfig | undefi
   }
 
   if (provider === "claude-code") {
-    return checkCommand(config?.executor.claude.bin ?? "claude", ["--version"], projectDir, "Claude Code CLI is available");
+    return checkClaudeVersion(config?.executor.claude.bin ?? "claude", projectDir);
   }
 
   return checkCommand(config?.executor.opencode.bin ?? "opencode", ["--version"], projectDir, "OpenCode CLI is available");
+}
+
+function checkClaudeConfig(config: ShipperConfig): DoctorCheck {
+  const effort = config.executor.claude.effort;
+  if (effort && !["low", "medium", "high", "xhigh", "max", "ultracode"].includes(effort)) {
+    return error("claude config", `Unsupported Claude effort: ${effort}`);
+  }
+  const permissionMode = config.executor.claude.permissionMode;
+  if (permissionMode !== "dontAsk" && permissionMode !== "bypassPermissions") {
+    return error("claude config", `Unsupported Claude permission mode: ${permissionMode ?? "(missing)"}`);
+  }
+  if (config.executor.claude.maxTurns !== undefined && (!Number.isInteger(config.executor.claude.maxTurns) || config.executor.claude.maxTurns <= 0)) {
+    return error("claude config", "Claude maxTurns must be a positive integer");
+  }
+  if (config.executor.claude.maxBudgetUsd !== undefined && (!Number.isFinite(config.executor.claude.maxBudgetUsd) || config.executor.claude.maxBudgetUsd <= 0)) {
+    return error("claude config", "Claude maxBudgetUsd must be a positive number");
+  }
+  if (permissionMode === "bypassPermissions") {
+    return warning("claude config", "Claude bypassPermissions disables normal permission checks; use only in an isolated environment");
+  }
+  return ok("claude config", `Claude model ${config.executor.claude.model ?? "default"}, effort ${effort ?? "default"}`);
+}
+
+function checkClaudeVersion(command: string, cwd: string): DoctorCheck {
+  const result = spawnSync(command, ["--version"], { cwd, encoding: "utf8", timeout: 10_000 });
+  if (result.error) {
+    return error(command, result.error.message);
+  }
+  if (result.status !== 0) {
+    return error(command, firstLine(result.stderr || result.stdout) ?? `exited with code ${result.status}`);
+  }
+  const version = (result.stdout || result.stderr).match(/(\d+)\.(\d+)\.(\d+)/);
+  if (version && compareVersion(version.slice(1).map(Number) as [number, number, number], [2, 1, 69]) < 0) {
+    return error(command, `Claude Code ${version[0]} is too old; version 2.1.69 or newer is required`);
+  }
+  return ok(command, version ? `Claude Code ${version[0]} is available` : "Claude Code CLI is available");
+}
+
+function compareVersion(left: [number, number, number], right: [number, number, number]): number {
+  for (let index = 0; index < left.length; index += 1) {
+    const difference = left[index]! - right[index]!;
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
 }
 
 async function checkProviderAssets(projectDir: string, config: ShipperConfig | undefined): Promise<DoctorCheck[]> {

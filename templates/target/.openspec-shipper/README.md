@@ -17,6 +17,7 @@ The installer created or updated these project assets:
 - provider assets:
   - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
   - Codex CLI: `.openspec-shipper/codex/`
+  - Claude Code: `.openspec-shipper/claude/`
 - `package.json`
 - `.gitignore`
 
@@ -62,6 +63,17 @@ gh auth status
 
 The runner uses `gh` to create the PR after pushing the implementation branch
 and to detect when that PR has merged.
+
+When `executor.provider` is `claude-code`, authenticate Claude Code as well:
+
+```bash
+claude auth login
+claude auth status
+```
+
+Claude provider prompts and strict sandbox settings live in
+`.openspec-shipper/claude/`. OpenSpec Shipper does not modify the project's
+`.claude/` directory.
 
 ```bash
 npx openspec-shipper doctor

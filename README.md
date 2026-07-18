@@ -1,9 +1,8 @@
 # openspec-shipper
 
 `openspec-shipper` is a small CLI that runs an OpenSpec delivery queue through
-AI executors. The v1 provider is OpenCode; Codex CLI support is included as an
-experimental provider so the architecture can grow without changing the queue
-contract.
+AI executors. OpenCode is the stable v1 provider; Codex CLI and Claude Code are
+experimental providers that share the same queue and delivery contract.
 
 The package is npm-first and repo-local by default:
 
@@ -21,7 +20,7 @@ such as `.opencode/`.
 
 - `git`
 - `gh`, authenticated with GitHub CLI
-- OpenCode for the stable v1 provider
+- OpenCode, Codex CLI, or Claude Code for the selected executor provider
 - The package manager configured during `init`
 
 `gh` is used by the runner to create pull requests after branch push and to
@@ -102,6 +101,12 @@ OPENSPEC_SHIPPER_OPENCODE_MODEL=opencode-go/deepseek-v4-pro
 OPENSPEC_SHIPPER_CODEX_BIN=codex
 OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.5
 OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=low
+OPENSPEC_SHIPPER_CLAUDE_BIN=claude
+OPENSPEC_SHIPPER_CLAUDE_MODEL=sonnet
+OPENSPEC_SHIPPER_CLAUDE_EFFORT=low
+OPENSPEC_SHIPPER_CLAUDE_PERMISSION_MODE=dontAsk
+OPENSPEC_SHIPPER_CLAUDE_MAX_TURNS=
+OPENSPEC_SHIPPER_CLAUDE_MAX_BUDGET_USD=
 OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=2
 OPENSPEC_SHIPPER_PRINT_LOGS=1
 OPENSPEC_SHIPPER_LOG_LEVEL=ERROR
@@ -109,7 +114,7 @@ OPENSPEC_SHIPPER_STATS=1
 ```
 
 `OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR` is a numeric allowance. The default is
-`2`, so having Codex/ChatGPT or OpenCode open in another window does not block
+`2`, so having Codex/ChatGPT, Claude Code, or OpenCode open in another window does not block
 the queue. Set it to `0` for strict single-executor mode.
 
 `init` adds these ignored entries:
@@ -137,6 +142,7 @@ Non-interactive mode:
 
 ```bash
 npx openspec-shipper init --yes --provider opencode --package-manager npm
+npx openspec-shipper init --yes --provider claude-code --model sonnet --effort low
 ```
 
 Current implementation still uses the previous profile flag while the
@@ -155,6 +161,7 @@ npx openspec-shipper init --profile node-npm
 - provider assets:
   - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
   - Codex CLI: `.openspec-shipper/codex/`
+  - Claude Code: `.openspec-shipper/claude/`
 - GitHub CLI (`gh`) based pull request creation after branch push
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees
@@ -339,7 +346,43 @@ Dry-run will produce command specs like:
 codex exec -C <projectDir> --sandbox workspace-write -c 'approval_policy="never"' --model <model> -c 'model_reasoning_effort="low"' <prompt>
 ```
 
-Claude Code is intentionally roadmap-only for now.
+### Claude Code
+
+Claude Code support is experimental. It runs `claude -p` non-interactively for
+the intelligent `implement` and `archive` phases, while Shipper continues to own
+worktrees, push, pull requests, base-branch sync, archive finalization, and
+cleanup.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude auth login
+npx openspec-shipper init --provider claude-code
+npx openspec-shipper doctor
+```
+
+Provider assets are installed under `.openspec-shipper/claude/`. Shipper does
+not create or modify `.claude/`, so existing project skills, agents, hooks, and
+settings remain application-owned. Each phase receives an explicit prompt,
+strict sandbox settings, a restricted tool surface, and a structured completion
+contract.
+
+```json
+{
+  "executor": {
+    "provider": "claude-code",
+    "claude": {
+      "bin": "claude",
+      "model": "sonnet",
+      "effort": "low",
+      "permissionMode": "dontAsk"
+    }
+  }
+}
+```
+
+The strict Claude sandbox is supported on macOS, Linux, and WSL2. Native Windows
+support remains experimental because Claude Code does not provide its sandbox
+there.
 
 ## Local And External Modes
 

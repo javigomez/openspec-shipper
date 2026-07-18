@@ -3,9 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
-import { checkWorkingTreeClean, runDoctor } from "../src/application/doctor/doctor";
+import { checkClaudePlatform, checkWorkingTreeClean, runDoctor } from "../src/application/doctor/doctor";
 
 describe("doctor", () => {
+  test("rejects native Windows for the strict Claude sandbox", () => {
+    expect(checkClaudePlatform("win32").ok).toBe(false);
+    expect(checkClaudePlatform("linux").ok).toBe(true);
+  });
   test("fails when the main checkout has non-runtime changes", async () => {
     const projectDir = await createGitRepo();
     await writeFile(join(projectDir, "package.json"), "{\"name\":\"changed\"}\n");
@@ -98,6 +102,28 @@ describe("doctor", () => {
     expect(checks.some((check) => check.name === "/usr/bin/true" && check.message === "Claude Code is authenticated")).toBe(true);
     expect(checks.some((check) => check.name === "claude sandbox" && check.ok)).toBe(true);
     expect(checks.some((check) => check.name.includes(".opencode/"))).toBe(false);
+  });
+
+  test("rejects invalid Claude execution limits", async () => {
+    const projectDir = await createGitRepo();
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(join(projectDir, ".openspec-shipper/config.json"), `${JSON.stringify({
+      version: 1,
+      profile: "node-npm",
+      baseBranch: "main",
+      packageManager: "npm",
+      executor: {
+        provider: "claude-code",
+        claude: { bin: "/usr/bin/true", model: "sonnet", effort: "low", permissionMode: "dontAsk", maxTurns: -1 },
+      },
+      github: { autoOpenPr: false, prChecks: false },
+      checks: {},
+      safety: { enablePush: true, enableArchive: true },
+    })}\n`);
+
+    const checks = await runDoctor(projectDir);
+
+    expect(checks.some((check) => check.name === "claude config" && !check.ok && check.message.includes("maxTurns"))).toBe(true);
   });
 });
 

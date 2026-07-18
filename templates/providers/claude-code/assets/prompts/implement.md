@@ -1,26 +1,61 @@
 # OpenSpec Shipper Claude Phase: implement
 
-Implement OpenSpec change `{{CHANGE_NAME}}` in repository `{{PROJECT_DIR}}`.
+Run one OpenSpec `implement` phase for change `{{CHANGE_NAME}}` in repository
+`{{PROJECT_DIR}}`.
 
-Read `.openspec-shipper/claude/workflow.md`, project instructions, and all
-OpenSpec artifacts for the change before editing.
+Read and follow `.openspec-shipper/claude/workflow.md`, `CLAUDE.md`, `AGENTS.md`,
+and the OpenSpec artifacts for this change. Prefer direct inspection and concise
+status updates.
 
-## Preconditions
+## Blocker Contract
 
-1. Confirm `worktrees/{{CHANGE_NAME}}` exists.
-2. Work only inside that prepared worktree.
-3. Validate the change with the command configured in
-   `.openspec-shipper/config.json`.
-4. If the worktree is missing or unsafe, return `blocked` without editing main.
+If you cannot complete this phase, return structured status `blocked` with an
+actionable reason and include exactly one final textual line:
 
-## Work
+```text
+OPENSPEC_SHIPPER_BLOCKED: <short reason>
+```
 
-1. Read proposal, design, delta specs, and tasks.
-2. Implement unchecked tasks in small coherent steps.
-3. Run the narrowest relevant project checks.
-4. Mark a task complete only after its implementation and validation succeed.
-5. Commit useful progress with a Conventional Commit.
-6. Finish only when all tasks are complete and the worktree is clean.
+Use it for missing tools, missing permissions, failed checks, dirty state,
+missing worktrees, unsafe Git state, or anything requiring human action. Do not
+include it after success.
 
-Do not create branches or worktrees. Do not push, create a pull request, merge,
-archive OpenSpec, or edit the root base-branch checkout.
+## Discovery
+
+Use `.openspec-shipper/config.json` for project commands. Use `checks.openspec`
+for OpenSpec CLI invocations; the default npm profile expands to
+`npm run openspec:cli --`.
+
+Run from repository root:
+
+```bash
+pwd
+git branch --show-current
+git status --short
+test -f openspec/changes/{{CHANGE_NAME}}/proposal.md
+test -f openspec/changes/{{CHANGE_NAME}}/design.md
+test -f openspec/changes/{{CHANGE_NAME}}/tasks.md
+find openspec/changes/{{CHANGE_NAME}}/specs -name spec.md -print
+OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> validate {{CHANGE_NAME}}
+test -d worktrees/{{CHANGE_NAME}}
+test -f worktrees/{{CHANGE_NAME}}/openspec/changes/{{CHANGE_NAME}}/tasks.md
+```
+
+If the root base branch checkout is dirty, do not edit it. Continue only inside
+the prepared `worktrees/{{CHANGE_NAME}}` checkout. If that worktree is missing,
+return `blocked`.
+
+## Implementation Rules
+
+Inside `worktrees/{{CHANGE_NAME}}`:
+
+1. Run `git status --short`.
+2. Read proposal, design, delta specs, and tasks.
+3. Implement the next small unchecked task.
+4. Mark a task complete only after its work and relevant validation are done.
+5. Run the narrowest useful checks from this worktree.
+6. Run scoped formatting when the repository provides a formatter.
+7. Commit useful progress with a Conventional Commit.
+
+Do not create PRs. Do not archive changes. Do not create branches or worktrees.
+Leave incomplete tasks unchecked when blocked.

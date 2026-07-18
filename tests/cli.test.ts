@@ -65,4 +65,38 @@ describe("CLI parser", () => {
       await rm(projectDir, { recursive: true, force: true });
     }
   });
+
+  test("initializes Claude Code with non-interactive provider options", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "shipper-cli-"));
+    try {
+      await runCli([
+        "init",
+        projectDir,
+        "--yes",
+        "--provider",
+        "claude-code",
+        "--provider-bin",
+        "custom-claude",
+        "--model",
+        "opus",
+        "--effort",
+        "medium",
+      ]);
+
+      expect(process.exitCode).toBe(0);
+      const config = JSON.parse(await readFile(join(projectDir, ".openspec-shipper/config.json"), "utf8"));
+      expect(config.executor.provider).toBe("claude-code");
+      expect(config.executor.claude).toEqual({
+        bin: "custom-claude",
+        model: "opus",
+        effort: "medium",
+        permissionMode: "dontAsk",
+      });
+      await expect(readFile(join(projectDir, ".openspec-shipper/claude/workflow.md"), "utf8")).resolves.toContain(
+        "Claude Code Workflow",
+      );
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
 });

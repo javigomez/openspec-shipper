@@ -16,7 +16,8 @@ const config = {
     },
     codex: {
       bin: "codex",
-      model: "gpt-5.4",
+      model: "gpt-5.5",
+      reasoningEffort: "low",
     },
   },
   opencodePrintLogs: true,
@@ -94,7 +95,8 @@ describe("executor providers", () => {
       'approval_policy="never"',
       "--model",
     ]);
-    expect(command.args).toContain("gpt-5.4");
+    expect(command.args).toContain("gpt-5.5");
+    expect(command.args).toContain('model_reasoning_effort="low"');
     expect(command.args.at(-1)).toContain("OpenSpec Shipper Codex Phase: implement");
     expect(command.args.at(-1)).toContain("add-name-greeting");
     expect(command.args.at(-1)).toContain("Installed Workflow Reference");

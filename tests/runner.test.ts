@@ -49,7 +49,8 @@ describe("runner", () => {
           },
           codex: {
             bin: "codex",
-            model: "gpt-5.4",
+            model: "gpt-5.5",
+            reasoningEffort: "low",
           },
         },
       }),
@@ -1015,7 +1016,8 @@ describe("runner", () => {
       ...harness.config,
       providerId: "codex-cli",
       codexBin: "codex",
-      codexModel: "gpt-5.4",
+      codexModel: "gpt-5.5",
+      codexReasoningEffort: "low",
       localClaimDetector: async () => true,
       tasksCompleteDetector: async () => false,
       executor: async (command, args) => {
@@ -1037,7 +1039,8 @@ describe("runner", () => {
       'approval_policy="never"',
       "--model",
     ]);
-    expect(receivedArgs).toContain("gpt-5.4");
+    expect(receivedArgs).toContain("gpt-5.5");
+    expect(receivedArgs).toContain('model_reasoning_effort="low"');
     expect(receivedArgs.at(-1)).toContain("OpenSpec Shipper Codex Phase: implement");
     expect(receivedArgs.at(-1)).toContain("add-name-greeting");
   });

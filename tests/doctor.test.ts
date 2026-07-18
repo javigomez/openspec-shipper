@@ -53,7 +53,7 @@ describe("doctor", () => {
         executor: {
           provider: "codex-cli",
           opencode: { bin: "opencode", model: "opencode-go/deepseek-v4-pro" },
-          codex: { bin: "codex", model: "gpt-5.4" },
+          codex: { bin: "codex", model: "gpt-5.5", reasoningEffort: "low" },
         },
         github: { autoOpenPr: false, prChecks: false },
         checks: {},

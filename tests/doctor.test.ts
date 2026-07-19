@@ -139,9 +139,18 @@ describe("doctor", () => {
       safety: { enablePush: true, enableArchive: true },
     })}\n`);
 
-    const checks = await runDoctor(projectDir);
+    let probeCalled = false;
+    const checks = await runDoctor(projectDir, {
+      deep: true,
+      claudeSandboxProbe: async () => {
+        probeCalled = true;
+        return { name: "claude sandbox probe", ok: true, message: "probe passed", severity: "error" };
+      },
+    });
 
     expect(checks.some((check) => check.name === "claude config" && !check.ok && check.message.includes("maxTurns"))).toBe(true);
+    expect(probeCalled).toBe(false);
+    expect(checks.some((check) => check.name === "claude sandbox probe" && check.message.includes("skipped"))).toBe(true);
   });
 });
 

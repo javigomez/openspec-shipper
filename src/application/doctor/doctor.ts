@@ -61,11 +61,6 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
     checks.push(checkClaudeConfig(config));
     checks.push(checkCommand(config.executor.claude.bin, ["auth", "status"], projectDir, "Claude Code is authenticated"));
     checks.push(asWarning(checkCommand(config.executor.claude.bin, ["doctor"], projectDir, "Claude Code diagnostics passed")));
-    if (options.deep) {
-      checks.push(await (options.claudeSandboxProbe ?? probeClaudeSandbox)(projectDir, config));
-    } else {
-      checks.push(warning("claude sandbox probe", "Runtime sandbox probe not run; use `openspec-shipper doctor --deep` to verify it (uses one Claude request)"));
-    }
   }
   checks.push(checkCommand(packageManagerCommand(config), ["--version"], projectDir, "Configured package manager is available"));
 
@@ -82,6 +77,16 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
   );
 
   checks.push(...(await checkProviderAssets(projectDir, config)));
+
+  if (config?.executor.provider === "claude-code") {
+    if (!options.deep) {
+      checks.push(warning("claude sandbox probe", "Runtime sandbox probe not run; use `openspec-shipper doctor --deep` to verify it (uses one Claude request)"));
+    } else if (checks.some((check) => isClaudeProbeBlocker(check, config))) {
+      checks.push(warning("claude sandbox probe", "Runtime probe skipped until the preceding Claude configuration errors are fixed"));
+    } else {
+      checks.push(await (options.claudeSandboxProbe ?? probeClaudeSandbox)(projectDir, config));
+    }
+  }
 
   if (packageJson) {
     for (const script of REQUIRED_PACKAGE_SCRIPTS) {
@@ -100,6 +105,16 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
   );
 
   return checks;
+}
+
+function isClaudeProbeBlocker(check: DoctorCheck, config: ShipperConfig): boolean {
+  if (check.ok || check.severity !== "error") {
+    return false;
+  }
+  return check.name === config.executor.claude.bin
+    || check.name === "claude config"
+    || check.name === "claude sandbox"
+    || check.name.startsWith(".openspec-shipper/claude/");
 }
 
 export function checkClaudePlatform(platform = process.platform, mode: ClaudeSandboxMode = "strict"): DoctorCheck {
@@ -241,7 +256,7 @@ async function probeClaudeSandbox(projectDir: string, config: ShipperConfig): Pr
     "--tools", "Bash",
     "--allowedTools", "Bash",
     "--max-turns", "2",
-    "--max-budget-usd", "0.02",
+    "--max-budget-usd", "0.10",
     "--output-format", "json",
     "--no-session-persistence",
     prompt,

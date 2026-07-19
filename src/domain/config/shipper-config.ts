@@ -46,6 +46,10 @@ export type ShipperConfig = {
     openspec: string;
     validateProposal: string;
   };
+  worktree: {
+    install: boolean;
+    installTimeoutMs: number;
+  };
   safety: {
     enablePush: boolean;
     enableArchive: boolean;
@@ -101,6 +105,10 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
       unit: "",
       openspec: `${run} openspec:cli --`,
       validateProposal: `${run} openspec:validate-proposal --`,
+    },
+    worktree: {
+      install: true,
+      installTimeoutMs: 10 * 60_000,
     },
     safety: {
       enablePush: true,
@@ -194,6 +202,10 @@ function migrateConfig(config: Partial<ShipperConfig>): ShipperConfig {
     checks: {
       ...defaults.checks,
       ...(config.checks ?? {}),
+    },
+    worktree: {
+      ...defaults.worktree,
+      ...(config.worktree ?? {}),
     },
     safety: {
       ...defaults.safety,

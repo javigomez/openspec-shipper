@@ -7,6 +7,10 @@ export const implementPhase: DeliveryPhaseDefinition = {
       return transition("prepare_worktree", "no local implementation branch or worktree exists");
     }
 
+    if (!evidence.worktreeDependenciesReady) {
+      return transition("prepare_worktree", "implementation workspace dependencies are not installed");
+    }
+
     if (!evidence.tasksComplete) {
       return ready("implement");
     }

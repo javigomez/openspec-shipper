@@ -24,7 +24,8 @@ include it after success.
 
 Use `.openspec-shipper/config.json` for project commands. Use `checks.openspec`
 for OpenSpec CLI invocations; the default npm profile expands to
-`npm run openspec:cli --`.
+`npm run openspec:cli --`. The native `prepare_worktree` phase installs the
+initial dependencies using `checks.install` before this phase starts.
 
 Run from repository root:
 
@@ -56,6 +57,9 @@ Inside `worktrees/{{CHANGE_NAME}}`:
 5. Run the narrowest useful checks from this worktree.
 6. Run scoped formatting when the repository provides a formatter.
 7. Commit useful progress with a Conventional Commit.
+
+If you modify a dependency manifest or lockfile, run the configured
+`checks.install` command again inside the worktree before running checks.
 
 Do not create PRs. Do not archive changes. Do not create branches or worktrees.
 Leave incomplete tasks unchecked when blocked.

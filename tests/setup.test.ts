@@ -23,6 +23,7 @@ describe("target setup", () => {
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.profile).toBe("node-npm");
     expect(shipperConfig.safety).toEqual({ enablePush: true, enableArchive: true });
+    expect(shipperConfig.worktree).toEqual({ install: true, installTimeoutMs: 600000 });
     expect(shipperConfig.github.autoOpenPr).toBe(false);
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
     const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");

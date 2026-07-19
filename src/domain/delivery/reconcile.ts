@@ -79,6 +79,10 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("prepare_worktree", "active OpenSpec change exists without a prepared workspace");
   }
 
+  if (evidence.hasLocalClaim && !evidence.worktreeDependenciesReady && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
+    return transitionInference("prepare_worktree", "implementation workspace dependencies are not installed");
+  }
+
   if (evidence.hasLocalClaim && !evidence.tasksComplete) {
     return transitionInference("implement", "local implementation workspace exists but tasks are not complete");
   }

@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { defaultConfig, detectMainSyncStatus, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
+import { defaultConfig, detectMainSyncStatus, prepareWorkspace, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
+import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -302,6 +303,75 @@ describe("runner", () => {
     expect(queueDuringExecution).toContain("phase: prepare_worktree");
     expect(queueDuringExecution).toContain("running: 2026-06-17T12:00:00.000Z");
     expect(queueDuringExecution).toContain("![prepare_worktree running](https://img.shields.io/badge/prepare_worktree-running-yellow)");
+  });
+
+  test("installs dependencies when an existing worktree has none", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: prepare_worktree -->\n");
+    const worktreeDir = join(harness.rootDir, "worktrees/add-name-greeting");
+    await mkdir(worktreeDir, { recursive: true });
+    const shipperConfig = defaultShipperConfig();
+    shipperConfig.checks.install = `node -e "require('node:fs').mkdirSync('node_modules')"`;
+    await mkdir(join(harness.rootDir, ".openspec-shipper"), { recursive: true });
+    await writeShipperConfig(harness.rootDir, shipperConfig);
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      prepareWorkspace: undefined,
+      localClaimDetector: async () => true,
+      worktreeDependenciesReadyDetector: undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(await readdir(join(worktreeDir, "node_modules"))).toEqual([]);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: implement");
+    const logs = await readdir(join(harness.config.stateDir, "runs"));
+    const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
+    expect(log).toContain("Installing worktree dependencies with:");
+  });
+
+  test("blocks prepare and preserves install output when dependency installation fails", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: prepare_worktree -->\n");
+    await mkdir(join(harness.rootDir, "worktrees/add-name-greeting"), { recursive: true });
+    const shipperConfig = defaultShipperConfig();
+    shipperConfig.checks.install = `node -e "console.error('registry unavailable'); process.exit(1)"`;
+    await mkdir(join(harness.rootDir, ".openspec-shipper"), { recursive: true });
+    await writeShipperConfig(harness.rootDir, shipperConfig);
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      prepareWorkspace: undefined,
+      localClaimDetector: async () => true,
+      worktreeDependenciesReadyDetector: undefined,
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("Dependency install failed in worktree; see log");
+    const logs = await readdir(join(harness.config.stateDir, "runs"));
+    const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
+    expect(log).toContain("registry unavailable");
+  });
+
+  test("allows worktree dependency installation to be disabled", async () => {
+    const harness = await createHarness("");
+    const worktreeDir = join(harness.rootDir, "worktrees/add-name-greeting");
+    await mkdir(worktreeDir, { recursive: true });
+    const shipperConfig = defaultShipperConfig();
+    shipperConfig.worktree.install = false;
+    shipperConfig.checks.install = "exit 1";
+    await mkdir(join(harness.rootDir, ".openspec-shipper"), { recursive: true });
+    await writeShipperConfig(harness.rootDir, shipperConfig);
+
+    const output = await prepareWorkspace({
+      projectDir: harness.rootDir,
+      changeName: "add-name-greeting",
+      branch: "feat/add-name-greeting",
+      worktreeDir,
+      baseBranch: "main",
+    });
+
+    expect(output).toContain("dependency installation is disabled");
   });
 
   test("writes log links relative to the queue file", async () => {
@@ -1629,6 +1699,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     syncBaseBranch: async (_projectDir, baseBranch) => `synced ${baseBranch}\n`,
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
+    worktreeDependenciesReadyDetector: async () => true,
     prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,
     finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),

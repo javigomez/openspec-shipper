@@ -3,7 +3,7 @@ import { execute, ready, transition, type DeliveryPhaseDefinition } from "../pha
 export const prepareWorktreePhase: DeliveryPhaseDefinition = {
   phase: "prepare_worktree",
   preChecks(evidence) {
-    if (evidence.hasLocalClaim) {
+    if (evidence.hasLocalClaim && evidence.worktreeDependenciesReady) {
       return transition("implement", "local implementation workspace exists");
     }
 

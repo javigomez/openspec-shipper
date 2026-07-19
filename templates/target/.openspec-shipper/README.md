@@ -111,9 +111,15 @@ prepare_worktree -> implement -> push -> waiting_for_merge -> sync_main -> archi
 ```
 
 `prepare_worktree` is native runner logic: it creates or reconnects
-`worktrees/<change-name>` and the deterministic implementation branch before
-any model call. `implement` then implements inside that prepared workspace. `push`
-pushes the implementation branch and opens or reuses a pull request with `gh`.
+`worktrees/<change-name>`, prepares the deterministic implementation branch,
+and runs `checks.install` inside that worktree before any model call. Existing
+worktrees without dependencies are prepared again. Set `worktree.install` to
+`false` for repositories that vendor dependencies or need no install. The
+default install timeout is controlled by `worktree.installTimeoutMs`.
+
+`implement` then implements inside that prepared workspace. `push` validates
+OpenSpec against the installed worktree, pushes the implementation branch, and
+opens or reuses a pull request with `gh`.
 After the PR merges, the queue can continue through `sync_main` and `archive`,
 then `cleanup_worktree`.
 

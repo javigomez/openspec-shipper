@@ -217,6 +217,13 @@ phase as metadata on that task and advances it through:
 prepare_worktree -> implement -> push -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
 ```
 
+`prepare_worktree` creates or reconnects the implementation worktree and runs
+the configured `checks.install` command there before starting an AI executor.
+This keeps concurrent worktrees isolated from the root checkout's dependencies.
+Existing worktrees missing `node_modules` are prepared again. Disable this for
+vendored or dependency-free repositories with `worktree.install: false`; adjust
+the default ten-minute timeout with `worktree.installTimeoutMs`.
+
 ```mermaid
 sequenceDiagram
   participant Human

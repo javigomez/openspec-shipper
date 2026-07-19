@@ -9,6 +9,7 @@ const evidence: DeliveryEvidence = {
   hasArchivedChange: false,
   cleanupComplete: false,
   hasLocalClaim: false,
+  worktreeDependenciesReady: true,
   localClaimPublished: false,
   hasRemoteBranch: false,
   hasOpenPullRequest: false,
@@ -25,6 +26,10 @@ describe("delivery phase definitions", () => {
       kind: "transition",
       phase: "implement",
       reason: "local implementation workspace exists",
+    });
+    expect(phase.preChecks({ ...evidence, hasLocalClaim: true, worktreeDependenciesReady: false })).toEqual({
+      kind: "ready",
+      phase: "prepare_worktree",
     });
     expect(phase.run(evidence)).toEqual({ kind: "execute", phase: "prepare_worktree" });
     expect(phase.postChecks(evidence)).toEqual({ kind: "transition", phase: "implement", reason: "workspace prepared" });

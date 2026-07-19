@@ -58,6 +58,10 @@ Use the OpenSpec command configured in `.openspec-shipper/config.json`
 dependencies are missing, stop and report the missing dependency/tooling. Do
 not fall back to unrelated worktrees.
 
+The native `prepare_worktree` phase installs initial dependencies using
+`checks.install`. If implementation changes a dependency manifest or lockfile,
+run that configured install command again inside the worktree before checks.
+
 When invocation arguments identify a target change, do targeted discovery only.
 Do not run `openspec list --json`. Instead inspect and validate that exact
 change:

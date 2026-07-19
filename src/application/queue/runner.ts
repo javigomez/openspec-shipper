@@ -27,6 +27,7 @@ import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import {
   DEFAULT_QUEUE_PATH,
   DEFAULT_STATE_DIR,
+  defaultShipperConfig,
   readShipperConfigSync,
 } from "../../domain/config/shipper-config.js";
 import { providerById } from "../../infrastructure/providers/registry.js";
@@ -86,6 +87,7 @@ export type RunnerConfig = {
   pullRequestDetector?: PullRequestDetector;
   mergedPullRequestDetector?: MergedPullRequestDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
+  worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
   syncBaseBranch?: SyncBaseBranch;
   prepareWorkspace?: PrepareWorkspace;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
@@ -137,6 +139,7 @@ export type RemoteBranchDetector = (projectDir: string, branch: string) => Promi
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
 export type SyncBaseBranch = (projectDir: string, baseBranch: string) => Promise<string>;
 export type PrepareWorkspaceInput = {
@@ -722,8 +725,12 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
   }
 
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
+  const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
   if (!(await tasksCompleteDetector(config.projectDir, task.change))) {
     return `Implementation tasks are not complete for ${task.change}; cannot push or open a PR.`;
+  }
+  if (!(await worktreeDependenciesReadyDetector(config.projectDir, task.change))) {
+    return `Worktree dependencies are not installed for ${task.change}; return the task to prepare_worktree.`;
   }
 
   return undefined;
@@ -920,14 +927,16 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const pullRequestDetector = config.pullRequestDetector ?? detectOpenPullRequest;
   const mergedPullRequestDetector = config.mergedPullRequestDetector ?? detectMergedPullRequest;
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
+  const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
   const declaredPhase = deliverPhase(task);
 
-  const [hasActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete] = await Promise.all([
+  const [hasActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete, worktreeDependenciesReady] = await Promise.all([
     activeChangeDetector(config.projectDir, changeName),
     archivedChangeDetector(config.projectDir, changeName),
     localClaimDetector(config.projectDir, changeName),
     localClaimPublishedDetector(config.projectDir, changeName, branch),
     tasksCompleteDetector(config.projectDir, changeName),
+    worktreeDependenciesReadyDetector(config.projectDir, changeName),
   ]);
 
   const shouldCheckRemoteBranch =
@@ -951,6 +960,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     hasArchivedChange,
     cleanupComplete: hasArchivedChange && !hasLocalClaim,
     hasLocalClaim,
+    worktreeDependenciesReady,
     localClaimPublished,
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
@@ -1079,7 +1089,8 @@ async function executeNativeTask(
     return 0;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    await writeFile(logPath, `${reason}\n`);
+    const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
+    await writeFile(logPath, logOutput);
     const nextContent = markTask(lines, task, "blocked", {
       timestamp: (config.now?.() ?? new Date()).toISOString(),
       reason,
@@ -1553,7 +1564,7 @@ export async function synchronizeBaseBranchWithOrigin(projectDir: string, baseBr
   throw new Error(`${baseBranch} has diverged from origin/${baseBranch}; reconcile ${baseBranch} before preparing a new worktree.`);
 }
 
-async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
+export async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
   const messages = [
     `Preparing ${input.changeName}`,
     `Project: ${input.projectDir}`,
@@ -1562,28 +1573,51 @@ async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
     `Worktree: ${input.worktreeDir}`,
   ];
 
-  if (await pathExists(input.worktreeDir)) {
+  const worktreeAlreadyExists = await pathExists(input.worktreeDir);
+  if (worktreeAlreadyExists) {
     messages.push("Worktree already exists; leaving it in place.");
-    return `${messages.join("\n")}\n`;
+  } else {
+    const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
+    if (currentBranch !== input.baseBranch) {
+      throw new Error(`Prepare must run from ${input.baseBranch}; current branch is ${currentBranch || "(detached)"}.`);
+    }
+
+    messages.push((await synchronizeBaseBranchWithOrigin(input.projectDir, input.baseBranch)).trim());
+
+    await mkdir(dirname(input.worktreeDir), { recursive: true });
+    if (localBranchExists(input.projectDir, input.branch)) {
+      messages.push(runGit(input.projectDir, ["worktree", "add", input.worktreeDir, input.branch]).trim());
+      messages.push("Linked existing implementation branch to a worktree.");
+    } else {
+      messages.push(runGit(input.projectDir, ["worktree", "add", "-b", input.branch, input.worktreeDir, "HEAD"]).trim());
+      messages.push("Created implementation branch and worktree.");
+    }
   }
 
-  const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
-  if (currentBranch !== input.baseBranch) {
-    throw new Error(`Prepare must run from ${input.baseBranch}; current branch is ${currentBranch || "(detached)"}.`);
+  const config = readShipperConfigSync(input.projectDir) ?? defaultShipperConfig();
+  const installCommand = config.checks.install.trim();
+  const dependenciesPresent = await pathExists(join(input.worktreeDir, "node_modules"));
+  if (config.worktree.install && installCommand && (!worktreeAlreadyExists || !dependenciesPresent)) {
+    messages.push(`Installing worktree dependencies with: ${installCommand}`);
+    messages.push(runWorktreeInstall(input.worktreeDir, installCommand, config.worktree.installTimeoutMs).trim());
+  } else if (!config.worktree.install) {
+    messages.push("Worktree dependency installation is disabled by config.");
+  } else if (!installCommand) {
+    messages.push("No worktree dependency install command is configured.");
+  } else {
+    messages.push("Worktree dependencies already exist; skipping installation.");
   }
 
-  messages.push((await synchronizeBaseBranchWithOrigin(input.projectDir, input.baseBranch)).trim());
-
-  await mkdir(dirname(input.worktreeDir), { recursive: true });
-  if (localBranchExists(input.projectDir, input.branch)) {
-    messages.push(runGit(input.projectDir, ["worktree", "add", input.worktreeDir, input.branch]).trim());
-    messages.push("Linked existing implementation branch to a worktree.");
-    return `${messages.filter(Boolean).join("\n")}\n`;
-  }
-
-  messages.push(runGit(input.projectDir, ["worktree", "add", "-b", input.branch, input.worktreeDir, "HEAD"]).trim());
-  messages.push("Created implementation branch and worktree.");
   return `${messages.filter(Boolean).join("\n")}\n`;
+}
+
+export async function detectWorktreeDependenciesReady(projectDir: string, changeName: string): Promise<boolean> {
+  const config = readShipperConfigSync(projectDir) ?? defaultShipperConfig();
+  if (!config.worktree.install || !config.checks.install.trim()) {
+    return true;
+  }
+
+  return await pathExists(join(projectDir, "worktrees", changeName, "node_modules"));
 }
 
 async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<string> {
@@ -1616,6 +1650,7 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
 
   const openspecCommand = config?.checks.openspec;
   if (openspecCommand) {
+    // prepare_worktree installs dependencies so validation uses this worktree's lockfile, not the parent checkout.
     messages.push(runShell(input.worktreeDir, `${openspecCommand} validate ${shellQuote(input.changeName)}`, "OpenSpec validation").trim());
   }
 
@@ -1846,6 +1881,38 @@ function runShell(cwd: string, command: string, label: string): string {
   }
 
   return result.stdout || result.stderr || `${label} passed.`;
+}
+
+class NativeTaskError extends Error {
+  constructor(message: string, readonly logOutput: string) {
+    super(message);
+    this.name = "NativeTaskError";
+  }
+}
+
+function runWorktreeInstall(cwd: string, command: string, timeoutMs: number): string {
+  const result = spawnSync(command, {
+    cwd,
+    env: childEnvForCwd(cwd),
+    encoding: "utf8",
+    shell: true,
+    timeout: timeoutMs,
+  });
+  const output = [
+    `$ ${command}`,
+    result.stdout?.trimEnd(),
+    result.stderr?.trimEnd(),
+  ].filter(Boolean).join("\n");
+
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message ?? firstNonEmptyLine(result.stderr || result.stdout) ?? `exited with code ${result.status}`;
+    throw new NativeTaskError(
+      `Dependency install failed in worktree; see log. ${detail}`,
+      `${output || detail}\n`,
+    );
+  }
+
+  return output || "Worktree dependency installation passed.";
 }
 
 function runGh(cwd: string, args: string[]): string {

@@ -7,6 +7,7 @@ export type DeliveryEvidence = {
   hasArchivedChange: boolean;
   cleanupComplete: boolean;
   hasLocalClaim: boolean;
+  worktreeDependenciesReady: boolean;
   localClaimPublished: boolean;
   hasRemoteBranch: boolean;
   hasOpenPullRequest: boolean;

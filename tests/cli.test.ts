@@ -81,6 +81,8 @@ describe("CLI parser", () => {
         "opus",
         "--effort",
         "medium",
+        "--claude-sandbox",
+        "permissive",
       ]);
 
       expect(process.exitCode).toBe(0);
@@ -91,6 +93,14 @@ describe("CLI parser", () => {
         model: "opus",
         effort: "medium",
         permissionMode: "dontAsk",
+        sandbox: "permissive",
+      });
+      const settings = JSON.parse(await readFile(join(projectDir, ".openspec-shipper/claude/settings.json"), "utf8"));
+      expect(settings.sandbox).toEqual({
+        enabled: true,
+        autoAllowBashIfSandboxed: true,
+        failIfUnavailable: false,
+        allowUnsandboxedCommands: true,
       });
       await expect(readFile(join(projectDir, ".openspec-shipper/claude/workflow.md"), "utf8")).resolves.toContain(
         "Claude Code Workflow",

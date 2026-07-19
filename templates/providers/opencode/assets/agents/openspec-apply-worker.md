@@ -59,8 +59,11 @@ dependencies are missing, stop and report the missing dependency/tooling. Do
 not fall back to unrelated worktrees.
 
 The native `prepare_worktree` phase installs initial dependencies using
-`checks.install`. If implementation changes a dependency manifest or lockfile,
-run that configured install command again inside the worktree before checks.
+`checks.install`. Do not install dependencies yourself. If implementation
+changes a dependency manifest or lockfile, commit the implementable progress,
+leave checks that require the new dependencies unchecked, and finish this phase
+successfully. The native runner executes `checks.updateDependencies` and
+schedules another `implement` pass to finish validation.
 
 When invocation arguments identify a target change, do targeted discovery only.
 Do not run `openspec list --json`. Instead inspect and validate that exact

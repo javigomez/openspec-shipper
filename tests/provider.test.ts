@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { parseQueue } from "../src/domain/queue/queue";
 import { codexCliProvider } from "../src/infrastructure/providers/codex-cli/provider";
-import { claudeCodeProvider, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
+import { claudeCodeProvider, claudeSettingsContent, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
 import { opencodeProvider } from "../src/infrastructure/providers/opencode/provider";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 
@@ -180,6 +180,22 @@ describe("executor providers", () => {
     expect(command.args.join(" ")).toContain(".openspec-shipper/claude/settings.json");
     expect(command.stdin).toContain("OpenSpec Shipper Claude Phase: implement");
     expect(command.stdin).toContain("add-name-greeting");
+  });
+
+  test("Claude Code settings render strict, permissive, and off sandbox modes", () => {
+    expect(JSON.parse(claudeSettingsContent("strict")).sandbox).toEqual({
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+    });
+    expect(JSON.parse(claudeSettingsContent("permissive")).sandbox).toEqual({
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      failIfUnavailable: false,
+      allowUnsandboxedCommands: true,
+    });
+    expect(JSON.parse(claudeSettingsContent("off")).sandbox).toEqual({ enabled: false });
   });
 
   test("Claude Code provider detects structured blockers and successful results", () => {

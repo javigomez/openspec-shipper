@@ -7,9 +7,11 @@ import {
   ENV_EXAMPLE_PATH,
   defaultShipperConfig,
   readShipperConfig,
+  type ClaudeSandboxMode,
   type ExecutorProviderId,
   type ShipperProfile,
 } from "../../domain/config/shipper-config.js";
+import { claudeSettingsContent } from "../../infrastructure/providers/claude-code/provider.js";
 
 export type SetupConfig = {
   rootDir: string;
@@ -20,6 +22,7 @@ export type SetupConfig = {
   model?: string;
   effort?: string;
   permissionMode?: "dontAsk" | "bypassPermissions";
+  claudeSandbox?: ClaudeSandboxMode;
   force?: boolean;
 };
 
@@ -90,8 +93,21 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   const shipperConfig = defaultShipperConfig(profile);
   shipperConfig.executor.provider = selectedProvider;
   applyProviderOptions(shipperConfig, selectedProvider, config);
+  if (selectedProvider === "claude-code") {
+    shipperConfig.executor.claude.sandbox = config.claudeSandbox
+      ?? existingConfig?.executor.claude.sandbox
+      ?? "strict";
+  }
   const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
+  if (selectedProvider === "claude-code") {
+    installed.push(await installGeneratedFile(
+      config,
+      "generated:claude-settings",
+      join(config.projectDir, CLAUDE_TARGET_DIR, "settings.json"),
+      claudeSettingsContent(shipperConfig.executor.claude.sandbox),
+    ));
+  }
   installed.push(await installGeneratedFile(config, "generated:shipper-env-example", join(config.projectDir, ENV_EXAMPLE_PATH), defaultEnvExample(selectedProvider)));
   installed.push(await ensureQueueFile(config.projectDir));
   installed.push(await installGeneratedFile(config, "generated:shipper-queue-example", join(config.projectDir, ".openspec-shipper/queue.example.md"), defaultQueueExample()));

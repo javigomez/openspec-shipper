@@ -9,6 +9,7 @@ describe("doctor", () => {
   test("rejects native Windows for the strict Claude sandbox", () => {
     expect(checkClaudePlatform("win32").ok).toBe(false);
     expect(checkClaudePlatform("linux").ok).toBe(true);
+    expect(checkClaudePlatform("win32", "permissive").severity).toBe("warning");
   });
   test("fails when the main checkout has non-runtime changes", async () => {
     const projectDir = await createGitRepo();
@@ -65,7 +66,15 @@ describe("doctor", () => {
       })}\n`,
     );
 
-    const checks = await runDoctor(projectDir);
+    const checks = await runDoctor(projectDir, {
+      deep: true,
+      claudeSandboxProbe: async () => ({
+        name: "claude sandbox probe",
+        ok: true,
+        severity: "warning",
+        message: "Claude sandbox accepted Bash commands",
+      }),
+    });
 
     expect(checks.some((check) => check.name === "codex provider" && check.severity === "warning")).toBe(true);
     expect(checks.some((check) => check.name === ".openspec-shipper/codex/prompts/implement.md" && !check.ok)).toBe(true);
@@ -80,7 +89,7 @@ describe("doctor", () => {
     await writeFile(join(claudeDir, "prompts/implement.md"), "implement\n");
     await writeFile(join(claudeDir, "prompts/archive.md"), "archive\n");
     await writeFile(join(claudeDir, "settings.json"), JSON.stringify({
-      sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false },
+      sandbox: { enabled: true, autoAllowBashIfSandboxed: true, failIfUnavailable: true, allowUnsandboxedCommands: false },
     }));
     await writeFile(join(projectDir, ".openspec-shipper/config.json"), `${JSON.stringify({
       version: 1,
@@ -96,11 +105,20 @@ describe("doctor", () => {
       safety: { enablePush: true, enableArchive: true },
     })}\n`);
 
-    const checks = await runDoctor(projectDir);
+    const checks = await runDoctor(projectDir, {
+      deep: true,
+      claudeSandboxProbe: async () => ({
+        name: "claude sandbox probe",
+        ok: true,
+        message: "probe passed",
+        severity: "error",
+      }),
+    });
 
     expect(checks.some((check) => check.name === "claude-code provider" && check.severity === "warning")).toBe(true);
     expect(checks.some((check) => check.name === "/usr/bin/true" && check.message === "Claude Code is authenticated")).toBe(true);
     expect(checks.some((check) => check.name === "claude sandbox" && check.ok)).toBe(true);
+    expect(checks.some((check) => check.name === "claude sandbox probe" && check.ok)).toBe(true);
     expect(checks.some((check) => check.name.includes(".opencode/"))).toBe(false);
   });
 

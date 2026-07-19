@@ -96,7 +96,10 @@ describe("target setup", () => {
       model: "sonnet",
       effort: "low",
       permissionMode: "dontAsk",
+      sandbox: "strict",
     });
+    expect(shipperConfig.checks.install).toBe("npm ci");
+    expect(shipperConfig.checks.updateDependencies).toBe("npm install");
   });
 
   test("update preserves the already configured provider when --provider is omitted", async () => {

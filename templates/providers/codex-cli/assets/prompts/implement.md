@@ -61,8 +61,11 @@ Inside `worktrees/{{CHANGE_NAME}}`:
 6. Run scoped formatting on changed files when the repo provides a formatter.
 7. Commit useful progress with a Conventional Commit.
 
-If you modify a dependency manifest or lockfile, run the configured
-`checks.install` command again inside the worktree before running checks.
+Do not install dependencies yourself. If you modify a dependency manifest or
+lockfile, commit the implementable progress, leave checks that require the new
+dependencies unchecked, and finish this phase successfully. The native runner
+will execute `checks.updateDependencies` and schedule another `implement` pass
+to finish validation.
 
 Do not create PRs. Do not archive changes. Do not create branches or worktrees.
 Leave incomplete tasks unchecked when blocked.

@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
 import { printDoctorReport, runDoctor } from "../application/doctor/doctor.js";
-import { isShipperProfile, readShipperConfig, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
+import { isShipperProfile, readShipperConfig, type ClaudeSandboxMode, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
 import { defaultConfig, runQueue, type RunnerMode } from "../application/queue/runner.js";
 import { installShipperKit } from "../application/init/setup.js";
 import { loadShipperEnv, type ShipperCliFlags } from "./env/load-shipper-env.js";
@@ -39,6 +39,7 @@ export async function runCli(argv: string[]): Promise<void> {
       model: options.model,
       effort: options.effort,
       permissionMode: options.permissionMode,
+      claudeSandbox: options.claudeSandbox,
       force: options.force,
     });
     console.log(`Processed ${installed.length} OpenSpec Shipper file(s) for ${projectDir}:`);
@@ -68,8 +69,9 @@ export async function runCli(argv: string[]): Promise<void> {
   }
 
   if (normalized.command === "doctor") {
-    const projectDir = normalized.args[0] ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
-    process.exitCode = printDoctorReport(await runDoctor(projectDir));
+    const doctorOptions = parseDoctorOptions(normalized.args);
+    const projectDir = doctorOptions.projectDir ?? global.flags.projectDir ?? process.env.OPENSPEC_SHIPPER_PROJECT_DIR ?? process.cwd();
+    process.exitCode = printDoctorReport(await runDoctor(projectDir, { deep: doctorOptions.deep }));
     return;
   }
 
@@ -132,6 +134,7 @@ function parseTargetOptions(argv: string[]): {
   model?: string;
   effort?: string;
   permissionMode?: "dontAsk" | "bypassPermissions";
+  claudeSandbox?: ClaudeSandboxMode;
   force: boolean;
   yes: boolean;
 } {
@@ -142,6 +145,7 @@ function parseTargetOptions(argv: string[]): {
   let model: string | undefined;
   let effort: string | undefined;
   let permissionMode: "dontAsk" | "bypassPermissions" | undefined;
+  let claudeSandbox: ClaudeSandboxMode | undefined;
   let force = false;
   let yes = false;
 
@@ -200,6 +204,16 @@ function parseTargetOptions(argv: string[]): {
       throw new Error("Expected --permission-mode to be one of dontAsk, bypassPermissions.");
     }
 
+    if (arg === "--claude-sandbox") {
+      const next = argv[index + 1];
+      if (next === "strict" || next === "permissive" || next === "off") {
+        claudeSandbox = next;
+        index += 1;
+        continue;
+      }
+      throw new Error("Expected --claude-sandbox to be one of strict, permissive, off.");
+    }
+
     if (arg === "--package-manager") {
       const next = argv[index + 1];
       if (next === "npm" || next === "pnpm" || next === "bun") {
@@ -227,7 +241,7 @@ function parseTargetOptions(argv: string[]): {
     }
   }
 
-  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, force, yes };
+  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, force, yes };
 }
 
 function profileForPackageManager(packageManager: PackageManager): ShipperProfile {
@@ -276,6 +290,12 @@ async function promptInitOptions(
     const effort = provider === "claude-code"
       ? parseClaudeEffort(answerOrDefault(await rl.question(`Claude effort low|medium|high (${parsed.effort ?? "low"}): `), parsed.effort ?? "low"), parsed.effort ?? "low")
       : parsed.effort;
+    const claudeSandbox = provider === "claude-code"
+      ? parseClaudeSandbox(answerOrDefault(
+          await rl.question(`Claude sandbox strict|permissive|off (${parsed.claudeSandbox ?? "strict"}): `),
+          parsed.claudeSandbox ?? "strict",
+        ), parsed.claudeSandbox ?? "strict")
+      : parsed.claudeSandbox;
 
     return {
       ...parsed,
@@ -285,10 +305,28 @@ async function promptInitOptions(
       providerBin,
       model,
       effort,
+      claudeSandbox,
     };
   } finally {
     rl.close();
   }
+}
+
+function parseClaudeSandbox(value: string, fallback: ClaudeSandboxMode): ClaudeSandboxMode {
+  return value === "strict" || value === "permissive" || value === "off" ? value : fallback;
+}
+
+function parseDoctorOptions(argv: string[]): { projectDir?: string; deep: boolean } {
+  let projectDir: string | undefined;
+  let deep = false;
+  for (const arg of argv) {
+    if (arg === "--deep") {
+      deep = true;
+    } else if (!projectDir) {
+      projectDir = arg;
+    }
+  }
+  return { projectDir, deep };
 }
 
 function parseClaudeEffort(value: string, fallback: string): string {

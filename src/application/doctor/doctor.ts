@@ -1,8 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { access, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { filterLocalStateStatus } from "../../domain/config/local-state.js";
-import { readShipperConfig, type ShipperConfig } from "../../domain/config/shipper-config.js";
+import { readShipperConfig, type ClaudeSandboxMode, type ShipperConfig } from "../../domain/config/shipper-config.js";
+import { claudeSettingsContent, claudeSettingsPath } from "../../infrastructure/providers/claude-code/provider.js";
 
 export type DoctorCheck = {
   name: string;
@@ -35,7 +38,12 @@ const REQUIRED_PACKAGE_SCRIPTS = [
   "lint:branch",
 ];
 
-export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
+export type DoctorOptions = {
+  deep?: boolean;
+  claudeSandboxProbe?: (projectDir: string, config: ShipperConfig) => Promise<DoctorCheck>;
+};
+
+export async function runDoctor(projectDir: string, options: DoctorOptions = {}): Promise<DoctorCheck[]> {
   const config = (await readShipperConfig(projectDir)) ?? undefined;
   const packageJson = await readPackageJson(projectDir);
   const checks: DoctorCheck[] = [];
@@ -49,10 +57,15 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   checks.push(checkGitHubPullRequestAccess(projectDir));
   checks.push(checkProviderCommand(projectDir, config));
   if (config?.executor.provider === "claude-code") {
-    checks.push(checkClaudePlatform());
+    checks.push(checkClaudePlatform(process.platform, config.executor.claude.sandbox));
     checks.push(checkClaudeConfig(config));
     checks.push(checkCommand(config.executor.claude.bin, ["auth", "status"], projectDir, "Claude Code is authenticated"));
     checks.push(asWarning(checkCommand(config.executor.claude.bin, ["doctor"], projectDir, "Claude Code diagnostics passed")));
+    if (options.deep) {
+      checks.push(await (options.claudeSandboxProbe ?? probeClaudeSandbox)(projectDir, config));
+    } else {
+      checks.push(warning("claude sandbox probe", "Runtime sandbox probe not run; use `openspec-shipper doctor --deep` to verify it (uses one Claude request)"));
+    }
   }
   checks.push(checkCommand(packageManagerCommand(config), ["--version"], projectDir, "Configured package manager is available"));
 
@@ -89,10 +102,13 @@ export async function runDoctor(projectDir: string): Promise<DoctorCheck[]> {
   return checks;
 }
 
-export function checkClaudePlatform(platform = process.platform): DoctorCheck {
-  return platform === "win32"
+export function checkClaudePlatform(platform = process.platform, mode: ClaudeSandboxMode = "strict"): DoctorCheck {
+  if (platform !== "win32") {
+    return ok("claude platform", `Claude Code ${mode} sandbox mode is supported on this platform`);
+  }
+  return mode === "strict"
     ? error("claude sandbox", "Claude Code strict sandbox requires macOS, Linux, or WSL2; native Windows is not supported")
-    : ok("claude platform", "Claude Code sandbox is supported on this platform");
+    : warning("claude platform", `Claude sandbox mode is ${mode}; native Windows cannot provide the strict sandbox`);
 }
 
 function checkProviderCommand(projectDir: string, config: ShipperConfig | undefined): DoctorCheck {
@@ -122,6 +138,9 @@ function checkClaudeConfig(config: ShipperConfig): DoctorCheck {
   }
   if (config.executor.claude.maxBudgetUsd !== undefined && (!Number.isFinite(config.executor.claude.maxBudgetUsd) || config.executor.claude.maxBudgetUsd <= 0)) {
     return error("claude config", "Claude maxBudgetUsd must be a positive number");
+  }
+  if (!["strict", "permissive", "off"].includes(config.executor.claude.sandbox)) {
+    return error("claude config", `Unsupported Claude sandbox mode: ${config.executor.claude.sandbox ?? "(missing)"}`);
   }
   if (permissionMode === "bypassPermissions") {
     return warning("claude config", "Claude bypassPermissions disables normal permission checks; use only in an isolated environment");
@@ -173,7 +192,9 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
     for (const file of REQUIRED_CLAUDE_ASSETS) {
       checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
     }
-    checks.push(await checkClaudeSettings(projectDir));
+    if (config) {
+      checks.push(await checkClaudeSettings(projectDir, config.executor.claude.sandbox));
+    }
     return checks;
   }
 
@@ -184,24 +205,60 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
   return checks;
 }
 
-async function checkClaudeSettings(projectDir: string): Promise<DoctorCheck> {
-  const path = join(projectDir, ".openspec-shipper/claude/settings.json");
+async function checkClaudeSettings(projectDir: string, mode: ClaudeSandboxMode): Promise<DoctorCheck> {
+  const path = claudeSettingsPath(projectDir);
   try {
     const settings = JSON.parse(await readFile(path, "utf8")) as {
-      sandbox?: { enabled?: boolean; failIfUnavailable?: boolean; allowUnsandboxedCommands?: boolean };
+      sandbox?: Record<string, unknown>;
     };
-    if (
-      settings.sandbox?.enabled !== true ||
-      settings.sandbox.failIfUnavailable !== true ||
-      settings.sandbox.allowUnsandboxedCommands !== false
-    ) {
-      return error("claude sandbox", "Claude settings must enable a strict sandbox and disable unsandboxed commands");
+    const expected = JSON.parse(claudeSettingsContent(mode)) as { sandbox: Record<string, unknown> };
+    if (!isDeepStrictEqual(settings.sandbox, expected.sandbox)) {
+      return error("claude sandbox", `Claude settings do not match executor.claude.sandbox=${mode}; run openspec-shipper update --force`);
     }
-    return ok("claude sandbox", "Claude Code strict sandbox is configured");
+    return mode === "strict"
+      ? ok("claude sandbox", "Claude Code strict sandbox is configured")
+      : warning("claude sandbox", `Claude sandbox mode is deliberately set to ${mode}; strict isolation is not guaranteed`);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     return error("claude sandbox", `Cannot read Claude settings: ${message}`);
   }
+}
+
+async function probeClaudeSandbox(projectDir: string, config: ShipperConfig): Promise<DoctorCheck> {
+  const mode = config.executor.claude.sandbox;
+  const tmpDir = join(projectDir, ".openspec-shipper", "tmp");
+  await mkdir(tmpDir, { recursive: true });
+  const marker = join(tmpDir, `claude-sandbox-probe-${randomUUID()}.txt`);
+  const prompt = [
+    "Use the Bash tool exactly once.",
+    `Run this exact command: printf sandbox-ok > ${JSON.stringify(marker)}`,
+    "Do not merely describe the command. After Bash succeeds, answer only: ok",
+  ].join("\n");
+  const result = spawnSync(config.executor.claude.bin, [
+    "-p",
+    "--permission-mode", config.executor.claude.permissionMode ?? "dontAsk",
+    "--settings", claudeSettingsPath(projectDir),
+    "--tools", "Bash",
+    "--allowedTools", "Bash",
+    "--max-turns", "2",
+    "--max-budget-usd", "0.02",
+    "--output-format", "json",
+    "--no-session-persistence",
+    prompt,
+  ], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 120_000,
+  });
+
+  const markerContent = await readFile(marker, "utf8").catch(() => undefined);
+  await unlink(marker).catch(() => undefined);
+  if (result.error || result.status !== 0 || markerContent !== "sandbox-ok") {
+    const detail = result.error?.message ?? firstLine(result.stderr || result.stdout) ?? "Claude did not execute the sandboxed Bash probe";
+    return error("claude sandbox probe", `${mode} execution probe failed: ${detail}`);
+  }
+
+  return ok("claude sandbox probe", `Claude Bash execution probe passed in ${mode} mode`);
 }
 
 function asWarning(check: DoctorCheck): DoctorCheck {

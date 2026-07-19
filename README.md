@@ -224,6 +224,13 @@ Existing worktrees missing `node_modules` are prepared again. Disable this for
 vendored or dependency-free repositories with `worktree.install: false`; adjust
 the default ten-minute timeout with `worktree.installTimeoutMs`.
 
+Agents do not install dependencies themselves. After a successful `implement`,
+Shipper compares `package.json` and supported lockfiles with `node_modules`. If
+they changed, it runs `checks.updateDependencies` natively, updates the lockfile,
+and schedules another `implement` pass when validation tasks remain. The default
+npm profile uses `npm ci` for initial preparation and `npm install` for this
+post-implementation reconciliation.
+
 ```mermaid
 sequenceDiagram
   participant Human
@@ -303,8 +310,10 @@ and reconciles OpenSpec archive/spec files, then the runner owns the determinist
 Git finalization: staging only OpenSpec paths, committing, rebasing, and pushing
 to the configured base branch. The `cleanup_worktree` phase is OpenSpec Shipper
 housekeeping: it removes a clean local `worktrees/<change-name>` worktree and
-deletes the merged local branch with `git branch -d` when safe. If there is
-nothing left to clean, cleanup succeeds as a no-op.
+deletes the local branch with regular `git branch -d` when Git recognizes it as
+merged. For squash or rebase merges, Shipper falls back to `git branch -D` only
+after it has positive PR/archive evidence. If there is nothing left to clean,
+cleanup succeeds as a no-op.
 
 ## Providers
 
@@ -363,15 +372,18 @@ cleanup.
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude auth login
-npx openspec-shipper init --provider claude-code
+npx openspec-shipper init --provider claude-code --claude-sandbox strict
 npx openspec-shipper doctor
+npx openspec-shipper doctor --deep
 ```
 
 Provider assets are installed under `.openspec-shipper/claude/`. Shipper does
 not create or modify `.claude/`, so existing project skills, agents, hooks, and
 settings remain application-owned. Each phase receives an explicit prompt,
-strict sandbox settings, a restricted tool surface, and a structured completion
-contract.
+a configurable sandbox, a restricted tool surface, and a structured completion
+contract. `doctor --deep` forces one trivial Bash tool call to verify the selected
+mode on the current machine; this performs one Claude request and may incur a
+small cost.
 
 ```json
 {
@@ -381,15 +393,19 @@ contract.
       "bin": "claude",
       "model": "sonnet",
       "effort": "low",
-      "permissionMode": "dontAsk"
+      "permissionMode": "dontAsk",
+      "sandbox": "strict"
     }
   }
 }
 ```
 
-The strict Claude sandbox is supported on macOS, Linux, and WSL2. Native Windows
-support remains experimental because Claude Code does not provide its sandbox
-there.
+Sandbox modes are `strict` (default, fail if isolation cannot start),
+`permissive` (prefer isolation but permit unsandboxed fallback), and `off`.
+`doctor` reports `permissive` and `off` as deliberate safety warnings and checks
+that `.openspec-shipper/claude/settings.json` matches the config. Strict mode is
+supported on macOS, Linux, and WSL2; native Windows requires an explicit weaker
+mode.
 
 ## Local And External Modes
 

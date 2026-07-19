@@ -71,9 +71,13 @@ claude auth login
 claude auth status
 ```
 
-Claude provider prompts and strict sandbox settings live in
+Claude provider prompts and generated sandbox settings live in
 `.openspec-shipper/claude/`. OpenSpec Shipper does not modify the project's
 `.claude/` directory.
+
+Set `executor.claude.sandbox` to `strict` (default), `permissive`, or `off`.
+The latter two produce doctor warnings. Run `openspec-shipper doctor --deep`
+to execute a real Bash sandbox probe; it uses one Claude request.
 
 ```bash
 npx openspec-shipper doctor
@@ -117,6 +121,11 @@ worktrees without dependencies are prepared again. Set `worktree.install` to
 `false` for repositories that vendor dependencies or need no install. The
 default install timeout is controlled by `worktree.installTimeoutMs`.
 
+After `implement`, Shipper detects newer dependency manifests or lockfiles and
+runs `checks.updateDependencies` natively. This lets strict agents add a package
+without requiring network access inside their sandbox. If validation remains,
+the queue returns to `implement` with the refreshed worktree.
+
 `implement` then implements inside that prepared workspace. `push` validates
 OpenSpec against the installed worktree, pushes the implementation branch, and
 opens or reuses a pull request with `gh`.
@@ -124,8 +133,9 @@ After the PR merges, the queue can continue through `sync_main` and `archive`,
 then `cleanup_worktree`.
 
 `archive` is the OpenSpec-native step. `cleanup_worktree` is OpenSpec Shipper
-housekeeping: it removes clean local implementation worktrees and merged local
-branches when safe. Missing worktree or branch is a successful no-op.
+housekeeping: it removes clean local implementation worktrees and deletes local
+branches normally, falling back to force deletion only when PR/archive evidence
+proves the change has landed. Missing worktree or branch is a successful no-op.
 
 If a task blocks, fix the cause described in the log, then change `[!]` to
 `[ ]` in `.openspec-shipper/queue.md` and run the queue again. The shipper will

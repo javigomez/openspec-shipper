@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeliverPhase } from "../../../domain/queue/queue.js";
 import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
+import type { ClaudeSandboxMode } from "../../../domain/config/shipper-config.js";
 
 const RESULT_SCHEMA = JSON.stringify({
   type: "object",
@@ -176,6 +177,19 @@ export function claudeWorkflowPath(projectDir: string): string {
 
 export function claudeSettingsPath(projectDir: string): string {
   return join(projectDir, ".openspec-shipper", "claude", "settings.json");
+}
+
+export function claudeSettingsContent(mode: ClaudeSandboxMode): string {
+  const sandbox = mode === "off"
+    ? { enabled: false }
+    : {
+        enabled: true,
+        autoAllowBashIfSandboxed: true,
+        failIfUnavailable: mode === "strict",
+        allowUnsandboxedCommands: mode === "permissive",
+      };
+
+  return `${JSON.stringify({ includeGitInstructions: false, sandbox }, null, 2)}\n`;
 }
 
 function claudePromptFileName(phase: DeliverPhase): string {

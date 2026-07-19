@@ -5,6 +5,7 @@ import { join } from "node:path";
 export type PackageManager = "npm" | "pnpm" | "bun";
 export type ShipperProfile = "generic" | "node-npm" | "node-pnpm" | "bun";
 export type ExecutorProviderId = "opencode" | "codex-cli" | "claude-code";
+export type ClaudeSandboxMode = "strict" | "permissive" | "off";
 
 export type ShipperConfig = {
   version: 1;
@@ -27,6 +28,7 @@ export type ShipperConfig = {
       model?: string;
       effort?: string;
       permissionMode?: "dontAsk" | "bypassPermissions";
+      sandbox: ClaudeSandboxMode;
       maxTurns?: number;
       maxBudgetUsd?: number;
     };
@@ -37,6 +39,7 @@ export type ShipperConfig = {
   };
   checks: {
     install: string;
+    updateDependencies: string;
     branch: string;
     commits: string;
     typecheck: string;
@@ -67,6 +70,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
   const packageManager = packageManagerForProfile(profile);
   const run = packageManager === "bun" ? "bun run" : packageManager === "pnpm" ? "pnpm" : "npm run";
   const install = packageManager === "bun" ? "bun install" : packageManager === "pnpm" ? "pnpm install --frozen-lockfile" : "npm ci";
+  const updateDependencies = packageManager === "bun" ? "bun install" : packageManager === "pnpm" ? "pnpm install" : "npm install";
 
   return {
     version: 1,
@@ -89,6 +93,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
         model: "sonnet",
         effort: "low",
         permissionMode: "dontAsk",
+        sandbox: "strict",
       },
     },
     github: {
@@ -97,6 +102,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
     },
     checks: {
       install,
+      updateDependencies,
       branch: `${run} lint:branch --`,
       commits: "npx commitlint",
       typecheck: "",

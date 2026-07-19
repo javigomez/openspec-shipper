@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, existsSync, rmSync, writeFileSync } from "node:fs";
-import { access, appendFile, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { createWriteStream, existsSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { access, appendFile, mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -88,6 +88,7 @@ export type RunnerConfig = {
   mergedPullRequestDetector?: MergedPullRequestDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
   worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
+  reconcileWorktreeDependencies?: ReconcileWorktreeDependencies;
   syncBaseBranch?: SyncBaseBranch;
   prepareWorkspace?: PrepareWorkspace;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
@@ -140,6 +141,7 @@ export type PullRequestDetector = (projectDir: string, branch: string) => Promis
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type ReconcileWorktreeDependencies = (projectDir: string, changeName: string) => Promise<string>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
 export type SyncBaseBranch = (projectDir: string, baseBranch: string) => Promise<string>;
 export type PrepareWorkspaceInput = {
@@ -788,6 +790,28 @@ async function executeTask(
 
   const failureSignal = provider(config).detectFailureSignal(result.output);
   if (result.exitCode === 0 && !failureSignal) {
+    if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
+      try {
+        const reconciler = config.reconcileWorktreeDependencies ?? reconcileWorktreeDependencies;
+        const dependencyOutput = await reconciler(config.projectDir, task.change);
+        await appendFile(logPath, `\n## Native dependency reconciliation\n\n${dependencyOutput}`);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
+        await appendFile(logPath, `\n## Native dependency reconciliation failed\n\n${logOutput}`);
+        const nextContent = markTask(lines, task, "blocked", {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          reason,
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        });
+        await writeFile(config.queuePath, nextContent);
+        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+        return 1;
+      }
+    }
+
     if (task.action === "deliver" && deliverPhase(task) === "archive" && task.change) {
       try {
         const archiveFinalizer = config.finalizeArchive ?? finalizeArchive;
@@ -822,6 +846,40 @@ async function executeTask(
     await writeFile(config.queuePath, nextContent);
     console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
     return 0;
+  }
+
+  if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
+    const readinessDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
+    if (!(await readinessDetector(config.projectDir, task.change))) {
+      try {
+        const reconciler = config.reconcileWorktreeDependencies ?? reconcileWorktreeDependencies;
+        const dependencyOutput = await reconciler(config.projectDir, task.change);
+        await appendFile(logPath, `\n## Native dependency recovery\n\n${dependencyOutput}`);
+        const retryContent = advanceDeliverTaskToPhase(lines, task, "implement", {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        });
+        await writeFile(config.queuePath, retryContent);
+        console.log(`[${new Date().toISOString()}] dependencies refreshed; implement will retry: ${task.rawCommand}`);
+        return 0;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
+        await appendFile(logPath, `\n## Native dependency recovery failed\n\n${logOutput}`);
+        const blockedContent = markTask(lines, task, "blocked", {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          reason,
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        });
+        await writeFile(config.queuePath, blockedContent);
+        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+        return 1;
+      }
+    }
   }
 
   const reason =
@@ -1596,8 +1654,8 @@ export async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<st
 
   const config = readShipperConfigSync(input.projectDir) ?? defaultShipperConfig();
   const installCommand = config.checks.install.trim();
-  const dependenciesPresent = await pathExists(join(input.worktreeDir, "node_modules"));
-  if (config.worktree.install && installCommand && (!worktreeAlreadyExists || !dependenciesPresent)) {
+  const dependenciesReady = await worktreeDependencyInputsReady(input.worktreeDir);
+  if (config.worktree.install && installCommand && (!worktreeAlreadyExists || !dependenciesReady)) {
     messages.push(`Installing worktree dependencies with: ${installCommand}`);
     messages.push(runWorktreeInstall(input.worktreeDir, installCommand, config.worktree.installTimeoutMs).trim());
   } else if (!config.worktree.install) {
@@ -1617,7 +1675,48 @@ export async function detectWorktreeDependenciesReady(projectDir: string, change
     return true;
   }
 
-  return await pathExists(join(projectDir, "worktrees", changeName, "node_modules"));
+  return await worktreeDependencyInputsReady(join(projectDir, "worktrees", changeName));
+}
+
+export async function reconcileWorktreeDependencies(projectDir: string, changeName: string): Promise<string> {
+  const config = readShipperConfigSync(projectDir) ?? defaultShipperConfig();
+  if (!config.worktree.install) {
+    return "Worktree dependency installation is disabled by config.\n";
+  }
+  const updateCommand = config.checks.updateDependencies.trim() || config.checks.install.trim();
+  if (!updateCommand) {
+    return "No worktree dependency update command is configured.\n";
+  }
+
+  const worktreeDir = join(projectDir, "worktrees", changeName);
+  if (await worktreeDependencyInputsReady(worktreeDir)) {
+    return "Dependency manifests and lockfiles are already reflected in node_modules.\n";
+  }
+
+  return `${runWorktreeInstall(worktreeDir, updateCommand, config.worktree.installTimeoutMs)}\n`;
+}
+
+const DEPENDENCY_INPUT_FILES = [
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb",
+];
+
+async function worktreeDependencyInputsReady(worktreeDir: string): Promise<boolean> {
+  const dependencyDir = await stat(join(worktreeDir, "node_modules")).catch(() => undefined);
+  if (!dependencyDir?.isDirectory()) {
+    return false;
+  }
+
+  const inputStats = await Promise.all(
+    DEPENDENCY_INPUT_FILES.map((file) => stat(join(worktreeDir, file)).catch(() => undefined)),
+  );
+  const newestInputMtime = Math.max(0, ...inputStats.filter(Boolean).map((entry) => entry!.mtimeMs));
+  return dependencyDir.mtimeMs >= newestInputMtime;
 }
 
 async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<string> {
@@ -1811,8 +1910,9 @@ async function gitStatusFromArgs(projectDir: string, args: string[]): Promise<st
     .filter(Boolean);
 }
 
-async function cleanupWorkspace(input: CleanupWorkspaceInput): Promise<string> {
-  if (!(await detectArchivedChange(input.projectDir, input.changeName))) {
+export async function cleanupWorkspace(input: CleanupWorkspaceInput): Promise<string> {
+  const archived = await detectArchivedChange(input.projectDir, input.changeName);
+  if (!archived) {
     throw new Error(`OpenSpec change ${input.changeName} is not archived yet; cleanup is unsafe.`);
   }
 
@@ -1835,12 +1935,37 @@ async function cleanupWorkspace(input: CleanupWorkspaceInput): Promise<string> {
   }
 
   if (localBranchExists(input.projectDir, input.branch)) {
-    messages.push(runGit(input.projectDir, ["branch", "-d", input.branch]).trim() || `Deleted local branch ${input.branch}.`);
+    messages.push(await deleteLocalBranchAfterCleanup(input, archived));
   } else {
     messages.push("Local branch already removed.");
   }
 
   return `${messages.filter(Boolean).join("\n")}\n`;
+}
+
+async function deleteLocalBranchAfterCleanup(input: CleanupWorkspaceInput, archived: boolean): Promise<string> {
+  try {
+    return runGit(input.projectDir, ["branch", "-d", input.branch]).trim() || `Deleted local branch ${input.branch}.`;
+  } catch (error) {
+    const softDeleteError = error instanceof Error ? error.message : String(error);
+    const mergedPullRequestUrl = await detectMergedPullRequest(input.projectDir, input.branch);
+    const positiveEvidence = mergedPullRequestUrl
+      ? `merged PR ${mergedPullRequestUrl}`
+      : archived
+        ? `archived OpenSpec change ${input.changeName}`
+        : undefined;
+
+    if (!positiveEvidence) {
+      throw new Error(`git branch -d ${input.branch} failed and cleanup has no positive merge/archive evidence: ${softDeleteError}`);
+    }
+
+    const forcedDelete = runGit(input.projectDir, ["branch", "-D", input.branch]).trim() || `Force-deleted local branch ${input.branch}.`;
+    return [
+      `git branch -d ${input.branch} was rejected: ${softDeleteError}`,
+      `Positive cleanup evidence found (${positiveEvidence}); force-deleting the local branch.`,
+      forcedDelete,
+    ].join("\n");
+  }
 }
 
 function ensureChangeArtifacts(worktreeDir: string, changeName: string): void {
@@ -1910,6 +2035,12 @@ function runWorktreeInstall(cwd: string, command: string, timeoutMs: number): st
       `Dependency install failed in worktree; see log. ${detail}`,
       `${output || detail}\n`,
     );
+  }
+
+  const dependencyDir = join(cwd, "node_modules");
+  if (existsSync(dependencyDir)) {
+    const now = new Date();
+    utimesSync(dependencyDir, now, now);
   }
 
   return output || "Worktree dependency installation passed.";

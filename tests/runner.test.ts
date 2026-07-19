@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { defaultConfig, detectMainSyncStatus, prepareWorkspace, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
+import { cleanupWorkspace, defaultConfig, detectMainSyncStatus, prepareWorkspace, reconcileWorktreeDependencies, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
+import { claudeSettingsContent } from "../src/infrastructure/providers/claude-code/provider";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -372,6 +373,67 @@ describe("runner", () => {
     });
 
     expect(output).toContain("dependency installation is disabled");
+  });
+
+  test("updates dependencies natively when an implement phase changed a manifest", async () => {
+    const harness = await createHarness("");
+    const worktreeDir = join(harness.rootDir, "worktrees/add-name-greeting");
+    const nodeModulesDir = join(worktreeDir, "node_modules");
+    await mkdir(nodeModulesDir, { recursive: true });
+    await writeFile(join(worktreeDir, "package.json"), "{\"name\":\"demo\"}\n");
+    await utimes(nodeModulesDir, new Date(0), new Date(0));
+    const shipperConfig = defaultShipperConfig();
+    shipperConfig.checks.updateDependencies = `node -e "require('node:fs').writeFileSync('dependencies-refreshed', 'yes')"`;
+    await mkdir(join(harness.rootDir, ".openspec-shipper"), { recursive: true });
+    await writeShipperConfig(harness.rootDir, shipperConfig);
+
+    const output = await reconcileWorktreeDependencies(harness.rootDir, "add-name-greeting");
+
+    expect(output).toContain("dependencies-refreshed");
+    await access(join(worktreeDir, "dependencies-refreshed"));
+  });
+
+  test("blocks implement when native dependency reconciliation fails", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => ({ exitCode: 0, output: "done" }),
+      reconcileWorktreeDependencies: async () => {
+        throw new Error("Dependency update failed after implementation");
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("Dependency update failed after implementation");
+    expect(queue).toContain("phase: implement");
+  });
+
+  test("recovers a blocked implement when dependency inputs became stale", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    let reconciled = false;
+    let readinessChecks = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      worktreeDependenciesReadyDetector: async () => readinessChecks++ === 0,
+      executor: async () => ({ exitCode: 1, output: "Cannot run tests until dependencies are installed" }),
+      reconcileWorktreeDependencies: async () => {
+        reconciled = true;
+        return "dependencies refreshed\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(reconciled).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: implement");
+    expect(queue).not.toContain("[!]");
   });
 
   test("writes log links relative to the queue file", async () => {
@@ -1120,6 +1182,7 @@ describe("runner", () => {
   test("runs Claude Code with installed prompts and sends the phase prompt through stdin", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
     await installClaudeTemplates({ rootDir: join(import.meta.dir, ".."), projectDir: harness.rootDir });
+    await writeFile(join(harness.rootDir, ".openspec-shipper/claude/settings.json"), claudeSettingsContent("strict"));
     let receivedCommand = "";
     let receivedArgs: string[] = [];
     let receivedStdin = "";
@@ -1522,6 +1585,51 @@ describe("runner", () => {
     expect(queue).toContain("- [x] deliver add-spanish-greeting");
   });
 
+  test("cleanup deletes a merge-commit branch with regular branch deletion", async () => {
+    const projectDir = await createCleanupRepo("merge-commit");
+
+    const output = await cleanupWorkspace({
+      projectDir,
+      changeName: "add-name-greeting",
+      branch: "feat/add-name-greeting",
+      worktreeDir: join(projectDir, "worktrees/add-name-greeting"),
+    });
+
+    expect(output).toContain("Deleted branch feat/add-name-greeting");
+    expect(output).not.toContain("force-deleting");
+    expect(branchExists(projectDir, "feat/add-name-greeting")).toBe(false);
+  });
+
+  test("cleanup force-deletes a squash-merged branch after archive evidence", async () => {
+    const projectDir = await createCleanupRepo("squash");
+
+    const output = await cleanupWorkspace({
+      projectDir,
+      changeName: "add-name-greeting",
+      branch: "feat/add-name-greeting",
+      worktreeDir: join(projectDir, "worktrees/add-name-greeting"),
+    });
+
+    expect(output).toContain("git branch -d feat/add-name-greeting was rejected");
+    expect(output).toContain("Positive cleanup evidence found (archived OpenSpec change add-name-greeting); force-deleting the local branch.");
+    expect(branchExists(projectDir, "feat/add-name-greeting")).toBe(false);
+  });
+
+  test("cleanup force-deletes a rebase-merged branch after archive evidence", async () => {
+    const projectDir = await createCleanupRepo("rebase");
+
+    const output = await cleanupWorkspace({
+      projectDir,
+      changeName: "add-name-greeting",
+      branch: "feat/add-name-greeting",
+      worktreeDir: join(projectDir, "worktrees/add-name-greeting"),
+    });
+
+    expect(output).toContain("git branch -d feat/add-name-greeting was rejected");
+    expect(output).toContain("Positive cleanup evidence found (archived OpenSpec change add-name-greeting); force-deleting the local branch.");
+    expect(branchExists(projectDir, "feat/add-name-greeting")).toBe(false);
+  });
+
   test("run mode continues after the first blocked task by default", async () => {
     const harness = await createHarness(
       [
@@ -1654,6 +1762,56 @@ function git(cwd: string, args: string[]): string {
   return result.stdout;
 }
 
+function branchExists(cwd: string, branch: string): boolean {
+  const result = spawnSync("git", ["show-ref", "--verify", `refs/heads/${branch}`], { cwd, encoding: "utf8" });
+  return result.status === 0;
+}
+
+type MergeMode = "merge-commit" | "squash" | "rebase";
+
+async function createCleanupRepo(mode: MergeMode): Promise<string> {
+  const projectDir = await mkdtemp(join(tmpdir(), `shipper-cleanup-${mode}-`));
+  git(projectDir, ["init", "-b", "main"]);
+  git(projectDir, ["config", "user.email", "tests@example.com"]);
+  git(projectDir, ["config", "user.name", "OpenSpec Shipper Tests"]);
+  await writeFile(join(projectDir, "README.md"), "# Demo\n");
+  git(projectDir, ["add", "README.md"]);
+  git(projectDir, ["commit", "-m", "chore: initial commit"]);
+
+  git(projectDir, ["switch", "-c", "feat/add-name-greeting"]);
+  await writeFile(join(projectDir, "hello.txt"), "hello name\n");
+  git(projectDir, ["add", "hello.txt"]);
+  git(projectDir, ["commit", "-m", "feat: add name greeting"]);
+  const branchCommit = git(projectDir, ["rev-parse", "HEAD"]).trim();
+  git(projectDir, ["switch", "main"]);
+
+  if (mode !== "merge-commit") {
+    await writeFile(join(projectDir, "base.txt"), `${mode} base moved\n`);
+    git(projectDir, ["add", "base.txt"]);
+    git(projectDir, ["commit", "-m", "chore: move base"]);
+  }
+
+  if (mode === "merge-commit") {
+    git(projectDir, ["merge", "--no-ff", "feat/add-name-greeting", "-m", "merge add-name-greeting"]);
+  } else if (mode === "squash") {
+    git(projectDir, ["merge", "--squash", "feat/add-name-greeting"]);
+    git(projectDir, ["commit", "-m", "feat: add name greeting"]);
+  } else {
+    git(projectDir, ["cherry-pick", branchCommit]);
+  }
+
+  await createArchivedChange(projectDir, "add-name-greeting");
+  return projectDir;
+}
+
+async function createArchivedChange(projectDir: string, changeName: string): Promise<void> {
+  const archiveDir = join(projectDir, "openspec", "changes", "archive", `2026-07-19-${changeName}`);
+  await mkdir(archiveDir, { recursive: true });
+  await writeFile(join(archiveDir, "proposal.md"), "# Proposal\n");
+  await writeFile(join(archiveDir, "design.md"), "# Design\n");
+  await writeFile(join(archiveDir, "tasks.md"), "- [x] Done\n");
+}
+
 function implementedChangeEvidence(changeName: string): Partial<RunnerConfig> {
   return {
     localClaimDetector: async (_projectDir, candidate) => candidate === changeName,
@@ -1700,6 +1858,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
     worktreeDependenciesReadyDetector: async () => true,
+    reconcileWorktreeDependencies: async () => "dependencies already reconciled\n",
     prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,
     finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),

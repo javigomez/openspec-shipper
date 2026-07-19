@@ -643,6 +643,89 @@ describe("runner", () => {
     expect(queue).toContain("![implement blocked](https://img.shields.io/badge/implement-blocked-red)");
   });
 
+  test("blocks a successful implement invocation that made no observable progress", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => ({ exitCode: 0, output: "completed\n" }),
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("Implement completed without observable progress");
+    const logs = await readdir(join(harness.config.stateDir, "runs"));
+    const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
+    expect(log).toContain("Implement progress check failed");
+  });
+
+  test("accepts implement progress made through a worktree diff", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        await writeFile(join(worktreeDir, "implementation.txt"), "progress\n");
+        return { exitCode: 0, output: "completed\n" };
+      },
+      reconcileWorktreeDependencies: async () => "dependencies ready\n",
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).not.toContain("[!]");
+  });
+
+  test("accepts implement progress committed by the provider", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        await writeFile(join(worktreeDir, "implementation.txt"), "committed progress\n");
+        git(worktreeDir, ["add", "implementation.txt"]);
+        git(worktreeDir, ["commit", "-m", "feat: implement greeting"]);
+        return { exitCode: 0, output: "completed\n" };
+      },
+      reconcileWorktreeDependencies: async () => "dependencies ready\n",
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).not.toContain("[!]");
+  });
+
+  test("accepts implement progress made by updating task checkboxes", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    const tasksPath = join(worktreeDir, "openspec/changes/add-name-greeting/tasks.md");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        await writeFile(tasksPath, "- [x] Implement greeting\n");
+        return { exitCode: 0, output: "completed\n" };
+      },
+      reconcileWorktreeDependencies: async () => "dependencies ready\n",
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).not.toContain("[!]");
+  });
+
   test("marks a deliver task done after cleanup succeeds", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: cleanup_worktree -->\n",
@@ -2014,6 +2097,20 @@ async function writeWorktreeTasks(projectDir: string, changeName: string, conten
   const changeDir = join(projectDir, "worktrees", changeName, "openspec", "changes", changeName);
   await mkdir(changeDir, { recursive: true });
   await writeFile(join(changeDir, "tasks.md"), `${content}\n`);
+}
+
+async function createImplementWorktree(projectDir: string, changeName: string): Promise<string> {
+  const worktreeDir = join(projectDir, "worktrees", changeName);
+  const changeDir = join(worktreeDir, "openspec", "changes", changeName);
+  await mkdir(changeDir, { recursive: true });
+  git(worktreeDir, ["init", "-b", `feat/${changeName}`]);
+  git(worktreeDir, ["config", "user.name", "Test User"]);
+  git(worktreeDir, ["config", "user.email", "test@example.com"]);
+  await writeFile(join(changeDir, "tasks.md"), "- [ ] Implement greeting\n");
+  await writeFile(join(worktreeDir, "README.md"), "demo\n");
+  git(worktreeDir, ["add", "."]);
+  git(worktreeDir, ["commit", "-m", "chore: prepare worktree"]);
+  return worktreeDir;
 }
 
 function implementedChangeEvidence(changeName: string): Partial<RunnerConfig> {

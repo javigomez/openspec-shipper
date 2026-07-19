@@ -142,6 +142,11 @@ checkboxes. Use `- [ ]`, `* [ ]`, `+ [ ]`, or numbered `1. [ ]` task items, and
 mark completed tasks with `[x]`. A `tasks.md` with no checkboxes blocks
 immediately because Shipper cannot know which work remains.
 
+A successful `implement` must produce a new commit, update `tasks.md`, or change
+the worktree diff. A provider that reports success without observable progress
+is blocked immediately. This guard compares the worktree before and after each
+call and stores no counters or secondary task state.
+
 `implement` then implements inside that prepared workspace. `push` validates
 OpenSpec against the installed worktree, pushes the implementation branch, and
 opens or reuses a pull request with `gh`.

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { access, appendFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -968,6 +968,7 @@ async function executeTask(
   console.log(`Log: ${toMarkdownPath(relative(config.projectDir, logPath))}`);
 
   const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
+  const implementProgressBefore = await captureImplementProgress(config, task);
   const runningContent = markTaskRunning(lines, task, {
     timestamp: startedAt,
     logPath: relativeLogPath,
@@ -990,6 +991,26 @@ async function executeTask(
   const failureSignal = provider(config).detectFailureSignal(result.output);
   if (result.exitCode === 0 && !failureSignal) {
     if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
+      const implementProgressAfter = await captureImplementProgress(config, task);
+      if (
+        implementProgressBefore &&
+        implementProgressAfter &&
+        !hasObservableImplementProgress(implementProgressBefore, implementProgressAfter)
+      ) {
+        const reason = "Implement completed without observable progress: no commits, task updates, or worktree changes were produced.";
+        await appendFile(logPath, `\n## Implement progress check failed\n\n${reason}\n`);
+        const nextContent = markTask(lines, task, "blocked", {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          reason,
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        });
+        await writeFile(config.queuePath, nextContent);
+        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+        return 1;
+      }
+
       try {
         const reconciler = config.reconcileWorktreeDependencies ?? reconcileWorktreeDependencies;
         const dependencyOutput = await reconciler(config.projectDir, task.change);
@@ -1093,6 +1114,69 @@ async function executeTask(
   await writeFile(config.queuePath, nextContent);
   console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
   return 1;
+}
+
+type ImplementProgressSnapshot = {
+  head: string;
+  tasksFingerprint: string;
+  worktreeFingerprint: string;
+};
+
+async function captureImplementProgress(
+  config: RunnerConfig,
+  task: QueueTask,
+): Promise<ImplementProgressSnapshot | undefined> {
+  if (task.action !== "deliver" || deliverPhase(task) !== "implement" || !task.change) {
+    return undefined;
+  }
+
+  const worktreeDir = join(config.projectDir, "worktrees", task.change);
+  if (!(await pathExists(worktreeDir))) {
+    return undefined;
+  }
+
+  const head = spawnSync("git", ["-C", worktreeDir, "rev-parse", "HEAD"], {
+    env: childEnvForCwd(worktreeDir),
+    encoding: "utf8",
+  });
+  const diff = spawnSync("git", ["-C", worktreeDir, "diff", "--binary", "HEAD"], {
+    env: childEnvForCwd(worktreeDir),
+  });
+  const untracked = spawnSync("git", ["-C", worktreeDir, "ls-files", "--others", "--exclude-standard", "-z"], {
+    env: childEnvForCwd(worktreeDir),
+  });
+  if (head.status !== 0 || diff.status !== 0 || untracked.status !== 0) {
+    return undefined;
+  }
+
+  const tasksPath = await firstExistingPath([
+    join(worktreeDir, "openspec", "changes", task.change, "tasks.md"),
+    join(config.projectDir, "openspec", "changes", task.change, "tasks.md"),
+  ]);
+  const tasksContent = tasksPath ? await readFile(tasksPath).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
+  const worktreeHash = createHash("sha256").update(diff.stdout ?? Buffer.alloc(0));
+  const untrackedPaths = (untracked.stdout ?? Buffer.alloc(0)).toString().split("\0").filter(Boolean).sort();
+  for (const relativePath of untrackedPaths) {
+    worktreeHash.update(relativePath);
+    worktreeHash.update(await readFile(join(worktreeDir, relativePath)).catch(() => Buffer.alloc(0)));
+  }
+
+  return {
+    head: head.stdout.trim(),
+    tasksFingerprint: createHash("sha256").update(tasksContent).digest("hex"),
+    worktreeFingerprint: worktreeHash.digest("hex"),
+  };
+}
+
+function hasObservableImplementProgress(
+  before: ImplementProgressSnapshot,
+  after: ImplementProgressSnapshot,
+): boolean {
+  return (
+    before.head !== after.head ||
+    before.tasksFingerprint !== after.tasksFingerprint ||
+    before.worktreeFingerprint !== after.worktreeFingerprint
+  );
 }
 
 async function reconcileQueue(

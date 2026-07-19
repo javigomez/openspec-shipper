@@ -257,6 +257,12 @@ change's `tasks.md`. It accepts `- [ ]`, `* [ ]`, `+ [ ]`, or numbered
 with no checkboxes blocks immediately because the queue cannot infer what work
 remains.
 
+Each successful `implement` invocation must also leave observable repository
+progress: a new commit, a changed `tasks.md`, or a changed worktree diff. If the
+provider reports success without any of those outcomes, Shipper blocks the task
+immediately instead of spending tokens in an implement loop. No run counter is
+stored; the check is derived fresh from the worktree before and after every call.
+
 ```mermaid
 sequenceDiagram
   participant Human

@@ -249,11 +249,11 @@ export function defaultConfig(): RunnerConfig {
     opencodeStatsProject: process.env.OPENSPEC_SHIPPER_STATS_PROJECT ?? process.env.OPENCODE_STATS_PROJECT ?? "",
     opencodeStatsModels: optionalEnv("OPENSPEC_SHIPPER_STATS_MODELS") ?? optionalEnv("OPENCODE_STATS_MODELS"),
     opencodeStatsDays: optionalEnv("OPENSPEC_SHIPPER_STATS_DAYS") ?? optionalEnv("OPENCODE_STATS_DAYS"),
-    loopDelayMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_LOOP_DELAY_MS ?? process.env.ORCHESTER_LOOP_DELAY_MS, DEFAULT_LOOP_DELAY_MS),
-    busyDelayMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_BUSY_DELAY_MS ?? process.env.ORCHESTER_BUSY_DELAY_MS, DEFAULT_BUSY_DELAY_MS),
-    taskTimeoutMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_TASK_TIMEOUT_MS ?? process.env.ORCHESTER_TASK_TIMEOUT_MS, DEFAULT_TASK_TIMEOUT_MS),
-    heartbeatMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_HEARTBEAT_MS ?? process.env.ORCHESTER_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
-    maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS ?? process.env.ORCHESTER_MAX_BLOCKED_TASKS, 100),
+    loopDelayMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_LOOP_DELAY_MS, DEFAULT_LOOP_DELAY_MS),
+    busyDelayMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_BUSY_DELAY_MS, DEFAULT_BUSY_DELAY_MS),
+    taskTimeoutMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_TASK_TIMEOUT_MS, DEFAULT_TASK_TIMEOUT_MS),
+    heartbeatMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
+    maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS, 100),
     activeExecutorAllowance: parsePositiveInt(process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR, DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE),
   };
 }
@@ -2129,10 +2129,6 @@ export async function detectActiveOpenCodeProcesses(): Promise<string[]> {
 }
 
 export async function detectActiveExecutorProcesses(processNames: string[]): Promise<string[]> {
-  if (process.env.ORCHESTER_ALLOW_ACTIVE_OPENCODE === "1") {
-    return [];
-  }
-
   const active: string[] = [];
   for (const processName of processNames) {
     const result = spawnSync("pgrep", ["-x", processName], { encoding: "utf8" });

@@ -543,7 +543,7 @@ For local tarball testing before publish:
 npm run build
 npm pack
 cd /Users/javigomez/Documents/projects/openspec-demo
-npm install -D /path/to/openspec-shipper-0.1.0.tgz
+npm install -D /path/to/openspec-shipper-0.2.0.tgz
 npx openspec-shipper doctor
 npx openspec-shipper queue dry-run
 ```

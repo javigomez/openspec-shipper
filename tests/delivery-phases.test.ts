@@ -90,8 +90,28 @@ describe("delivery phase definitions", () => {
     expect(archive.postChecks(evidence).phase).toBe("publish_archive");
     expect(publishArchive.preChecks(evidence)).toEqual({ kind: "ready", phase: "publish_archive" });
     expect(publishArchive.run(evidence)).toEqual({ kind: "execute", phase: "publish_archive" });
+    expect(publishArchive.preChecks({ ...evidence, hasOpenArchivePullRequest: true }).phase).toBe("waiting_for_archive_merge");
+    expect(publishArchive.preChecks({ ...evidence, hasMergedArchivePullRequest: true }).phase).toBe("cleanup_worktree");
     expect(cleanup.preChecks(evidence)).toEqual({ kind: "ready", phase: "cleanup_worktree" });
     expect(cleanup.run(evidence)).toEqual({ kind: "execute", phase: "cleanup_worktree" });
     expect(cleanup.postChecks(evidence)).toEqual({ kind: "ready", phase: "cleanup_worktree" });
+  });
+
+  test("archive PR waiting advances only after merge or publication evidence", () => {
+    const phase = phaseDefinition("waiting_for_archive_merge");
+
+    expect(phase.preChecks(evidence)).toEqual({
+      kind: "wait",
+      phase: "waiting_for_archive_merge",
+      reason: "waits for its archive pull request to merge",
+    });
+    expect(phase.run(evidence)).toEqual({
+      kind: "noop",
+      phase: "waiting_for_archive_merge",
+      reason: "waiting for external archive merge",
+    });
+    expect(phase.postChecks(evidence).kind).toBe("wait");
+    expect(phase.preChecks({ ...evidence, hasMergedArchivePullRequest: true }).phase).toBe("cleanup_worktree");
+    expect(phase.postChecks({ ...evidence, archivePublished: true }).phase).toBe("cleanup_worktree");
   });
 });

@@ -247,8 +247,6 @@ function gitignoreContainsEntry(content: string, entry: string): boolean {
     .some((line) => line === entry);
 }
 
-export const installOrchesterKit = installShipperKit;
-
 async function installTemplateTree(
   config: SetupConfig,
   sourceRoot: string,

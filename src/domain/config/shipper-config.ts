@@ -188,14 +188,6 @@ export function isShipperProfile(value: string): value is ShipperProfile {
   return value === "generic" || value === "node-npm" || value === "node-pnpm" || value === "bun";
 }
 
-export const defaultOrchesterConfig = defaultShipperConfig;
-export const readOrchesterConfig = readShipperConfig;
-export const readOrchesterConfigSync = readShipperConfigSync;
-export const writeOrchesterConfig = writeShipperConfig;
-export const isOrchesterProfile = isShipperProfile;
-export type OrchesterConfig = ShipperConfig;
-export type OrchesterProfile = ShipperProfile;
-
 function migrateConfig(config: Partial<ShipperConfig>): ShipperConfig {
   const defaults = defaultShipperConfig(config.profile ?? "node-npm");
   return {

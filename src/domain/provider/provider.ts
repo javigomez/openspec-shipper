@@ -12,6 +12,7 @@ export type BuildCommandInput = {
   phase: DeliverPhase;
   task: QueueTask;
   projectDir: string;
+  assetsDir?: string;
   config: ProviderRuntimeConfig;
 };
 

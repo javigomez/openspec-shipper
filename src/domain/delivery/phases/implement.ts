@@ -16,11 +16,11 @@ export const implementPhase: DeliveryPhaseDefinition = {
     }
 
     if (!evidence.localClaimPublished) {
-      return transition("push", "local implementation is complete but not published");
+      return transition("refresh_branch", "local implementation is complete and must be checked against the current base");
     }
 
     if (evidence.hasMergedPullRequest) {
-      return transition("sync_main", "pull request is merged");
+      return transition("archive", "pull request is merged");
     }
 
     if (evidence.hasOpenPullRequest) {
@@ -31,12 +31,12 @@ export const implementPhase: DeliveryPhaseDefinition = {
       return transition("push", "remote implementation branch exists without an open pull request");
     }
 
-    return transition("push", "local implementation is complete");
+    return transition("refresh_branch", "local implementation is complete");
   },
   run() {
     return execute("implement");
   },
   postChecks() {
-    return transition("push", "implementation completed");
+    return transition("refresh_branch", "implementation completed");
   },
 };

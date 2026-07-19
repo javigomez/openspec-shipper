@@ -43,10 +43,12 @@ export function openCodeCommandName(phase: DeliverPhase): string {
     case "archive":
       return "openspec-archive-merged";
     case "prepare_worktree":
+    case "refresh_branch":
     case "push":
-    case "sync_main":
+    case "publish_archive":
     case "cleanup_worktree":
     case "waiting_for_merge":
+    case "waiting_for_archive_merge":
       throw new Error(`${phase} is native OpenSpec Shipper runner logic and has no OpenCode command`);
   }
 }

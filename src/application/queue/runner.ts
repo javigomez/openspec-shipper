@@ -44,6 +44,11 @@ import {
   verifyClaudeCliContract,
 } from "../../infrastructure/providers/claude-code/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
+import {
+  resolveDeliverySource,
+  sourceHasNewerChangeCommit,
+  type DeliverySource,
+} from "../../infrastructure/git/delivery-source.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
 
@@ -97,9 +102,12 @@ export type RunnerConfig = {
   claudeContractVerifier?: ClaudeContractVerifier;
   syncBaseBranch?: SyncBaseBranch;
   prepareWorkspace?: PrepareWorkspace;
+  refreshDeliveryBranch?: RefreshDeliveryBranch;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
   cleanupWorkspace?: CleanupWorkspace;
   finalizeArchive?: FinalizeArchive;
+  sourceResolver?: SourceResolver;
+  prepareArchiveWorkspace?: PrepareArchiveWorkspace;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -156,6 +164,8 @@ export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName:
 export type ReconcileWorktreeDependencies = (projectDir: string, changeName: string) => Promise<string>;
 export type ClaudeContractVerifier = (projectDir: string, claude: ClaudeCliOptions) => Promise<ClaudeContractResult>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
+export type RefreshDeliveryBranch = (projectDir: string, changeName: string, baseBranch: string) => Promise<string>;
+export type SourceResolver = (projectDir: string, task: QueueTask, baseBranch: string) => DeliverySource;
 export type SyncBaseBranch = (projectDir: string, baseBranch: string) => Promise<string>;
 export type PrepareWorkspaceInput = {
   projectDir: string;
@@ -163,6 +173,7 @@ export type PrepareWorkspaceInput = {
   branch: string;
   worktreeDir: string;
   baseBranch: string;
+  source: DeliverySource;
 };
 export type PushBranchAndOpenPullRequest = (input: PushBranchInput) => Promise<string>;
 export type PushBranchInput = {
@@ -185,6 +196,7 @@ export type FinalizeArchiveInput = {
   baseBranch: string;
 };
 export type FinalizeArchive = (input: FinalizeArchiveInput) => Promise<string>;
+export type PrepareArchiveWorkspace = (projectDir: string, baseBranch: string) => Promise<string>;
 export type Sleep = (ms: number) => Promise<void>;
 
 type MainSyncStatus =
@@ -770,7 +782,7 @@ async function validateTaskPreflight(
     }
   }
 
-  if (phase === "sync_main" || phase === "cleanup_worktree") {
+  if (["refresh_branch", "publish_archive", "waiting_for_archive_merge", "cleanup_worktree"].includes(phase)) {
     return { ok: true, commandPath };
   }
 
@@ -861,27 +873,18 @@ async function validatePrepareCanCreateWorktree(config: RunnerConfig, task: Queu
     return undefined;
   }
 
-  const activeChangeDetector = config.activeChangeDetector ?? detectActiveChange;
-  if (!(await activeChangeDetector(config.projectDir, task.change))) {
-    return `OpenSpec change ${task.change} is missing at openspec/changes/${task.change}; cannot prepare a worktree.`;
-  }
-
   const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
   if (await localClaimDetector(config.projectDir, task.change)) {
     return undefined;
   }
 
-  const status = filterLocalStateStatus(await gitStatus(config));
-  if (status.length === 0) {
-    const mainSync = await gitMainSyncStatus(config);
-    return mainSync.ok ? undefined : mainSync.reason;
+  try {
+    const resolver = config.sourceResolver ?? resolveDeliverySource;
+    resolver(config.projectDir, task, configuredBaseBranch(config));
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
   }
-
-  return [
-    `${configuredBaseBranch(config)} checkout has uncommitted changes and no existing worktree or branch for ${task.change}.`,
-    `Commit or stash the changes on ${configuredBaseBranch(config)} before creating a new worktree.`,
-    `Dirty paths: ${formatDirtyStatus(status)}.`,
-  ].join(" ");
 }
 
 async function validateNativePush(config: RunnerConfig, task: QueueTask): Promise<string | undefined> {
@@ -910,7 +913,9 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
     }
   }
 
-  const worktreeDir = join(config.projectDir, "worktrees", task.change);
+  const worktreeDir = task.deliveryWorktree
+    ? join(config.projectDir, task.deliveryWorktree)
+    : join(config.projectDir, "worktrees", task.change);
   if (!config.pushBranchAndOpenPullRequest && !(await pathExists(worktreeDir))) {
     return `Prepared worktree missing for ${task.change}; cannot push or open a PR.`;
   }
@@ -928,6 +933,15 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
   }
   if (!(await worktreeDependenciesReadyDetector(config.projectDir, task.change))) {
     return `Worktree dependencies are not installed for ${task.change}; return the task to prepare_worktree.`;
+  }
+  const branch = task.deliveryBranch ?? detectChangeBranch(config.projectDir, task.change);
+  const canonicalSpecDiff = spawnSync(
+    "git",
+    ["-C", worktreeDir, "diff", "--name-only", `origin/${configuredBaseBranch(config)}...HEAD`, "--", "openspec/specs"],
+    { encoding: "utf8" },
+  );
+  if (canonicalSpecDiff.status === 0 && canonicalSpecDiff.stdout.trim()) {
+    return `Implementation branch ${branch} modifies canonical openspec/specs. Canonical specs may only be written by the archive phase.`;
   }
   if (!(readShipperConfigSync(config.projectDir) ?? defaultShipperConfig()).checks.openspec.trim()) {
     return "checks.openspec is not configured in .openspec-shipper/config.json; cannot validate OpenSpec before push.";
@@ -957,6 +971,10 @@ async function executeTask(
   providerCommand: ProviderCommand,
   activity: { checkedAt?: string } = {},
 ): Promise<number> {
+  if (deliverPhase(task) === "archive") {
+    const preparer = config.prepareArchiveWorkspace ?? prepareArchiveIntegrationWorkspace;
+    await preparer(config.projectDir, configuredBaseBranch(config));
+  }
   const startedAt = (config.now?.() ?? new Date()).toISOString();
   const logPath = await createRunLogPath(config, task, startedAt);
   const executor = config.executor ?? spawnExecutor;
@@ -1019,31 +1037,6 @@ async function executeTask(
         const reason = error instanceof Error ? error.message : String(error);
         const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
         await appendFile(logPath, `\n## Native dependency reconciliation failed\n\n${logOutput}`);
-        const nextContent = markTask(lines, task, "blocked", {
-          timestamp: (config.now?.() ?? new Date()).toISOString(),
-          reason,
-          logPath: relativeLogPath,
-          checkedAt: activity.checkedAt,
-          startedAt,
-        });
-        await writeFile(config.queuePath, nextContent);
-        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
-        return 1;
-      }
-    }
-
-    if (task.action === "deliver" && deliverPhase(task) === "archive" && task.change) {
-      try {
-        const archiveFinalizer = config.finalizeArchive ?? finalizeArchive;
-        const finalizeOutput = await archiveFinalizer({
-          projectDir: config.projectDir,
-          changeName: task.change,
-          baseBranch: configuredBaseBranch(config),
-        });
-        await appendFile(logPath, `\n## Native archive finalization\n\n${finalizeOutput}`);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        await appendFile(logPath, `\n## Native archive finalization failed\n\n${reason}\n`);
         const nextContent = markTask(lines, task, "blocked", {
           timestamp: (config.now?.() ?? new Date()).toISOString(),
           reason,
@@ -1203,6 +1196,12 @@ async function reconcileQueue(
     }
     cursor = currentTask.lineIndex + 1;
 
+    if (sourceHasNewerChangeCommit(config.projectDir, currentTask)) {
+      console.warn(
+        `Planning source ${currentTask.sourceBranch} has newer commits for ${currentTask.change}; delivery remains pinned to ${currentTask.sourceCommit?.slice(0, 8)}.`,
+      );
+    }
+
     const evidence = await collectDeliveryEvidence(config, currentTask);
     const decision = reconcileDeliveryTask(currentTask, evidence);
     if (decision.kind === "transition" && decision.phase !== deliverPhase(currentTask)) {
@@ -1259,7 +1258,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     throw new Error("Cannot collect delivery evidence for a task without a change name");
   }
 
-  const branch = detectChangeBranch(config.projectDir, changeName);
+  const branch = task.deliveryBranch ?? detectChangeBranch(config.projectDir, changeName);
   const activeChangeDetector = config.activeChangeDetector ?? detectActiveChange;
   const archivedChangeDetector = config.archivedChangeDetector ?? detectArchivedChange;
   const localClaimDetector = config.localClaimDetector ?? changeHasExistingLocalClaim;
@@ -1271,7 +1270,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
   const declaredPhase = deliverPhase(task);
 
-  const [hasActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete, worktreeDependenciesReady] = await Promise.all([
+  const [detectedActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete, worktreeDependenciesReady] = await Promise.all([
     activeChangeDetector(config.projectDir, changeName),
     archivedChangeDetector(config.projectDir, changeName),
     localClaimDetector(config.projectDir, changeName),
@@ -1279,6 +1278,16 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     tasksCompleteDetector(config.projectDir, changeName),
     worktreeDependenciesReadyDetector(config.projectDir, changeName),
   ]);
+  let hasResolvableSource = false;
+  if (!hasLocalClaim && phasePrecedesForEvidence(declaredPhase, "implement")) {
+    try {
+      (config.sourceResolver ?? resolveDeliverySource)(config.projectDir, task, configuredBaseBranch(config));
+      hasResolvableSource = true;
+    } catch {
+      hasResolvableSource = false;
+    }
+  }
+  const hasActiveChange = detectedActiveChange || hasResolvableSource;
 
   const shouldCheckRemoteBranch =
     phasePrecedesForEvidence(declaredPhase, "waiting_for_merge") ||
@@ -1288,11 +1297,14 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const shouldCheckOpenPullRequest =
     phasePrecedesForEvidence(declaredPhase, "waiting_for_merge") ||
     (declaredPhase === "push" && hasRemoteBranch);
-  const shouldCheckMergedPullRequest = phasePrecedesForEvidence(declaredPhase, "sync_main");
+  const shouldCheckMergedPullRequest = phasePrecedesForEvidence(declaredPhase, "archive");
   const [openPullRequest, mergedPullRequest] = await Promise.all([
     shouldCheckOpenPullRequest ? pullRequestDetector(config.projectDir, branch) : Promise.resolve(undefined),
     shouldCheckMergedPullRequest ? mergedPullRequestDetector(config.projectDir, branch) : Promise.resolve(undefined),
   ]);
+  const refreshRequired = openPullRequest
+    ? await deliveryBranchRefreshRequired(config, branch, configuredBaseBranch(config))
+    : false;
 
   return {
     changeName,
@@ -1308,7 +1320,63 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     pullRequestUrl: openPullRequest,
     hasMergedPullRequest: Boolean(mergedPullRequest),
     tasksComplete,
+    refreshRequired,
+    archivePublished: hasArchivedChange,
   };
+}
+
+async function deliveryBranchRefreshRequired(config: RunnerConfig, branch: string, baseBranch: string): Promise<boolean> {
+  const policy = (readShipperConfigSync(config.projectDir) ?? defaultShipperConfig()).delivery.refreshPolicy;
+  if (policy === "never") {
+    return false;
+  }
+
+  const result = spawnSync("gh", ["pr", "view", branch, "--json", "mergeStateStatus"], {
+    cwd: config.projectDir,
+    env: childEnvForCwd(config.projectDir),
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) {
+    return false;
+  }
+  let mergeStateStatus = "";
+  try {
+    mergeStateStatus = String((JSON.parse(result.stdout) as { mergeStateStatus?: unknown }).mergeStateStatus ?? "").toUpperCase();
+  } catch {
+    return false;
+  }
+
+  if (mergeStateStatus === "DIRTY") {
+    return true;
+  }
+  if (policy === "conflicts-only") {
+    return false;
+  }
+  if (policy === "always") {
+    return mergeStateStatus === "BEHIND";
+  }
+  return mergeStateStatus === "BEHIND" && branchProtectionRequiresCurrentBase(config.projectDir, baseBranch);
+}
+
+function branchProtectionRequiresCurrentBase(projectDir: string, baseBranch: string): boolean {
+  const repo = spawnSync("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {
+    cwd: projectDir,
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const nameWithOwner = repo.status === 0 ? repo.stdout.trim() : "";
+  if (!nameWithOwner) {
+    return false;
+  }
+  const protection = spawnSync("gh", ["api", `repos/${nameWithOwner}/branches/${baseBranch}/protection`, "--jq", ".required_status_checks.strict"], {
+    cwd: projectDir,
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  return protection.status === 0 && protection.stdout.trim() === "true";
 }
 
 function phasePrecedesForEvidence(left: DeliverPhase, right: DeliverPhase): boolean {
@@ -1321,16 +1389,20 @@ function deliveryPhaseRank(phase: DeliverPhase): number {
       return 0;
     case "implement":
       return 1;
-    case "push":
+    case "refresh_branch":
       return 2;
-    case "waiting_for_merge":
+    case "push":
       return 3;
-    case "sync_main":
+    case "waiting_for_merge":
       return 4;
     case "archive":
       return 5;
-    case "cleanup_worktree":
+    case "publish_archive":
       return 6;
+    case "waiting_for_archive_merge":
+      return 7;
+    case "cleanup_worktree":
+      return 8;
   }
 }
 
@@ -1363,7 +1435,7 @@ function isNativeTask(task: QueueTask): boolean {
 }
 
 function isNativePhase(phase: DeliverPhase): boolean {
-  return phase === "prepare_worktree" || phase === "push" || phase === "sync_main" || phase === "cleanup_worktree";
+  return ["prepare_worktree", "refresh_branch", "push", "publish_archive", "cleanup_worktree"].includes(phase);
 }
 
 function describeNativeTask(task: QueueTask): string {
@@ -1371,11 +1443,14 @@ function describeNativeTask(task: QueueTask): string {
   if (phase === "prepare_worktree" && task.change) {
     return `prepare worktree for ${task.change}`;
   }
-  if (phase === "sync_main") {
-    return "synchronize base branch with origin";
+  if (phase === "refresh_branch" && task.change) {
+    return `refresh delivery branch for ${task.change}`;
   }
   if (phase === "push" && task.change) {
     return `push ${task.change} and open a pull request`;
+  }
+  if (phase === "publish_archive" && task.change) {
+    return `publish archive for ${task.change}`;
   }
   if (phase === "cleanup_worktree" && task.change) {
     return `cleanup worktree for ${task.change}`;
@@ -1390,6 +1465,7 @@ async function executeNativeTask(
   task: QueueTask,
   activity: { checkedAt?: string } = {},
 ): Promise<number> {
+  let effectiveTask = task;
   const startedAt = (config.now?.() ?? new Date()).toISOString();
   const logPath = await createRunLogPath(config, task, startedAt);
   const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
@@ -1399,19 +1475,39 @@ async function executeNativeTask(
   console.log(`Cwd: ${config.projectDir}`);
   console.log(`Log: ${toMarkdownPath(relative(config.projectDir, logPath))}`);
 
-  const runningContent = markTaskRunning(lines, task, {
+  const runningContent = markTaskRunning(lines, effectiveTask, {
     timestamp: startedAt,
     logPath: relativeLogPath,
   });
   await writeFile(config.queuePath, runningContent);
 
   try {
-    const output = await runNativeTask(config, task);
+    if (deliverPhase(effectiveTask) === "prepare_worktree") {
+      const resolver = config.sourceResolver ?? resolveDeliverySource;
+      const source = resolver(config.projectDir, effectiveTask, configuredBaseBranch(config));
+      effectiveTask = {
+        ...effectiveTask,
+        sourceBranch: source.branch,
+        sourceCommit: source.commit,
+        sourceWorktree: source.worktree,
+        deliveryBranch: effectiveTask.deliveryBranch ?? `feat/${effectiveTask.change}`,
+        deliveryWorktree: effectiveTask.deliveryWorktree ?? `worktrees/${effectiveTask.change}`,
+        adoptedAt: effectiveTask.adoptedAt ?? startedAt,
+      };
+      await writeFile(config.queuePath, markTaskRunning(lines, effectiveTask, {
+        timestamp: startedAt,
+        logPath: relativeLogPath,
+      }));
+    }
+
+    const output = await runNativeTask(config, effectiveTask);
     await writeFile(logPath, output);
     const timestamp = (config.now?.() ?? new Date()).toISOString();
+    const phase = deliverPhase(effectiveTask);
+    const publicationUrl = phase === "publish_archive" ? extractPullRequestUrl(output) : undefined;
     const nextContent =
-      task.action === "deliver" && deliverPhase(task) === "push"
-        ? markTask(lines, { ...task, phase: "waiting_for_merge" }, "blocked", {
+      effectiveTask.action === "deliver" && phase === "push"
+        ? markTask(lines, { ...effectiveTask, phase: "waiting_for_merge" }, "blocked", {
             timestamp,
             reason: humanInterventionReason("waiting_for_merge", extractPullRequestUrl(output)),
             pullRequestUrl: extractPullRequestUrl(output),
@@ -1419,7 +1515,23 @@ async function executeNativeTask(
             checkedAt: activity.checkedAt,
             startedAt,
           })
-        : advanceDeliverTask(lines, task, {
+        : effectiveTask.action === "deliver" && phase === "publish_archive" && publicationUrl
+          ? markTask(lines, { ...effectiveTask, phase: "waiting_for_archive_merge", archivePullRequestUrl: publicationUrl }, "blocked", {
+              timestamp,
+              reason: `Archive PR is ready and waits for a human to merge it: ${publicationUrl}`,
+              pullRequestUrl: publicationUrl,
+              logPath: relativeLogPath,
+              checkedAt: activity.checkedAt,
+              startedAt,
+            })
+          : effectiveTask.action === "deliver" && phase === "publish_archive"
+            ? advanceDeliverTaskToPhase(lines, effectiveTask, "cleanup_worktree", {
+                timestamp,
+                logPath: relativeLogPath,
+                checkedAt: activity.checkedAt,
+                startedAt,
+              })
+        : advanceDeliverTask(lines, effectiveTask, {
             timestamp,
             logPath: relativeLogPath,
             checkedAt: activity.checkedAt,
@@ -1432,7 +1544,27 @@ async function executeNativeTask(
     const reason = error instanceof Error ? error.message : String(error);
     const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
     await writeFile(logPath, logOutput);
-    const nextContent = markTask(lines, task, "blocked", {
+    if (error instanceof ArchivePublishRaceError && deliverPhase(effectiveTask) === "publish_archive") {
+      const attempts = (effectiveTask.archiveAttempts ?? 0) + 1;
+      const maxAttempts = (readShipperConfigSync(config.projectDir) ?? defaultShipperConfig()).archive.maxAttempts;
+      if (attempts < maxAttempts) {
+        const retryTask = {
+          ...effectiveTask,
+          phase: "archive" as const,
+          archiveAttempts: attempts,
+          archiveBase: error.actualBase,
+        };
+        await writeFile(config.queuePath, advanceDeliverTaskToPhase(lines, retryTask, "archive", {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        }));
+        console.log(`[${new Date().toISOString()}] archive publication raced with origin; recalculating (${attempts}/${maxAttempts})`);
+        return 0;
+      }
+    }
+    const nextContent = markTask(lines, effectiveTask, "blocked", {
       timestamp: (config.now?.() ?? new Date()).toISOString(),
       reason,
       logPath: relativeLogPath,
@@ -1447,9 +1579,18 @@ async function executeNativeTask(
 
 async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<string> {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
-  if (phase === "sync_main") {
-    const syncer = config.syncBaseBranch ?? synchronizeBaseBranchWithOrigin;
-    return await syncer(config.projectDir, configuredBaseBranch(config));
+  if (phase === "refresh_branch" && task.change) {
+    const refresher = config.refreshDeliveryBranch ?? refreshDeliveryBranch;
+    return await refresher(config.projectDir, task.change, configuredBaseBranch(config));
+  }
+
+  if (phase === "publish_archive" && task.change) {
+    const archiveFinalizer = config.finalizeArchive ?? finalizeArchive;
+    return await archiveFinalizer({
+      projectDir: config.projectDir,
+      changeName: task.change,
+      baseBranch: configuredBaseBranch(config),
+    });
   }
 
   if (phase === "push" && task.change) {
@@ -1482,14 +1623,18 @@ async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<str
   }
 
   const preparer = config.prepareWorkspace ?? prepareWorkspace;
-  const branch = detectChangeBranch(config.projectDir, task.change);
-  const worktreeDir = join(config.projectDir, "worktrees", task.change);
+  const branch = task.deliveryBranch ?? detectChangeBranch(config.projectDir, task.change);
+  const worktreeDir = task.deliveryWorktree
+    ? join(config.projectDir, task.deliveryWorktree)
+    : join(config.projectDir, "worktrees", task.change);
+  const source = (config.sourceResolver ?? resolveDeliverySource)(config.projectDir, task, configuredBaseBranch(config));
   return await preparer({
     projectDir: config.projectDir,
     changeName: task.change,
     branch,
     worktreeDir,
     baseBranch: configuredBaseBranch(config),
+    source,
   });
 }
 
@@ -1593,10 +1738,13 @@ function terminateChild(child: ReturnType<typeof spawn>, signal: NodeJS.Signals)
 }
 
 function buildConfiguredProviderCommand(config: RunnerConfig, task: QueueTask): ProviderCommand {
+  const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
+  const executionDir = phase === "archive" ? archiveIntegrationWorkspace(config.projectDir) : config.projectDir;
   return provider(config).buildCommand({
-    phase: task.action === "deliver" ? deliverPhase(task) : task.action,
+    phase,
     task,
-    projectDir: config.projectDir,
+    projectDir: executionDir,
+    assetsDir: config.projectDir,
     config: {
       executor: {
         provider: config.providerId ?? "opencode",
@@ -1909,6 +2057,97 @@ export async function synchronizeBaseBranchWithOrigin(projectDir: string, baseBr
   throw new Error(`${baseBranch} has diverged from origin/${baseBranch}; reconcile ${baseBranch} before preparing a new worktree.`);
 }
 
+export async function refreshDeliveryBranch(projectDir: string, changeName: string, baseBranch = "main"): Promise<string> {
+  const worktreeDir = join(projectDir, "worktrees", changeName);
+  if (!(await pathExists(worktreeDir))) {
+    throw new Error(`Delivery worktree missing for ${changeName}; return the task to prepare_worktree.`);
+  }
+
+  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin", baseBranch], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (fetch.status !== 0) {
+    throw new Error(`Cannot fetch origin/${baseBranch} before refreshing ${changeName}: ${formatGitError(fetch)}`);
+  }
+
+  const messages: string[] = [];
+  const dirty = filterLocalStateStatus(await detectGitStatus(worktreeDir));
+  if (dirty.length > 0) {
+    const identity = checkGitIdentity(worktreeDir);
+    if (!identity.ok) {
+      throw new Error(identity.reason);
+    }
+    runGit(worktreeDir, ["add", "-A"]);
+    const branch = runGit(worktreeDir, ["branch", "--show-current"]).trim();
+    runGit(worktreeDir, ["commit", "-m", `${commitTypeFromBranch(branch)}: complete ${changeName}`]);
+    messages.push(`Committed implementation changes before refresh: ${formatDirtyStatus(dirty)}.`);
+  }
+
+  const baseRef = `origin/${baseBranch}`;
+  const alreadyCurrent = spawnSync("git", ["-C", worktreeDir, "merge-base", "--is-ancestor", baseRef, "HEAD"], {
+    env: childEnvForCwd(worktreeDir),
+    encoding: "utf8",
+  });
+  if (alreadyCurrent.status === 0) {
+    messages.push(`Delivery branch for ${changeName} already contains ${baseRef}.`);
+    return `${messages.join("\n")}\n`;
+  }
+
+  const mergeTree = spawnSync("git", ["-C", worktreeDir, "merge-tree", "--write-tree", "--quiet", "HEAD", baseRef], {
+    env: childEnvForCwd(worktreeDir),
+    encoding: "utf8",
+  });
+  if (mergeTree.status === 1) {
+    throw new Error(`Delivery branch ${changeName} conflicts with ${baseRef}; intelligent repair is required before it can be pushed.`);
+  }
+  if (mergeTree.status !== 0) {
+    throw new Error(`Cannot inspect the merge between ${changeName} and ${baseRef}: ${formatGitError(mergeTree)}`);
+  }
+
+  const merge = spawnSync("git", ["-C", worktreeDir, "merge", "--no-edit", baseRef], {
+    env: childEnvForCwd(worktreeDir),
+    encoding: "utf8",
+  });
+  if (merge.status !== 0) {
+    spawnSync("git", ["-C", worktreeDir, "merge", "--abort"], {
+      env: childEnvForCwd(worktreeDir),
+      encoding: "utf8",
+    });
+    throw new Error(`Delivery branch ${changeName} conflicts with ${baseRef}; intelligent repair is required: ${formatGitError(merge)}`);
+  }
+
+  messages.push(merge.stdout.trim() || `Merged ${baseRef} into the delivery branch for ${changeName}.`);
+  return `${messages.join("\n")}\n`;
+}
+
+export function archiveIntegrationWorkspace(projectDir: string): string {
+  return join(projectDir, ".openspec-shipper", "workspaces", "integration");
+}
+
+export async function prepareArchiveIntegrationWorkspace(projectDir: string, baseBranch = "main"): Promise<string> {
+  const workspace = archiveIntegrationWorkspace(projectDir);
+  const baseRef = `origin/${baseBranch}`;
+  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin", baseBranch], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+  });
+  if (fetch.status !== 0) {
+    throw new Error(`Cannot fetch ${baseRef} before archive: ${formatGitError(fetch)}`);
+  }
+
+  if (await pathExists(workspace)) {
+    runGit(workspace, ["reset", "--hard", baseRef]);
+    runGit(workspace, ["clean", "-fd"]);
+    return `Reset archive integration workspace to ${baseRef}.\n`;
+  }
+
+  await mkdir(dirname(workspace), { recursive: true });
+  runGit(projectDir, ["worktree", "prune"]);
+  runGit(projectDir, ["worktree", "add", "--detach", workspace, baseRef]);
+  return `Created archive integration workspace from ${baseRef}.\n`;
+}
+
 export async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<string> {
   const messages = [
     `Preparing ${input.changeName}`,
@@ -1916,27 +2155,54 @@ export async function prepareWorkspace(input: PrepareWorkspaceInput): Promise<st
     `Base branch: ${input.baseBranch}`,
     `Branch: ${input.branch}`,
     `Worktree: ${input.worktreeDir}`,
+    `Planning snapshot: ${input.source.commit}`,
   ];
+
+  const baseRef = `origin/${input.baseBranch}`;
 
   const worktreeAlreadyExists = await pathExists(input.worktreeDir);
   if (worktreeAlreadyExists) {
     messages.push("Worktree already exists; leaving it in place.");
   } else {
-    const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
-    if (currentBranch !== input.baseBranch) {
-      throw new Error(`Prepare must run from ${input.baseBranch}; current branch is ${currentBranch || "(detached)"}.`);
+    const fetch = spawnSync("git", ["-C", input.projectDir, "fetch", "--quiet", "origin", input.baseBranch], {
+      env: childEnvForCwd(input.projectDir),
+      encoding: "utf8",
+    });
+    if (fetch.status !== 0) {
+      throw new Error(`Cannot fetch origin/${input.baseBranch} before preparing ${input.changeName}: ${formatGitError(fetch)}`);
     }
-
-    messages.push((await synchronizeBaseBranchWithOrigin(input.projectDir, input.baseBranch)).trim());
-
     await mkdir(dirname(input.worktreeDir), { recursive: true });
     if (localBranchExists(input.projectDir, input.branch)) {
       messages.push(runGit(input.projectDir, ["worktree", "add", input.worktreeDir, input.branch]).trim());
       messages.push("Linked existing implementation branch to a worktree.");
     } else {
-      messages.push(runGit(input.projectDir, ["worktree", "add", "-b", input.branch, input.worktreeDir, "HEAD"]).trim());
+      messages.push(runGit(input.projectDir, ["worktree", "add", "-b", input.branch, input.worktreeDir, baseRef]).trim());
       messages.push("Created implementation branch and worktree.");
     }
+  }
+
+  const changePath = `openspec/changes/${input.changeName}`;
+  const changeExists = await pathExists(join(input.worktreeDir, changePath));
+  const currentSource = spawnSync("git", ["-C", input.worktreeDir, "diff", "--quiet", "HEAD", input.source.commit, "--", changePath], {
+    env: childEnvForCwd(input.worktreeDir),
+    encoding: "utf8",
+  });
+  if ((!worktreeAlreadyExists || !changeExists) && currentSource.status !== 0) {
+    runGit(input.worktreeDir, ["restore", "--source", input.source.commit, "--staged", "--worktree", "--", changePath]);
+    const staged = runGit(input.worktreeDir, ["diff", "--cached", "--name-only", "--", changePath]).trim();
+    if (staged) {
+      runGit(input.worktreeDir, ["commit", "-m", `chore: adopt OpenSpec change ${input.changeName}`]);
+      messages.push(`Adopted ${changePath} from planning snapshot ${input.source.commit}.`);
+    }
+  }
+
+  if (!(await pathExists(join(input.worktreeDir, changePath)))) {
+    throw new Error(`Planning snapshot ${input.source.commit} did not produce ${changePath} in the delivery worktree.`);
+  }
+
+  if (!worktreeAlreadyExists) {
+    const refreshed = await refreshDeliveryBranch(input.projectDir, input.changeName, input.baseBranch);
+    messages.push(refreshed.trim());
   }
 
   const config = readShipperConfigSync(input.projectDir) ?? defaultShipperConfig();
@@ -2100,77 +2366,114 @@ async function finalizeArchive(input: FinalizeArchiveInput): Promise<string> {
     throw new Error("OpenSpec Shipper archive safety is disabled in .openspec-shipper/config.json.");
   }
 
-  const currentBranch = runGit(input.projectDir, ["branch", "--show-current"]).trim();
-  if (currentBranch !== input.baseBranch) {
-    throw new Error(`Archive finalization must run from ${input.baseBranch}; current branch is ${currentBranch || "(detached)"}.`);
+  const workspace = archiveIntegrationWorkspace(input.projectDir);
+  if (!(await pathExists(workspace))) {
+    throw new Error("Archive integration workspace is missing; return the task to archive.");
   }
 
-  if (!(await detectArchivedChange(input.projectDir, input.changeName))) {
+  if (!(await detectArchivedChangeOnDisk(workspace, input.changeName))) {
     throw new Error(`OpenSpec change ${input.changeName} was not archived by the archive agent.`);
   }
 
   const messages = [
     `Finalizing archive for ${input.changeName}`,
-    `Project: ${input.projectDir}`,
+    `Workspace: ${workspace}`,
     `Base branch: ${input.baseBranch}`,
   ];
 
-  const dirty = filterLocalStateStatus(await detectGitStatus(input.projectDir));
-  if (dirty.length === 0) {
-    messages.push("No archive/spec diff to commit; archive already appears finalized.");
-    return `${messages.join("\n")}\n`;
+  const dirty = filterLocalStateStatus(await detectGitStatus(workspace));
+  let archiveBase: string;
+  let archiveCommit: string;
+  if (dirty.length > 0) {
+    const unexpected = dirty.filter((entry) => !isAllowedArchiveStatus(entry));
+    if (unexpected.length > 0) {
+      throw new Error(`Archive produced non-OpenSpec changes; refusing to commit: ${formatDirtyStatus(unexpected)}.`);
+    }
+
+    const gitIdentity = checkGitIdentity(workspace);
+    if (!gitIdentity.ok) {
+      throw new Error(gitIdentity.reason);
+    }
+
+    const stagePaths = ["openspec/changes", "openspec/specs"].filter((path) => fileExistsSync(join(workspace, path)));
+    if (stagePaths.length === 0) {
+      throw new Error("Archive produced OpenSpec changes but no stageable OpenSpec paths were found.");
+    }
+
+    runGit(workspace, ["add", "-A", ...stagePaths]);
+    const staged = await gitStatusFromArgs(workspace, ["diff", "--cached", "--name-only"]);
+    if (staged.length === 0) {
+      throw new Error("Archive produced no staged OpenSpec changes after staging archive/spec paths.");
+    }
+
+    messages.push(`Committing archive paths: ${formatDirtyStatus(dirty)}.`);
+    archiveBase = runGit(workspace, ["rev-parse", "HEAD"]).trim();
+    runGit(workspace, ["commit", "-m", `chore: archive ${input.changeName}`]);
+    archiveCommit = runGit(workspace, ["rev-parse", "HEAD"]).trim();
+  } else {
+    archiveCommit = runGit(workspace, ["rev-parse", "HEAD"]).trim();
+    const parent = spawnSync("git", ["-C", workspace, "rev-parse", "HEAD^"], { encoding: "utf8" });
+    archiveBase = parent.status === 0 ? parent.stdout.trim() : "";
+    if (!archiveBase) {
+      messages.push("Archive is already present in the base snapshot.");
+      return `${messages.join("\n")}\n`;
+    }
+    messages.push(`Resuming publication of archive commit ${archiveCommit.slice(0, 8)}.`);
   }
 
-  const unexpected = dirty.filter((entry) => !isAllowedArchiveStatus(entry));
-  if (unexpected.length > 0) {
-    throw new Error(`Archive produced non-OpenSpec changes; refusing to commit: ${formatDirtyStatus(unexpected)}.`);
-  }
-
-  const gitIdentity = checkGitIdentity(input.projectDir);
-  if (!gitIdentity.ok) {
-    throw new Error(gitIdentity.reason);
-  }
-
-  const stagePaths = ["openspec/changes", "openspec/specs"].filter((path) => fileExistsSync(join(input.projectDir, path)));
-  if (stagePaths.length === 0) {
-    throw new Error("Archive produced OpenSpec changes but no stageable OpenSpec paths were found.");
-  }
-
-  runGit(input.projectDir, ["add", "-A", ...stagePaths]);
-  const staged = filterLocalStateStatus(await gitStatusFromArgs(input.projectDir, ["diff", "--cached", "--name-only"]));
-  if (staged.length === 0) {
-    throw new Error("Archive produced no staged OpenSpec changes after staging archive/spec paths.");
-  }
-
-  messages.push(`Committing archive paths: ${formatDirtyStatus(dirty)}.`);
-  runGit(input.projectDir, ["commit", "-m", `chore: archive ${input.changeName}`]);
-
-  const fetch = spawnSync("git", ["-C", input.projectDir, "fetch", "--quiet", "origin"], {
-    env: childEnvForCwd(input.projectDir),
+  const fetch = spawnSync("git", ["-C", workspace, "fetch", "--quiet", "origin", input.baseBranch], {
+    env: childEnvForCwd(workspace),
     encoding: "utf8",
   });
   if (fetch.status !== 0) {
     throw new Error(`Archive committed locally but origin fetch failed before push: ${formatGitError(fetch)}`);
   }
 
-  const rebase = spawnSync("git", ["-C", input.projectDir, "rebase", `origin/${input.baseBranch}`], {
-    env: childEnvForCwd(input.projectDir),
-    encoding: "utf8",
-  });
-  if (rebase.status !== 0) {
-    throw new Error(`Archive committed locally but rebase on origin/${input.baseBranch} failed: ${formatGitError(rebase)}`);
+  const remoteHead = runGit(workspace, ["rev-parse", `origin/${input.baseBranch}`]).trim();
+  if (remoteHead !== archiveBase) {
+    throw new ArchivePublishRaceError(archiveBase, remoteHead);
   }
 
-  const push = spawnSync("git", ["-C", input.projectDir, "push", "origin", `HEAD:${input.baseBranch}`], {
-    env: childEnvForCwd(input.projectDir),
+  if ((config ?? defaultShipperConfig()).archive.publishMode === "pull-request") {
+    const branch = `openspec-shipper/archive-${input.changeName}-${archiveCommit.slice(0, 8)}`;
+    runGit(workspace, ["push", "-u", "origin", `HEAD:refs/heads/${branch}`]);
+    const existing = detectOpenPullRequest(input.projectDir, branch);
+    const existingUrl = await existing;
+    if (existingUrl) {
+      messages.push(`Archive pull request: ${existingUrl}`);
+      return `${messages.join("\n")}\n`;
+    }
+    const created = runGh(workspace, [
+      "pr", "create", "--base", input.baseBranch, "--head", branch,
+      "--title", `chore: archive ${input.changeName}`,
+      "--body", `OpenSpec archive reconciliation for ${input.changeName}.`,
+    ]).trim();
+    const url = extractPullRequestUrl(created);
+    if (!url) {
+      throw new Error("gh pr create completed without returning an archive pull request URL.");
+    }
+    messages.push(`Archive pull request: ${url}`);
+    return `${messages.join("\n")}\n`;
+  }
+
+  const push = spawnSync("git", ["-C", workspace, "push", "origin", `HEAD:refs/heads/${input.baseBranch}`, `--force-with-lease=refs/heads/${input.baseBranch}:${archiveBase}`], {
+    env: childEnvForCwd(workspace),
     encoding: "utf8",
   });
   if (push.status !== 0) {
-    throw new Error(`Archive committed locally but push to origin/${input.baseBranch} failed: ${formatGitError(push)}`);
+    throw new ArchivePublishRaceError(archiveBase, remoteHead, formatGitError(push));
   }
 
   messages.push(push.stdout.trim() || `Pushed archive commit to origin/${input.baseBranch}.`);
   return `${messages.filter(Boolean).join("\n")}\n`;
+}
+
+class ArchivePublishRaceError extends Error {
+  constructor(readonly expectedBase: string, readonly actualBase: string, detail?: string) {
+    super(
+      `origin changed while publishing the archive (expected ${expectedBase.slice(0, 8)}, found ${actualBase.slice(0, 8)}). The archive must be recalculated${detail ? `: ${detail}` : "."}`,
+    );
+  }
 }
 
 function isAllowedArchiveStatus(entry: string): boolean {
@@ -2457,7 +2760,7 @@ async function changeHasExistingLocalClaim(projectDir: string, changeName: strin
   return branches.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .some((line) => line === changeName || line.endsWith(`/${changeName}`));
+    .some((line) => line === `feat/${changeName}`);
 }
 
 async function detectLocalClaimPublished(projectDir: string, changeName: string, branch: string): Promise<boolean> {
@@ -2516,10 +2819,25 @@ async function detectRemoteBranch(projectDir: string, branch: string): Promise<b
 }
 
 async function detectActiveChange(projectDir: string, changeName: string): Promise<boolean> {
-  return await pathExists(join(projectDir, "openspec", "changes", changeName));
+  const baseBranch = readShipperConfigSync(projectDir)?.baseBranch ?? "main";
+  return gitTreePathExists(projectDir, `origin/${baseBranch}`, `openspec/changes/${changeName}`);
 }
 
 async function detectArchivedChange(projectDir: string, changeName: string): Promise<boolean> {
+  const gitDir = spawnSync("git", ["-C", projectDir, "rev-parse", "--git-dir"], { encoding: "utf8" });
+  if (gitDir.status === 0) {
+    const baseBranch = readShipperConfigSync(projectDir)?.baseBranch ?? "main";
+    const remoteBase = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", `origin/${baseBranch}`], { encoding: "utf8" });
+    if (remoteBase.status === 0) {
+      const entries = gitTreeEntries(projectDir, `origin/${baseBranch}`, "openspec/changes/archive");
+      return entries.some((entry) => entry.endsWith(`-${changeName}`));
+    }
+  }
+
+  return await detectArchivedChangeOnDisk(projectDir, changeName);
+}
+
+async function detectArchivedChangeOnDisk(projectDir: string, changeName: string): Promise<boolean> {
   const archiveDir = join(projectDir, "openspec", "changes", "archive");
   const entries = await readdir(archiveDir, { withFileTypes: true }).catch(() => []);
   const matches = entries
@@ -2546,7 +2864,6 @@ async function detectTaskCompletionStatus(projectDir: string, changeName: string
   const tasksPath =
     (await firstExistingPath([
       join(projectDir, "worktrees", changeName, "openspec", "changes", changeName, "tasks.md"),
-      join(projectDir, "openspec", "changes", changeName, "tasks.md"),
     ])) ?? "";
   if (!tasksPath) {
     return { kind: "missing" };
@@ -2561,6 +2878,18 @@ async function detectTaskCompletionStatus(projectDir: string, changeName: string
   return taskCheckboxes.every((checked) => checked)
     ? { kind: "complete", tasksPath }
     : { kind: "incomplete", tasksPath };
+}
+
+function gitTreePathExists(projectDir: string, ref: string, path: string): boolean {
+  const result = spawnSync("git", ["-C", projectDir, "cat-file", "-e", `${ref}:${path}`], { encoding: "utf8" });
+  return result.status === 0;
+}
+
+function gitTreeEntries(projectDir: string, ref: string, path: string): string[] {
+  const result = spawnSync("git", ["-C", projectDir, "ls-tree", "--name-only", `${ref}:${path}`], { encoding: "utf8" });
+  return result.status === 0
+    ? result.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)
+    : [];
 }
 
 function parseTaskCheckboxes(content: string): boolean[] {
@@ -2703,6 +3032,10 @@ function printStatus(tasks: QueueTask[], config: RunnerConfig) {
 function waitingReason(task: QueueTask): string {
   if (task.action === "deliver" && task.phase === "waiting_for_merge") {
     return "waits for its PR to merge";
+  }
+
+  if (["archive", "publish_archive", "waiting_for_archive_merge", "cleanup_worktree"].includes(deliverPhase(task)) && task.archiveAfter.length > 0) {
+    return `waits to archive after ${task.archiveAfter.join(", ")}`;
   }
 
   return `waits for ${task.dependsOn.join(", ")}`;

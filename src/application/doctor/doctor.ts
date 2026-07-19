@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import { readShipperConfig, type ClaudeSandboxMode, type ShipperConfig } from "../../domain/config/shipper-config.js";
 import {
   CLAUDE_MAX_TESTED_VERSION,
@@ -56,13 +55,12 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
   const checks: DoctorCheck[] = [];
 
   checks.push(checkCommand("git", ["rev-parse", "--is-inside-work-tree"], projectDir, "Git repository detected"));
-  checks.push(checkCommand("git", ["rev-parse", "--verify", config?.baseBranch ?? "main"], projectDir, "Base branch exists"));
+  checks.push(checkRemoteBaseBranch(projectDir, config?.baseBranch ?? "main"));
   checks.push(checkGitIdentity(projectDir));
-  checks.push(checkWorkingTreeClean(projectDir, config?.baseBranch ?? "main"));
   checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for pull request management"));
   checks.push(checkGitHubCliAuth(projectDir));
   checks.push(checkGitHubPullRequestAccess(projectDir));
-  checks.push(checkBaseBranchProtection(projectDir, config?.baseBranch ?? "main"));
+  checks.push(checkBaseBranchProtection(projectDir, config?.baseBranch ?? "main", config?.archive.publishMode ?? "direct"));
   checks.push(checkProviderCommand(projectDir, config));
   if (config?.executor.provider === "claude-code") {
     checks.push(checkClaudePlatform(process.platform, config.executor.claude.sandbox));
@@ -264,7 +262,9 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
       warning("codex provider", "Codex CLI provider is experimental; validate it in a demo repo before relying on it"),
     ];
     for (const file of REQUIRED_CODEX_ASSETS) {
-      checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
+      checks.push((await fileExists(join(projectDir, file)))
+        ? ok(file, `${file} project override found`)
+        : ok(file, `${file} is not overridden; packaged default will be used`));
     }
     return checks;
   }
@@ -274,7 +274,13 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
       warning("claude-code provider", "Claude Code provider is experimental; validate it in a demo repo before relying on it"),
     ];
     for (const file of REQUIRED_CLAUDE_ASSETS) {
-      checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
+      const requiredLocal = file.endsWith("settings.json");
+      const exists = await fileExists(join(projectDir, file));
+      checks.push(exists
+        ? ok(file, `${file} project override found`)
+        : requiredLocal
+          ? error(file, `${file} missing`)
+          : ok(file, `${file} is not overridden; packaged default will be used`));
     }
     if (config) {
       checks.push(await checkClaudeSettings(projectDir, config.executor.claude.sandbox));
@@ -372,38 +378,20 @@ function checkGitIdentity(projectDir: string): DoctorCheck {
       );
 }
 
-export function checkWorkingTreeClean(projectDir: string, baseBranch = "main"): DoctorCheck {
-  const result = spawnSync("git", ["status", "--short", "--untracked-files=all"], {
+function checkRemoteBaseBranch(projectDir: string, baseBranch: string): DoctorCheck {
+  const result = spawnSync("git", ["ls-remote", "--exit-code", "--heads", "origin", baseBranch], {
     cwd: projectDir,
     encoding: "utf8",
     timeout: 10_000,
   });
   if (result.error) {
-    return error("working tree", result.error.message);
+    return error("remote base branch", result.error.message);
   }
 
   if (result.status !== 0) {
-    return error("working tree", firstLine(result.stderr || result.stdout) ?? `git status exited with code ${result.status}`);
+    return error("remote base branch", firstLine(result.stderr || result.stdout) ?? `origin/${baseBranch} is unavailable`);
   }
-
-  const dirty = filterLocalStateStatus(
-    result.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trimEnd())
-      .filter(Boolean),
-  );
-  if (dirty.length === 0) {
-    return ok("working tree", `No non-runtime changes in the ${baseBranch} checkout`);
-  }
-
-  return error(
-    "working tree",
-    [
-      `${baseBranch} checkout has uncommitted non-runtime changes.`,
-      "Commit or stash them before running the queue.",
-      `Dirty paths: ${formatDirtyStatus(dirty)}.`,
-    ].join(" "),
-  );
+  return ok("remote base branch", `origin/${baseBranch} is available as the integration boundary`);
 }
 
 function checkGitHubCliAuth(projectDir: string): DoctorCheck {
@@ -445,7 +433,7 @@ function checkGitHubPullRequestAccess(projectDir: string): DoctorCheck {
   return ok("gh pr access", "GitHub pull requests are accessible through gh");
 }
 
-export function checkBaseBranchProtection(projectDir: string, baseBranch = "main"): DoctorCheck {
+export function checkBaseBranchProtection(projectDir: string, baseBranch = "main", publishMode: "direct" | "pull-request" = "direct"): DoctorCheck {
   const repository = detectGitHubRepository(projectDir);
   if (repository === "missing") {
     return warning("base branch protection", `Cannot check whether ${baseBranch} is protected because git remote origin is missing`);
@@ -464,7 +452,7 @@ export function checkBaseBranchProtection(projectDir: string, baseBranch = "main
     encoding: "utf8",
     timeout: 10_000,
   });
-  return branchProtectionCheck(baseBranch, result.status, result.stdout, result.stderr, result.error);
+  return branchProtectionCheck(baseBranch, result.status, result.stdout, result.stderr, result.error, publishMode);
 }
 
 export function branchProtectionCheck(
@@ -473,6 +461,7 @@ export function branchProtectionCheck(
   stdout: string,
   stderr: string,
   processError?: Error,
+  publishMode: "direct" | "pull-request" = "direct",
 ): DoctorCheck {
   if (processError || status !== 0) {
     const detail = processError?.message ?? firstLine(stderr || stdout) ?? "GitHub API request failed";
@@ -480,10 +469,12 @@ export function branchProtectionCheck(
   }
 
   if (stdout.trim() === "true") {
-    return error(
-      "base branch protection",
-      `${baseBranch} is protected on GitHub. OpenSpec Shipper currently finalizes archive by pushing directly to origin/${baseBranch}, so archive will fail. PR-based archive finalization is not supported yet.`,
-    );
+    return publishMode === "pull-request"
+      ? ok("base branch protection", `${baseBranch} is protected; archive publication is configured to use pull requests`)
+      : warning(
+          "base branch protection",
+          `${baseBranch} is protected. Direct archive publication may be rejected; set archive.publishMode to pull-request if required.`,
+        );
   }
 
   if (stdout.trim() === "false") {

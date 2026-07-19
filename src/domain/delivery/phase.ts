@@ -14,6 +14,11 @@ export type DeliveryEvidence = {
   pullRequestUrl?: string;
   hasMergedPullRequest: boolean;
   tasksComplete: boolean;
+  refreshRequired?: boolean;
+  archiveOrderReady?: boolean;
+  archivePublished?: boolean;
+  hasOpenArchivePullRequest?: boolean;
+  hasMergedArchivePullRequest?: boolean;
 };
 
 export type PhaseDecision =

@@ -5,10 +5,12 @@ export type QueueAction = "deliver";
 export type DeliverPhase =
   | "prepare_worktree"
   | "implement"
+  | "refresh_branch"
   | "push"
   | "waiting_for_merge"
-  | "sync_main"
   | "archive"
+  | "publish_archive"
+  | "waiting_for_archive_merge"
   | "cleanup_worktree";
 
 export type QueueTask = {
@@ -18,6 +20,19 @@ export type QueueTask = {
   change?: string;
   phase?: DeliverPhase;
   dependsOn: string[];
+  archiveAfter: string[];
+  sourceBranch?: string;
+  sourceCommit?: string;
+  sourceWorktree?: string;
+  deliveryBranch?: string;
+  deliveryWorktree?: string;
+  adoptedAt?: string;
+  publishedCommit?: string;
+  pullRequestUrl?: string;
+  archiveAttempts?: number;
+  archiveBase?: string;
+  archivePullRequestUrl?: string;
+  metadata: Record<string, string>;
   rawCommand: string;
 };
 
@@ -35,10 +50,12 @@ const CHANGE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const DELIVER_PHASES: DeliverPhase[] = [
   "prepare_worktree",
   "implement",
+  "refresh_branch",
   "push",
   "waiting_for_merge",
-  "sync_main",
   "archive",
+  "publish_archive",
+  "waiting_for_archive_merge",
   "cleanup_worktree",
 ];
 export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
@@ -149,10 +166,12 @@ export function openCodeCommandName(task: QueueTask): string {
     case "archive":
       return "openspec-archive-merged";
     case "prepare_worktree":
+    case "refresh_branch":
     case "push":
-    case "sync_main":
+    case "publish_archive":
     case "cleanup_worktree":
     case "waiting_for_merge":
+    case "waiting_for_archive_merge":
       throw new Error(`${action} is native OpenSpec Shipper runner logic and has no OpenCode command`);
   }
 }
@@ -170,7 +189,7 @@ export function markTask(
   const marker = status === "done" ? "x" : "!";
   const detailParts = [
     status === "blocked" ? `phase: ${deliverPhase(task)}` : undefined,
-    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    ...persistentMetadataParts(task),
     status === "done" ? `done: ${details.timestamp}` : `blocked: ${details.timestamp}`,
     details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
     details.startedAt ? `started: ${details.startedAt}` : undefined,
@@ -199,7 +218,7 @@ export function markTaskChecking(
   const phase = deliverPhase(task);
   const detailParts = [
     phase ? `phase: ${phase}` : undefined,
-    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    ...persistentMetadataParts(task),
     `checking: ${details.timestamp}`,
   ].filter(Boolean);
 
@@ -218,7 +237,7 @@ export function markTaskRunning(
   const phase = deliverPhase(task);
   const detailParts = [
     phase ? `phase: ${phase}` : undefined,
-    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    ...persistentMetadataParts(task),
     `running: ${details.timestamp}`,
     details.logPath ? `log: ${details.logPath}` : undefined,
   ].filter(Boolean);
@@ -243,7 +262,7 @@ export function advanceDeliverTask(
 
   const nextPhase = phase === "push" ? "waiting_for_merge" : DELIVER_PHASES[DELIVER_PHASES.indexOf(phase) + 1]!;
   const detailParts = [
-    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    ...persistentMetadataParts(task),
     `phase: ${nextPhase}`,
     `advanced: ${details.timestamp}`,
     details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
@@ -265,7 +284,7 @@ export function advanceDeliverTaskToPhase(
   details: { timestamp: string; logPath?: string; checkedAt?: string; startedAt?: string },
 ): string {
   const detailParts = [
-    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    ...persistentMetadataParts(task),
     `phase: ${phase}`,
     `advanced: ${details.timestamp}`,
     details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
@@ -327,9 +346,28 @@ function stripTaskDecorations(value: string): string {
   return value.replace(COMMENT_PATTERN, "").replace(VISUAL_DECORATION_PATTERN, "").trim();
 }
 
-function parseTaskMetadata(value: string): Pick<QueueTask, "phase" | "dependsOn"> {
+type ParsedTaskMetadata = Pick<
+  QueueTask,
+  | "phase"
+  | "dependsOn"
+  | "archiveAfter"
+  | "sourceBranch"
+  | "sourceCommit"
+  | "sourceWorktree"
+  | "deliveryBranch"
+  | "deliveryWorktree"
+  | "adoptedAt"
+  | "publishedCommit"
+  | "pullRequestUrl"
+  | "archiveAttempts"
+  | "archiveBase"
+  | "archivePullRequestUrl"
+  | "metadata"
+>;
+
+function parseTaskMetadata(value: string): ParsedTaskMetadata {
   const match = value.match(COMMENT_PATTERN);
-  const metadata: Pick<QueueTask, "phase" | "dependsOn"> = { dependsOn: [] };
+  const metadata: ParsedTaskMetadata = { dependsOn: [], archiveAfter: [], metadata: {} };
   if (!match) {
     return metadata;
   }
@@ -342,6 +380,7 @@ function parseTaskMetadata(value: string): Pick<QueueTask, "phase" | "dependsOn"
       continue;
     }
 
+    metadata.metadata[key] = rawValue;
     const phase = normalizeDeliverPhase(rawValue);
     if (key === "phase" && phase) {
       metadata.phase = phase;
@@ -353,6 +392,25 @@ function parseTaskMetadata(value: string): Pick<QueueTask, "phase" | "dependsOn"
         .map((dependency) => normalizeChangeName(dependency))
         .filter((dependency): dependency is string => Boolean(dependency));
     }
+
+    if (key === "archive_after") {
+      metadata.archiveAfter = rawValue
+        .split(",")
+        .map((dependency) => normalizeChangeName(dependency))
+        .filter((dependency): dependency is string => Boolean(dependency));
+    }
+
+    if (key === "source_branch") metadata.sourceBranch = rawValue;
+    if (key === "source_commit") metadata.sourceCommit = rawValue;
+    if (key === "source_worktree") metadata.sourceWorktree = rawValue;
+    if (key === "delivery_branch") metadata.deliveryBranch = rawValue;
+    if (key === "delivery_worktree") metadata.deliveryWorktree = rawValue;
+    if (key === "adopted") metadata.adoptedAt = rawValue;
+    if (key === "published_commit") metadata.publishedCommit = rawValue;
+    if (key === "pr_url") metadata.pullRequestUrl = rawValue;
+    if (key === "archive_base") metadata.archiveBase = rawValue;
+    if (key === "archive_pr_url") metadata.archivePullRequestUrl = rawValue;
+    if (key === "archive_attempts" && /^\d+$/.test(rawValue)) metadata.archiveAttempts = Number(rawValue);
   }
 
   return metadata;
@@ -364,16 +422,83 @@ function dependenciesAreDone(task: QueueTask, tasks: QueueTask[]): boolean {
   );
 }
 
+function archiveDependenciesAreDone(task: QueueTask, tasks: QueueTask[]): boolean {
+  if (!phaseRequiresArchiveOrder(deliverPhase(task))) {
+    return true;
+  }
+
+  return task.archiveAfter.every((dependency) =>
+    tasks.some((candidate) =>
+      candidate.change === dependency &&
+      (candidate.status === "done" || ["cleanup_worktree"].includes(deliverPhase(candidate)))
+    ),
+  );
+}
+
 function taskIsRunnable(task: QueueTask, tasks: QueueTask[]): boolean {
-  if (!dependenciesAreDone(task, tasks)) {
+  if (!dependenciesAreDone(task, tasks) || !archiveDependenciesAreDone(task, tasks)) {
     return false;
   }
 
-  return deliverPhase(task) !== "waiting_for_merge";
+  return !["waiting_for_merge", "waiting_for_archive_merge"].includes(deliverPhase(task));
 }
 
 export function commandAcceptsChangeArgument(task: QueueTask): boolean {
-  return !["prepare_worktree", "sync_main", "waiting_for_merge"].includes(deliverPhase(task));
+  return !["prepare_worktree", "refresh_branch", "waiting_for_merge", "publish_archive", "waiting_for_archive_merge"].includes(deliverPhase(task));
+}
+
+function phaseRequiresArchiveOrder(phase: DeliverPhase): boolean {
+  return ["archive", "publish_archive", "waiting_for_archive_merge", "cleanup_worktree"].includes(phase);
+}
+
+const TRANSIENT_METADATA_KEYS = new Set([
+  "phase",
+  "checking",
+  "running",
+  "advanced",
+  "blocked",
+  "done",
+  "checked",
+  "started",
+  "reason",
+  "log",
+]);
+
+function persistentMetadataParts(task: QueueTask): string[] {
+  const known = new Set([
+    "depends_on",
+    "archive_after",
+    "source_branch",
+    "source_commit",
+    "source_worktree",
+    "delivery_branch",
+    "delivery_worktree",
+    "adopted",
+    "published_commit",
+    "pr_url",
+    "archive_attempts",
+    "archive_base",
+    "archive_pr_url",
+  ]);
+  const parts = [
+    task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
+    task.archiveAfter.length > 0 ? `archive_after: ${task.archiveAfter.join(",")}` : undefined,
+    task.sourceBranch ? `source_branch: ${task.sourceBranch}` : undefined,
+    task.sourceCommit ? `source_commit: ${task.sourceCommit}` : undefined,
+    task.sourceWorktree ? `source_worktree: ${task.sourceWorktree}` : undefined,
+    task.deliveryBranch ? `delivery_branch: ${task.deliveryBranch}` : undefined,
+    task.deliveryWorktree ? `delivery_worktree: ${task.deliveryWorktree}` : undefined,
+    task.adoptedAt ? `adopted: ${task.adoptedAt}` : undefined,
+    task.publishedCommit ? `published_commit: ${task.publishedCommit}` : undefined,
+    task.pullRequestUrl ? `pr_url: ${task.pullRequestUrl}` : undefined,
+    task.archiveAttempts !== undefined ? `archive_attempts: ${task.archiveAttempts}` : undefined,
+    task.archiveBase ? `archive_base: ${task.archiveBase}` : undefined,
+    task.archivePullRequestUrl ? `archive_pr_url: ${task.archivePullRequestUrl}` : undefined,
+    ...Object.entries(task.metadata)
+      .filter(([key]) => !known.has(key) && !TRANSIENT_METADATA_KEYS.has(key))
+      .map(([key, value]) => `${key}: ${value}`),
+  ].filter((part): part is string => Boolean(part));
+  return parts;
 }
 
 function normalizeDeliverPhase(value: string): DeliverPhase | undefined {
@@ -452,6 +577,10 @@ function badgeForVisual(visual: {
   const phase = visual.phase ?? "pending";
   if (phase === "waiting_for_merge") {
     return "![waiting_for_merge waiting](https://img.shields.io/badge/waiting_for_merge-waiting-orange)";
+  }
+
+  if (phase === "waiting_for_archive_merge") {
+    return "![waiting_for_archive_merge waiting](https://img.shields.io/badge/waiting_for_archive_merge-waiting-orange)";
   }
 
   if (phase === "pending") {

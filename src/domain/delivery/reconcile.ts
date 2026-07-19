@@ -75,8 +75,12 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("cleanup_worktree", "change is already archived");
   }
 
-  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
-    return transitionInference("prepare_worktree", "active OpenSpec change exists without a prepared workspace");
+  if (evidence.hasMergedArchivePullRequest || evidence.archivePublished) {
+    return transitionInference("cleanup_worktree", "archive is published");
+  }
+
+  if (evidence.hasOpenArchivePullRequest) {
+    return transitionInference("waiting_for_archive_merge", "archive pull request is open");
   }
 
   if (evidence.hasLocalClaim && !evidence.worktreeDependenciesReady && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
@@ -88,11 +92,15 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
   }
 
   if (evidence.hasLocalClaim && evidence.tasksComplete && !evidence.localClaimPublished) {
-    return transitionInference("push", "local implementation is complete but not published");
+    return transitionInference("refresh_branch", "local implementation is complete but not published");
   }
 
-  if (evidence.hasMergedPullRequest && phasePrecedes(evidence.declaredPhase, "sync_main")) {
-    return transitionInference("sync_main", "pull request is merged");
+  if (evidence.hasMergedPullRequest && phasePrecedes(evidence.declaredPhase, "archive")) {
+    return transitionInference("archive", "pull request is merged");
+  }
+
+  if (evidence.hasOpenPullRequest && evidence.refreshRequired && phasePrecedesOrMatches(evidence.declaredPhase, "waiting_for_merge")) {
+    return transitionInference("refresh_branch", "open pull request needs its delivery branch refreshed");
   }
 
   if (evidence.hasOpenPullRequest && phasePrecedes(evidence.declaredPhase, "waiting_for_merge")) {
@@ -101,6 +109,10 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
 
   if (evidence.hasRemoteBranch && phasePrecedes(evidence.declaredPhase, "waiting_for_merge")) {
     return transitionInference("push", "remote implementation branch exists without an open pull request");
+  }
+
+  if (evidence.hasActiveChange && !evidence.hasLocalClaim && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
+    return transitionInference("prepare_worktree", "a committed OpenSpec planning source exists without a delivery workspace");
   }
 
   if (evidence.hasActiveChange || evidence.hasLocalClaim) {
@@ -143,15 +155,19 @@ function phaseRank(phase: DeliverPhase): number {
       return 1;
     case "prepare_worktree":
       return 0;
-    case "push":
+    case "refresh_branch":
       return 2;
-    case "waiting_for_merge":
+    case "push":
       return 3;
-    case "sync_main":
+    case "waiting_for_merge":
       return 4;
     case "archive":
       return 5;
-    case "cleanup_worktree":
+    case "publish_archive":
       return 6;
+    case "waiting_for_archive_merge":
+      return 7;
+    case "cleanup_worktree":
+      return 8;
   }
 }

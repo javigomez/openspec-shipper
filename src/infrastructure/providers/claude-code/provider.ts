@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { DeliverPhase } from "../../../domain/queue/queue.js";
 import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
 import type { ClaudeSandboxMode } from "../../../domain/config/shipper-config.js";
+import { resolveProviderAsset } from "../../templates/provider-assets.js";
 
 export const CLAUDE_MIN_VERSION = "2.1.69";
 export const CLAUDE_MAX_TESTED_VERSION = "2.1.215";
@@ -28,10 +29,11 @@ export const claudeCodeProvider: ExecutorProvider = {
   activeProcessNames: ["claude"],
   buildCommand(input: BuildCommandInput) {
     const claude = input.config.executor.claude;
+    const assetsDir = input.assetsDir ?? input.projectDir;
 
     return {
       command: claude.bin,
-      args: buildClaudeCliArgs(input.projectDir, claude),
+      args: buildClaudeCliArgs(assetsDir, claude),
       cwd: input.projectDir,
       stdin: buildClaudePrompt(input),
     };
@@ -352,11 +354,20 @@ function buildClaudePrompt(input: BuildCommandInput): string {
 }
 
 export function claudePromptPath(projectDir: string, phase: DeliverPhase): string {
-  return join(projectDir, ".openspec-shipper", "claude", "prompts", claudePromptFileName(phase));
+  const fileName = claudePromptFileName(phase);
+  return resolveProviderAsset(
+    projectDir,
+    join(".openspec-shipper", "claude", "prompts", fileName),
+    join("claude-code", "assets", "prompts", fileName),
+  );
 }
 
 export function claudeWorkflowPath(projectDir: string): string {
-  return join(projectDir, ".openspec-shipper", "claude", "workflow.md");
+  return resolveProviderAsset(
+    projectDir,
+    join(".openspec-shipper", "claude", "workflow.md"),
+    join("claude-code", "assets", "workflow.md"),
+  );
 }
 
 export function claudeSettingsPath(projectDir: string): string {
@@ -383,10 +394,12 @@ function claudePromptFileName(phase: DeliverPhase): string {
     case "archive":
       return "archive.md";
     case "prepare_worktree":
+    case "refresh_branch":
     case "push":
-    case "sync_main":
+    case "publish_archive":
     case "cleanup_worktree":
     case "waiting_for_merge":
+    case "waiting_for_archive_merge":
       throw new Error(`${phase} is native OpenSpec Shipper runner logic and has no Claude prompt`);
   }
 }

@@ -6,9 +6,11 @@ export type PackageManager = "npm" | "pnpm" | "bun";
 export type ShipperProfile = "generic" | "node-npm" | "node-pnpm" | "bun";
 export type ExecutorProviderId = "opencode" | "codex-cli" | "claude-code";
 export type ClaudeSandboxMode = "strict" | "permissive" | "off";
+export type DeliveryRefreshPolicy = "auto" | "always" | "conflicts-only" | "never";
+export type ArchivePublishMode = "direct" | "pull-request";
 
 export type ShipperConfig = {
-  version: 1;
+  version: 2;
   profile: ShipperProfile;
   baseBranch: string;
   packageManager: PackageManager;
@@ -53,6 +55,13 @@ export type ShipperConfig = {
     install: boolean;
     installTimeoutMs: number;
   };
+  delivery: {
+    refreshPolicy: DeliveryRefreshPolicy;
+  };
+  archive: {
+    publishMode: ArchivePublishMode;
+    maxAttempts: number;
+  };
   safety: {
     enablePush: boolean;
     enableArchive: boolean;
@@ -73,7 +82,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
   const updateDependencies = packageManager === "bun" ? "bun install" : packageManager === "pnpm" ? "pnpm install" : "npm install";
 
   return {
-    version: 1,
+    version: 2,
     profile,
     baseBranch: "main",
     packageManager,
@@ -115,6 +124,13 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
     worktree: {
       install: true,
       installTimeoutMs: 10 * 60_000,
+    },
+    delivery: {
+      refreshPolicy: "auto",
+    },
+    archive: {
+      publishMode: "direct",
+      maxAttempts: 3,
     },
     safety: {
       enablePush: true,
@@ -212,6 +228,14 @@ function migrateConfig(config: Partial<ShipperConfig>): ShipperConfig {
     worktree: {
       ...defaults.worktree,
       ...(config.worktree ?? {}),
+    },
+    delivery: {
+      ...defaults.delivery,
+      ...(config.delivery ?? {}),
+    },
+    archive: {
+      ...defaults.archive,
+      ...(config.archive ?? {}),
     },
     safety: {
       ...defaults.safety,

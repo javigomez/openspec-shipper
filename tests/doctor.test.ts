@@ -3,17 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
-import { branchProtectionCheck, checkClaudePlatform, checkWorkingTreeClean, claudeVersionCheck, runDoctor } from "../src/application/doctor/doctor";
+import { branchProtectionCheck, checkClaudePlatform, claudeVersionCheck, runDoctor } from "../src/application/doctor/doctor";
 
 describe("doctor", () => {
-  test("fails early when the configured base branch is protected", () => {
+  test("warns for protected direct publication and accepts PR publication", () => {
     const protectedBranch = branchProtectionCheck("main", 0, "true\n", "");
+    const protectedWithPr = branchProtectionCheck("main", 0, "true\n", "", undefined, "pull-request");
     const unprotectedBranch = branchProtectionCheck("develop", 0, "false\n", "");
     const unknownBranch = branchProtectionCheck("main", 1, "", "HTTP 403");
 
     expect(protectedBranch.ok).toBe(false);
-    expect(protectedBranch.severity).toBe("error");
-    expect(protectedBranch.message).toContain("archive will fail");
+    expect(protectedBranch.severity).toBe("warning");
+    expect(protectedBranch.message).toContain("Direct archive publication may be rejected");
+    expect(protectedWithPr.ok).toBe(true);
     expect(unprotectedBranch.ok).toBe(true);
     expect(unknownBranch.severity).toBe("warning");
   });
@@ -32,40 +34,6 @@ describe("doctor", () => {
     expect(tested.ok).toBe(true);
     expect(old.severity).toBe("error");
   });
-  test("fails when the main checkout has non-runtime changes", async () => {
-    const projectDir = await createGitRepo();
-    await writeFile(join(projectDir, "package.json"), "{\"name\":\"changed\"}\n");
-
-    const check = checkWorkingTreeClean(projectDir);
-
-    expect(check.ok).toBe(false);
-    expect(check.severity).toBe("error");
-    expect(check.message).toContain("main checkout has uncommitted non-runtime changes");
-    expect(check.message).toContain("package.json");
-  });
-
-  test("ignores shipper runtime files when checking the working tree", async () => {
-    const projectDir = await createGitRepo();
-    await writeFile(
-      join(projectDir, ".gitignore"),
-      [
-        ".openspec-shipper/queue.md",
-        ".openspec-shipper/runs/",
-        "",
-      ].join("\n"),
-    );
-    runGit(projectDir, ["add", ".gitignore"]);
-    runGit(projectDir, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "ignore runtime"]);
-
-    await mkdir(join(projectDir, ".openspec-shipper/runs"), { recursive: true });
-    await writeFile(join(projectDir, ".openspec-shipper/queue.md"), "- [ ] deliver add-name-greeting\n");
-    await writeFile(join(projectDir, ".openspec-shipper/runs/run.log"), "log\n");
-
-    const check = checkWorkingTreeClean(projectDir);
-
-    expect(check.ok).toBe(true);
-  });
-
   test("checks Codex provider assets instead of OpenCode command files", async () => {
     const projectDir = await createGitRepo();
     await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
@@ -98,7 +66,7 @@ describe("doctor", () => {
     });
 
     expect(checks.some((check) => check.name === "codex provider" && check.severity === "warning")).toBe(true);
-    expect(checks.some((check) => check.name === ".openspec-shipper/codex/prompts/implement.md" && !check.ok)).toBe(true);
+    expect(checks.some((check) => check.name === ".openspec-shipper/codex/prompts/implement.md" && check.ok && check.message.includes("packaged default"))).toBe(true);
     expect(checks.some((check) => check.name === ".opencode/commands/openspec-apply-worktree.md")).toBe(false);
   });
 

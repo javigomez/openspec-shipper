@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeliverPhase } from "../../../domain/queue/queue.js";
 import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
+import { resolveProviderAsset } from "../../templates/provider-assets.js";
 
 export const codexCliProvider: ExecutorProvider = {
   id: "codex-cli",
@@ -63,8 +64,9 @@ function codexAssistantOutput(output: string): string {
 }
 
 function buildCodexPrompt(input: BuildCommandInput): string {
-  const prompt = readFileSync(codexPromptPath(input.projectDir, input.phase), "utf8");
-  const workflow = readFileSync(codexWorkflowPath(input.projectDir), "utf8");
+  const assetsDir = input.assetsDir ?? input.projectDir;
+  const prompt = readFileSync(codexPromptPath(assetsDir, input.phase), "utf8");
+  const workflow = readFileSync(codexWorkflowPath(assetsDir), "utf8");
   const changeName = input.task.change ?? "";
   const branchName = changeName ? `feat/${changeName}` : "";
   const worktreePath = changeName ? `worktrees/${changeName}` : "";
@@ -95,11 +97,20 @@ function buildCodexPrompt(input: BuildCommandInput): string {
 }
 
 export function codexPromptPath(projectDir: string, phase: DeliverPhase): string {
-  return join(projectDir, ".openspec-shipper", "codex", "prompts", codexPromptFileName(phase));
+  const fileName = codexPromptFileName(phase);
+  return resolveProviderAsset(
+    projectDir,
+    join(".openspec-shipper", "codex", "prompts", fileName),
+    join("codex-cli", "assets", "prompts", fileName),
+  );
 }
 
 export function codexWorkflowPath(projectDir: string): string {
-  return join(projectDir, ".openspec-shipper", "codex", "workflow.md");
+  return resolveProviderAsset(
+    projectDir,
+    join(".openspec-shipper", "codex", "workflow.md"),
+    join("codex-cli", "assets", "workflow.md"),
+  );
 }
 
 function codexPromptFileName(phase: DeliverPhase): string {
@@ -109,10 +120,12 @@ function codexPromptFileName(phase: DeliverPhase): string {
     case "archive":
       return "archive.md";
     case "prepare_worktree":
+    case "refresh_branch":
     case "push":
-    case "sync_main":
+    case "publish_archive":
     case "cleanup_worktree":
     case "waiting_for_merge":
+    case "waiting_for_archive_merge":
       throw new Error(`${phase} is native OpenSpec Shipper runner logic and has no Codex prompt`);
   }
 }

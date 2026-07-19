@@ -112,11 +112,11 @@ describe("runner", () => {
 
   test("does not execute when the queue has a blocked task", async () => {
     const harness = await createHarness(
-      "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: sync_main -->\n",
+      "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: archive -->\n",
     );
     let called = false;
 
-    const exitCode = await runQueue("next", {
+    const exitCode = await runQueue("run", {
       ...harness.config,
       executor: async () => {
         called = true;
@@ -130,7 +130,7 @@ describe("runner", () => {
 
   test("skips existing blocked tasks within the configured limit", async () => {
     const harness = await createHarness(
-      "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: sync_main -->\n",
+      "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: archive -->\n",
     );
     let called = false;
 
@@ -144,11 +144,11 @@ describe("runner", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(called).toBe(false);
+    expect(called).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("- [ ] deliver add-spanish-greeting");
-    expect(queue).toContain("phase: archive");
+    expect(queue).toContain("phase: publish_archive");
   });
 
   test("pauses when blocked tasks exceed the configured limit", async () => {
@@ -156,7 +156,7 @@ describe("runner", () => {
       [
         "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->",
         "- [!] deliver add-spanish-greeting <!-- phase: archive; blocked: earlier -->",
-        "- [ ] deliver add-shouting-greeting <!-- phase: sync_main -->",
+        "- [ ] deliver add-shouting-greeting <!-- phase: archive -->",
       ].join("\n"),
     );
     let called = false;
@@ -192,7 +192,7 @@ describe("runner", () => {
 
   test("advances the first pending deliver task on clean success", async () => {
     const harness = await createHarness(
-      "- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n- [ ] deliver add-spanish-greeting <!-- phase: archive -->\n",
+      "- [ ] deliver add-name-greeting <!-- phase: archive -->\n- [ ] deliver add-spanish-greeting <!-- phase: archive -->\n",
     );
 
     const exitCode = await runQueue("next", {
@@ -203,7 +203,7 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver add-name-greeting");
-    expect(queue).toContain("phase: archive");
+    expect(queue).toContain("phase: publish_archive");
     expect(queue).toContain("- [ ] deliver add-spanish-greeting");
   });
 
@@ -309,7 +309,7 @@ describe("runner", () => {
   test("installs dependencies when an existing worktree has none", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: prepare_worktree -->\n");
     const worktreeDir = join(harness.rootDir, "worktrees/add-name-greeting");
-    await mkdir(worktreeDir, { recursive: true });
+    await writeWorktreeTasks(harness.rootDir, "add-name-greeting", "- [ ] Implement");
     const shipperConfig = defaultShipperConfig();
     shipperConfig.checks.install = `node -e "require('node:fs').mkdirSync('node_modules')"`;
     await mkdir(join(harness.rootDir, ".openspec-shipper"), { recursive: true });
@@ -333,7 +333,7 @@ describe("runner", () => {
 
   test("blocks prepare and preserves install output when dependency installation fails", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: prepare_worktree -->\n");
-    await mkdir(join(harness.rootDir, "worktrees/add-name-greeting"), { recursive: true });
+    await writeWorktreeTasks(harness.rootDir, "add-name-greeting", "- [ ] Implement");
     const shipperConfig = defaultShipperConfig();
     shipperConfig.checks.install = `node -e "console.error('registry unavailable'); process.exit(1)"`;
     await mkdir(join(harness.rootDir, ".openspec-shipper"), { recursive: true });
@@ -357,7 +357,7 @@ describe("runner", () => {
   test("allows worktree dependency installation to be disabled", async () => {
     const harness = await createHarness("");
     const worktreeDir = join(harness.rootDir, "worktrees/add-name-greeting");
-    await mkdir(worktreeDir, { recursive: true });
+    await writeWorktreeTasks(harness.rootDir, "add-name-greeting", "- [ ] Implement");
     const shipperConfig = defaultShipperConfig();
     shipperConfig.worktree.install = false;
     shipperConfig.checks.install = "exit 1";
@@ -370,6 +370,7 @@ describe("runner", () => {
       branch: "feat/add-name-greeting",
       worktreeDir,
       baseBranch: "main",
+      source: { kind: "snapshot", commit: "0000000000000000000000000000000000000001" },
     });
 
     expect(output).toContain("dependency installation is disabled");
@@ -440,7 +441,7 @@ describe("runner", () => {
     const harness = await createHarness("");
     const queuePath = join(harness.config.stateDir, "queue.md");
     await mkdir(harness.config.stateDir, { recursive: true });
-    await writeFile(queuePath, "- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    await writeFile(queuePath, "- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -451,8 +452,8 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(queuePath, "utf8");
-    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-deliver-sync_main-add-name-greeting.log");
-    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-deliver-sync_main-add-name-greeting.log))_");
+    expect(queue).toContain("log: runs/2026-06-17T12-00-00-000Z-deliver-archive-add-name-greeting.log");
+    expect(queue).toContain("_([log](runs/2026-06-17T12-00-00-000Z-deliver-archive-add-name-greeting.log))_");
     expect(queue).not.toContain("../../.openspec-shipper");
   });
 
@@ -466,6 +467,7 @@ describe("runner", () => {
     const exitCode = await runQueue("next", {
       ...harness.config,
       ...implementedChangeEvidence("test-20-migrate-notebook-access-button-rntl"),
+      localClaimPublishedDetector: async () => true,
       pushBranchAndOpenPullRequest: async (input) => {
         pushedChange = input.changeName;
         return "pushed and opened PR\n";
@@ -495,6 +497,7 @@ describe("runner", () => {
       ...harness.config,
       baseBranch: "develop",
       ...implementedChangeEvidence("add-name-greeting"),
+      localClaimPublishedDetector: async () => true,
       pushBranchAndOpenPullRequest: async (input) => {
         pushedBranch = input.branch;
         baseBranch = input.baseBranch;
@@ -514,7 +517,7 @@ describe("runner", () => {
     expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
-  test("advances a deliver task to cleanup after archive succeeds", async () => {
+  test("advances a deliver task to archive publication after archive succeeds", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: archive -->\n",
     );
@@ -527,8 +530,8 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver test-20-migrate-notebook-access-button-rntl");
-    expect(queue).toContain("phase: cleanup_worktree");
-    expect(queue).toContain("![cleanup_worktree ready](https://img.shields.io/badge/cleanup_worktree-ready-blue)");
+    expect(queue).toContain("phase: publish_archive");
+    expect(queue).toContain("![publish_archive ready](https://img.shields.io/badge/publish_archive-ready-blue)");
   });
 
   test("finalizes archive by committing and pushing OpenSpec diff", async () => {
@@ -555,7 +558,7 @@ describe("runner", () => {
     const queuePath = join(projectDir, ".openspec-shipper/queue.md");
     await writeFile(queuePath, "- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 
-    const exitCode = await runQueue("next", {
+    const exitCode = await runQueue("run", {
       rootDir: projectDir,
       projectDir,
       queuePath,
@@ -569,23 +572,23 @@ describe("runner", () => {
       taskTimeoutMs: 1_000,
       heartbeatMs: 0,
       maxBlockedTasks: 0,
-      executor: async () => {
-        const archiveDir = join(projectDir, "openspec/changes/archive/2026-07-18-add-name-greeting");
+      executor: async (_command, _args, options) => {
+        const archiveDir = join(options.cwd, "openspec/changes/archive/2026-07-18-add-name-greeting");
         await mkdir(archiveDir, { recursive: true });
-        await mkdir(join(projectDir, "openspec/specs/hello-cli"), { recursive: true });
+        await mkdir(join(options.cwd, "openspec/specs/hello-cli"), { recursive: true });
         await writeFile(join(archiveDir, "proposal.md"), "proposal\n");
         await writeFile(join(archiveDir, "design.md"), "design\n");
         await writeFile(join(archiveDir, "tasks.md"), "- [x] done\n");
-        await writeFile(join(projectDir, "openspec/specs/hello-cli/spec.md"), "## Purpose\n\nGreeting.\n");
+        await writeFile(join(options.cwd, "openspec/specs/hello-cli/spec.md"), "## Purpose\n\nGreeting.\n");
         return { exitCode: 0, output: "archived\n" };
       },
     });
 
     expect(exitCode).toBe(0);
-    expect(git(projectDir, ["log", "-1", "--pretty=%s"]).trim()).toBe("chore: archive add-name-greeting");
-    expect(git(originDir, ["rev-parse", "main"]).trim()).toBe(git(projectDir, ["rev-parse", "HEAD"]).trim());
+    expect(git(projectDir, ["log", "-1", "--pretty=%s"]).trim()).toBe("chore: initial");
+    expect(git(originDir, ["log", "-1", "--pretty=%s", "main"]).trim()).toBe("chore: archive add-name-greeting");
     const queue = await readFile(queuePath, "utf8");
-    expect(queue).toContain("phase: cleanup_worktree");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
   });
 
   test("treats star, plus, and numbered task checkboxes as complete before push", async () => {
@@ -605,7 +608,7 @@ describe("runner", () => {
     const exitCode = await runQueue("next", {
       ...harness.config,
       localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
-      localClaimPublishedDetector: async () => false,
+      localClaimPublishedDetector: async () => true,
       pushBranchAndOpenPullRequest: async () => {
         pushed = true;
         return "pushed and opened PR https://github.com/example/project/pull/1\n";
@@ -796,7 +799,7 @@ describe("runner", () => {
     expect(queue).not.toContain("phase: implement");
   });
 
-  test("refreshes waiting-for-merge tasks to sync when the PR is merged", async () => {
+  test("refreshes waiting-for-merge tasks to archive when the PR is merged", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: waiting_for_merge -->\n");
 
     const exitCode = await runQueue("dry-run", {
@@ -808,8 +811,8 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: sync_main");
-    expect(queue).toContain("![sync_main ready](https://img.shields.io/badge/sync_main-ready-blue)");
+    expect(queue).toContain("phase: archive");
+    expect(queue).toContain("![archive ready](https://img.shields.io/badge/archive-ready-blue)");
   });
 
   test("reconstructs waiting-for-merge from a bare deliver task when a PR is open", async () => {
@@ -835,7 +838,7 @@ describe("runner", () => {
     expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
-  test("reconstructs sync from a bare deliver task when the PR is already merged", async () => {
+  test("reconstructs archive from a bare deliver task when the PR is already merged", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
 
     const exitCode = await runQueue("dry-run", {
@@ -849,14 +852,14 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: sync_main");
+    expect(queue).toContain("phase: archive");
   });
 
-  test("prefers active local changes over stale merged PR evidence", async () => {
+  test("prefers merged PR evidence over an unadopted stale active change", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let preparedChange = "";
 
-    const exitCode = await runQueue("next", {
+    const exitCode = await runQueue("dry-run", {
       ...harness.config,
       activeChangeDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
       localClaimDetector: async () => false,
@@ -874,15 +877,13 @@ describe("runner", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(preparedChange).toBe("add-name-greeting");
+    expect(preparedChange).toBe("");
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: implement");
-    expect(queue).not.toContain("phase: sync_main");
-    expect(queue).not.toContain("phase: archive");
+    expect(queue).toContain("phase: archive");
   });
 
   test("regresses stale advanced phases when local implementation tasks are incomplete", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: publish_archive -->\n");
 
     const exitCode = await runQueue("dry-run", {
       ...harness.config,
@@ -898,11 +899,11 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: implement");
-    expect(queue).not.toContain("phase: sync_main");
+    expect(queue).not.toContain("phase: publish_archive");
     expect(queue).not.toContain("phase: archive");
   });
 
-  test("prefers push when local completed work is not published despite stale merged PR evidence", async () => {
+  test("prefers refresh when local completed work is not published despite stale merged PR evidence", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 
     const exitCode = await runQueue("dry-run", {
@@ -920,8 +921,7 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: push");
-    expect(queue).not.toContain("phase: sync_main");
+    expect(queue).toContain("phase: refresh_branch");
     expect(queue).not.toContain("phase: archive");
   });
 
@@ -953,7 +953,6 @@ describe("runner", () => {
     expect(remoteChecks).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: archive");
-    expect(queue).not.toContain("phase: sync_main");
   });
 
   test("reconstructs push from a bare deliver task when only the remote branch exists", async () => {
@@ -973,7 +972,7 @@ describe("runner", () => {
     expect(queue).toContain("phase: push");
   });
 
-  test("reconstructs ship from a bare deliver task when local implementation tasks are complete", async () => {
+  test("reconstructs refresh from a bare deliver task when local implementation tasks are complete", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
 
     const exitCode = await runQueue("dry-run", {
@@ -985,7 +984,7 @@ describe("runner", () => {
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: push");
+    expect(queue).toContain("phase: refresh_branch");
   });
 
   test("marks a bare deliver task done when archive exists and cleanup is complete", async () => {
@@ -999,6 +998,9 @@ describe("runner", () => {
       remoteBranchDetector: async () => false,
       pullRequestDetector: async () => undefined,
       mergedPullRequestDetector: async () => undefined,
+      sourceResolver: () => {
+        throw new Error("missing source");
+      },
     });
 
     expect(exitCode).toBe(0);
@@ -1018,6 +1020,9 @@ describe("runner", () => {
       remoteBranchDetector: async () => false,
       pullRequestDetector: async () => undefined,
       mergedPullRequestDetector: async () => undefined,
+      sourceResolver: () => {
+        throw new Error("missing source");
+      },
     });
 
     expect(exitCode).toBe(0);
@@ -1057,6 +1062,9 @@ describe("runner", () => {
       remoteBranchDetector: async () => false,
       pullRequestDetector: async () => undefined,
       mergedPullRequestDetector: async () => undefined,
+      sourceResolver: () => {
+        throw new Error("missing source");
+      },
     });
 
     expect(exitCode).toBe(1);
@@ -1085,7 +1093,7 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).not.toContain(BLOCKED_TASK_RETRY_HINT);
     expect(queue).toContain("- [ ] deliver add-name-greeting");
-    expect(queue).toContain("phase: sync_main");
+    expect(queue).toContain("phase: archive");
   });
 
   test("passes OpenCode log flags before the command", async () => {
@@ -1492,7 +1500,7 @@ describe("runner", () => {
     expect(queue).not.toContain("waiting_for_merge");
   });
 
-  test("blocks prepare before execution when main is dirty and no claim exists", async () => {
+  test("allows prepare while the human checkout is dirty", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let called = false;
 
@@ -1505,12 +1513,11 @@ describe("runner", () => {
       },
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(called).toBe(false);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("phase: prepare_worktree");
-    expect(queue).toContain("no existing worktree or branch for add-name-greeting");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: implement");
   });
 
   test("detects synchronizable main without mutating when it is behind origin", async () => {
@@ -1632,7 +1639,7 @@ describe("runner", () => {
     expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(git(cloneDir, ["rev-parse", "origin/main"]).trim());
   });
 
-  test("blocks prepare when main cannot be safely synchronized with origin", async () => {
+  test("prepare does not depend on the human checkout sync status", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let prepareCalled = false;
 
@@ -1645,11 +1652,10 @@ describe("runner", () => {
       },
     });
 
-    expect(exitCode).toBe(1);
-    expect(prepareCalled).toBe(false);
+    expect(exitCode).toBe(0);
+    expect(prepareCalled).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("Main has diverged from origin/main");
+    expect(queue).toContain("phase: implement");
   });
 
   test("ignores shipper runtime files when checking dirty main", async () => {
@@ -1694,7 +1700,7 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     expect(called).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: push");
+    expect(queue).toContain("phase: refresh_branch");
   });
 
   test("allows prepare phase with unsynced main when the change worktree already exists", async () => {
@@ -1720,7 +1726,7 @@ describe("runner", () => {
     expect(prepareCalled).toBe(false);
     expect(executorCalled).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: push");
+    expect(queue).toContain("phase: refresh_branch");
   });
 
   test("next mode marks the task as checking before detecting active opencode", async () => {
@@ -1760,7 +1766,7 @@ describe("runner", () => {
     expect(exitCode).toBe(0);
     expect(called).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("phase: cleanup_worktree");
+    expect(queue).toContain("phase: publish_archive");
   });
 
   test("run mode processes pending tasks until the queue is complete", async () => {
@@ -1920,7 +1926,7 @@ describe("runner", () => {
   });
 
   test("stop mode requests a safe queue stop", async () => {
-    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: sync_main -->\n");
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 
     const exitCode = await runQueue("stop", harness.config);
 
@@ -2117,6 +2123,7 @@ function implementedChangeEvidence(changeName: string): Partial<RunnerConfig> {
   return {
     localClaimDetector: async (_projectDir, candidate) => candidate === changeName,
     tasksCompleteDetector: async (_projectDir, candidate) => candidate === changeName,
+    localClaimPublishedDetector: async (_projectDir, candidate) => candidate === changeName,
   };
 }
 
@@ -2162,6 +2169,13 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     reconcileWorktreeDependencies: async () => "dependencies already reconciled\n",
     claudeContractVerifier: async () => ({ ok: true, cached: true, message: "contract cached" }),
     prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,
+    sourceResolver: (_projectDir, task) => ({
+      kind: "base",
+      commit: "0000000000000000000000000000000000000001",
+      branch: "origin/main",
+    }),
+    prepareArchiveWorkspace: async (_projectDir, baseBranch) => `prepared archive workspace from origin/${baseBranch}\n`,
+    refreshDeliveryBranch: async (_projectDir, changeName, baseBranch) => `refreshed ${changeName} from origin/${baseBranch}\n`,
     finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),
   };

@@ -16,7 +16,7 @@ export const pushPhase: DeliveryPhaseDefinition = {
     }
 
     if (evidence.hasMergedPullRequest) {
-      return transition("sync_main", "pull request is merged");
+      return transition("archive", "pull request is merged");
     }
 
     if (evidence.hasOpenPullRequest) {
@@ -34,7 +34,7 @@ export const pushPhase: DeliveryPhaseDefinition = {
   },
   postChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
-      return transition("sync_main", "pull request is merged");
+      return transition("archive", "pull request is merged");
     }
 
     return evidence.hasOpenPullRequest

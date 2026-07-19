@@ -4,7 +4,7 @@ export const waitingForMergePhase: DeliveryPhaseDefinition = {
   phase: "waiting_for_merge",
   preChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
-      return transition("sync_main", "pull request is merged");
+      return transition("archive", "pull request is merged");
     }
 
     return blocked("waiting_for_merge", "waits for its PR to merge");
@@ -14,7 +14,7 @@ export const waitingForMergePhase: DeliveryPhaseDefinition = {
   },
   postChecks(evidence) {
     if (evidence.hasMergedPullRequest) {
-      return transition("sync_main", "pull request is merged");
+      return transition("archive", "pull request is merged");
     }
 
     return blocked("waiting_for_merge", "waits for its PR to merge");

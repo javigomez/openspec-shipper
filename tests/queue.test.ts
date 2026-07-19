@@ -121,7 +121,7 @@ describe("queue parser", () => {
     expect(findFirstRunnableTask([parsed])).toBeUndefined();
   });
 
-  test("advances archive to cleanup_worktree before marking deliver done", () => {
+  test("advances archive to publish_archive before cleanup", () => {
     const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
     const task = result.tasks[0]!;
 
@@ -129,10 +129,38 @@ describe("queue parser", () => {
       timestamp: "2026-07-13T12:00:00.000Z",
     });
 
-    expect(next).toContain("phase: cleanup_worktree");
-    expect(next).toContain("![cleanup_worktree ready](https://img.shields.io/badge/cleanup_worktree-ready-blue)");
+    expect(next).toContain("phase: publish_archive");
+    expect(next).toContain("![publish_archive ready](https://img.shields.io/badge/publish_archive-ready-blue)");
     const parsed = parseQueue(next).tasks[0]!;
-    expect(deliverPhase(parsed)).toBe("cleanup_worktree");
+    expect(deliverPhase(parsed)).toBe("publish_archive");
+  });
+
+  test("preserves source and archive metadata while updating queue state", () => {
+    const result = parseQueue(
+      "- [ ] deliver add-name-greeting <!-- source_branch: spec/add-name-greeting; source_commit: abc123; archive_after: prepare-hello; custom: keep-me -->\n",
+    );
+    const task = result.tasks[0]!;
+
+    expect(task.sourceBranch).toBe("spec/add-name-greeting");
+    expect(task.sourceCommit).toBe("abc123");
+    expect(task.archiveAfter).toEqual(["prepare-hello"]);
+
+    const next = markTaskChecking(result.lines, task, { timestamp: "2026-07-19T10:00:00.000Z" });
+    expect(next).toContain("source_branch: spec/add-name-greeting");
+    expect(next).toContain("source_commit: abc123");
+    expect(next).toContain("archive_after: prepare-hello");
+    expect(next).toContain("custom: keep-me");
+  });
+
+  test("archive_after waits only when the dependent task reaches archive", () => {
+    const result = parseQueue([
+      "- [ ] deliver change-a <!-- phase: waiting_for_merge -->",
+      "- [ ] deliver change-b <!-- phase: archive; archive_after: change-a -->",
+      "- [ ] deliver change-c <!-- phase: implement; archive_after: change-a -->",
+    ].join("\n"));
+
+    expect(findWaitingTasks(result.tasks).map((task) => task.change)).toEqual(["change-a", "change-b"]);
+    expect(findFirstRunnableTask(result.tasks)?.change).toBe("change-c");
   });
 
   test("marks deliver done after cleanup_worktree", () => {

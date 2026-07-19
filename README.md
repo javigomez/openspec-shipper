@@ -90,6 +90,11 @@ Runtime state lives in the target repository:
 `openspec-shipper` never loads the target app's `.env`. It only reads
 `.openspec-shipper/.env`, or the file passed with `--env-file`.
 
+`shipper.lock` records the runner PID, hostname, owner ID, and a heartbeat. Lock
+creation is atomic. After a crash, the next run automatically recovers a lock
+whose local PID is dead; an old heartbeat never overrides a PID that is still
+alive, so two runners cannot be started accidentally.
+
 Config precedence is:
 
 ```text

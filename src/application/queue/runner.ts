@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createWriteStream, existsSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { access, appendFile, mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { createWriteStream, existsSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { access, appendFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -145,6 +147,11 @@ export type RemoteBranchDetector = (projectDir: string, branch: string) => Promi
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+type TaskCompletionStatus =
+  | { kind: "complete"; tasksPath: string }
+  | { kind: "incomplete"; tasksPath: string }
+  | { kind: "missing" }
+  | { kind: "no_checkboxes"; tasksPath: string };
 export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type ReconcileWorktreeDependencies = (projectDir: string, changeName: string) => Promise<string>;
 export type ClaudeContractVerifier = (projectDir: string, claude: ClaudeCliOptions) => Promise<ClaudeContractResult>;
@@ -188,6 +195,7 @@ const DEFAULT_LOOP_DELAY_MS = 5_000;
 const DEFAULT_BUSY_DELAY_MS = 60_000;
 const DEFAULT_TASK_TIMEOUT_MS = 90 * 60_000;
 const DEFAULT_HEARTBEAT_MS = 60_000;
+const LOCK_STALE_AFTER_MS = 10 * 60_000;
 const DEFAULT_STATS_INTERVAL_MS = 120_000;
 const DEFAULT_STATS_TIMEOUT_MS = 10_000;
 const DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE = 2;
@@ -484,26 +492,48 @@ async function acquireLock(
   task: string,
   interruptMode: "graceful" | "immediate",
 ): Promise<{ acquired: true; release: () => Promise<void> } | { acquired: false }> {
-  if (await fileExists(lockPath)) {
-    console.log(`Queue is already running: lock exists at ${lockPath}`);
-    return { acquired: false };
+  await mkdir(config.stateDir, { recursive: true });
+  const lockId = randomUUID();
+  const startedAt = new Date().toISOString();
+  const lock: ShipperLock = {
+    version: 1,
+    lockId,
+    pid: process.pid,
+    hostname: hostname(),
+    startedAt,
+    heartbeatAt: startedAt,
+    task,
+  };
+
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx");
+      try {
+        await handle.writeFile(serializeLock(lock));
+      } finally {
+        await handle.close();
+      }
+      break;
+    } catch (error) {
+      if (!isNodeError(error, "EEXIST")) {
+        throw error;
+      }
+
+      const stale = await recoverStaleLock(lockPath);
+      if (!stale.recovered) {
+        console.log(`Queue is already running: ${stale.reason} (${lockPath})`);
+        return { acquired: false };
+      }
+      console.log(`Recovered stale queue lock: ${stale.reason} (${lockPath})`);
+    }
   }
 
-  await mkdir(config.stateDir, { recursive: true });
-  await writeFile(
-    lockPath,
-    JSON.stringify(
-      {
-        pid: process.pid,
-        startedAt: config.now?.().toISOString() ?? new Date().toISOString(),
-        task,
-      },
-      null,
-      2,
-    ),
-  );
-
   let released = false;
+  const lockHeartbeatMs = config.heartbeatMs > 0 ? config.heartbeatMs : DEFAULT_HEARTBEAT_MS;
+  const lockHeartbeat = setInterval(() => {
+    void refreshOwnedLock(lockPath, lock).catch(() => undefined);
+  }, lockHeartbeatMs);
+  lockHeartbeat.unref?.();
   let gracefulStopRequested = false;
   let forceInterruptAllowedAt = 0;
   const signalHandler = (signal: NodeJS.Signals) => {
@@ -523,7 +553,7 @@ async function acquireLock(
     terminateActiveChild("SIGTERM");
 
     if (!released) {
-      rmSync(lockPath, { force: true });
+      removeOwnedLockSync(lockPath, lockId);
     }
 
     console.error(`\nReceived ${signal}; removed orchestrator lock and interrupted the runner.`);
@@ -537,11 +567,139 @@ async function acquireLock(
     acquired: true,
     release: async () => {
       released = true;
+      clearInterval(lockHeartbeat);
       process.removeListener("SIGINT", signalHandler);
       process.removeListener("SIGTERM", signalHandler);
-      await rm(lockPath, { force: true });
+      await removeOwnedLock(lockPath, lockId);
     },
   };
+}
+
+type ShipperLock = {
+  version?: number;
+  lockId?: string;
+  pid?: number;
+  hostname?: string;
+  startedAt?: string;
+  heartbeatAt?: string;
+  task?: string;
+};
+
+async function recoverStaleLock(lockPath: string): Promise<{ recovered: boolean; reason: string }> {
+  const snapshot = await readLockSnapshot(lockPath);
+  if (!snapshot) {
+    return { recovered: true, reason: "lock disappeared while checking it" };
+  }
+
+  const sameHost = !snapshot.lock.hostname || snapshot.lock.hostname === hostname();
+  if (!sameHost) {
+    return { recovered: false, reason: `lock belongs to ${snapshot.lock.hostname}` };
+  }
+
+  const processState = lockProcessState(snapshot.lock.pid);
+  const heartbeatAt = Date.parse(snapshot.lock.heartbeatAt ?? snapshot.lock.startedAt ?? "");
+  const heartbeatAge = Number.isFinite(heartbeatAt) ? Date.now() - heartbeatAt : Date.now() - snapshot.mtimeMs;
+  let reason: string | undefined;
+  if (processState === "dead") {
+    reason = `PID ${snapshot.lock.pid} is no longer running`;
+  } else if (processState !== "alive" && heartbeatAge > LOCK_STALE_AFTER_MS) {
+    reason = `heartbeat is older than ${formatDuration(LOCK_STALE_AFTER_MS)}`;
+  }
+
+  if (!reason) {
+    const detail = processState === "alive"
+      ? `PID ${snapshot.lock.pid} is still running`
+      : `heartbeat is ${formatDuration(Math.max(0, heartbeatAge))} old`;
+    return { recovered: false, reason: detail };
+  }
+
+  const recoveryPath = `${lockPath}.stale-${process.pid}-${randomUUID()}`;
+  try {
+    await rename(lockPath, recoveryPath);
+    await rm(recoveryPath, { force: true });
+    return { recovered: true, reason };
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) {
+      return { recovered: true, reason: "another runner recovered the stale lock" };
+    }
+    throw error;
+  }
+}
+
+async function refreshOwnedLock(lockPath: string, lock: ShipperLock): Promise<void> {
+  const current = await readLockSnapshot(lockPath);
+  if (!current || current.lock.lockId !== lock.lockId) {
+    return;
+  }
+  lock.heartbeatAt = new Date().toISOString();
+  const heartbeatPath = `${lockPath}.heartbeat-${lock.lockId}`;
+  await writeFile(heartbeatPath, serializeLock(lock));
+  const latest = await readLockSnapshot(lockPath);
+  if (latest?.lock.lockId === lock.lockId) {
+    await rename(heartbeatPath, lockPath);
+  } else {
+    await rm(heartbeatPath, { force: true });
+  }
+}
+
+async function removeOwnedLock(lockPath: string, lockId: string): Promise<void> {
+  const current = await readLockSnapshot(lockPath);
+  if (current?.lock.lockId === lockId) {
+    await rm(lockPath, { force: true });
+  }
+}
+
+function removeOwnedLockSync(lockPath: string, lockId: string): void {
+  try {
+    const lock = JSON.parse(readFileSync(lockPath, "utf8")) as ShipperLock;
+    if (lock.lockId === lockId) {
+      rmSync(lockPath, { force: true });
+    }
+  } catch {
+    // A missing or replaced lock no longer belongs to this runner.
+  }
+}
+
+async function readLockSnapshot(lockPath: string): Promise<{ lock: ShipperLock; mtimeMs: number } | undefined> {
+  try {
+    const [raw, metadata] = await Promise.all([readFile(lockPath, "utf8"), stat(lockPath)]);
+    return { lock: JSON.parse(raw) as ShipperLock, mtimeMs: metadata.mtimeMs };
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) {
+      return undefined;
+    }
+    if (error instanceof SyntaxError) {
+      const metadata = await stat(lockPath).catch(() => undefined);
+      return metadata ? { lock: {}, mtimeMs: metadata.mtimeMs } : undefined;
+    }
+    throw error;
+  }
+}
+
+function lockProcessState(pid: number | undefined): "alive" | "dead" | "unknown" {
+  if (!Number.isSafeInteger(pid) || !pid || pid < 1) {
+    return "unknown";
+  }
+  try {
+    process.kill(pid, 0);
+    return "alive";
+  } catch (error) {
+    if (isNodeError(error, "ESRCH")) {
+      return "dead";
+    }
+    if (isNodeError(error, "EPERM")) {
+      return "alive";
+    }
+    return "unknown";
+  }
+}
+
+function serializeLock(lock: ShipperLock): string {
+  return `${JSON.stringify(lock, null, 2)}\n`;
+}
+
+function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 async function checkActiveExecutor(config: RunnerConfig): Promise<{ busy: false } | { busy: true; reason: string }> {
@@ -599,6 +757,17 @@ async function validateTaskPreflight(
   if (phase === "push") {
     const pushBlocker = await validateNativePush(config, task);
     return pushBlocker ? { ok: false, commandPath, reason: pushBlocker } : { ok: true, commandPath };
+  }
+
+  if (phase === "implement" && task.change) {
+    const status = await detectTaskCompletionStatus(config.projectDir, task.change);
+    if (status.kind === "no_checkboxes") {
+      return {
+        ok: false,
+        commandPath,
+        reason: "tasks.md has no task checkboxes; OpenSpec Shipper cannot track completion. Use markdown checkboxes such as - [ ] and - [x].",
+      };
+    }
   }
 
   if (phase === "sync_main" || phase === "cleanup_worktree") {
@@ -748,6 +917,12 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
 
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
   const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
+  if (!config.tasksCompleteDetector) {
+    const status = await detectTaskCompletionStatus(config.projectDir, task.change);
+    if (status.kind === "no_checkboxes") {
+      return `tasks.md has no task checkboxes; OpenSpec Shipper cannot track completion. Use markdown checkboxes such as - [ ] and - [x].`;
+    }
+  }
   if (!(await tasksCompleteDetector(config.projectDir, task.change))) {
     return `Implementation tasks are not complete for ${task.change}; cannot push or open a PR.`;
   }
@@ -1771,7 +1946,11 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
   }
 
   ensureChangeArtifacts(input.worktreeDir, input.changeName);
-  if (!(await detectTasksComplete(input.projectDir, input.changeName))) {
+  const taskCompletionStatus = await detectTaskCompletionStatus(input.projectDir, input.changeName);
+  if (taskCompletionStatus.kind === "no_checkboxes") {
+    throw new Error("tasks.md has no task checkboxes; OpenSpec Shipper cannot track completion. Use markdown checkboxes such as - [ ] and - [x].");
+  }
+  if (taskCompletionStatus.kind !== "complete") {
     throw new Error(`Implementation tasks are not complete for ${input.changeName}.`);
   }
 
@@ -2276,19 +2455,33 @@ async function detectArchivedChange(projectDir: string, changeName: string): Pro
 }
 
 async function detectTasksComplete(projectDir: string, changeName: string): Promise<boolean> {
+  return (await detectTaskCompletionStatus(projectDir, changeName)).kind === "complete";
+}
+
+async function detectTaskCompletionStatus(projectDir: string, changeName: string): Promise<TaskCompletionStatus> {
   const tasksPath =
     (await firstExistingPath([
       join(projectDir, "worktrees", changeName, "openspec", "changes", changeName, "tasks.md"),
       join(projectDir, "openspec", "changes", changeName, "tasks.md"),
     ])) ?? "";
   if (!tasksPath) {
-    return false;
+    return { kind: "missing" };
   }
 
   const content = await readFile(tasksPath, "utf8").catch(() => "");
-  const totalTasks = (content.match(/^[ \t]*- \[[ xX]\]/gm) ?? []).length;
-  const incompleteTasks = (content.match(/^[ \t]*- \[ \]/gm) ?? []).length;
-  return totalTasks > 0 && incompleteTasks === 0;
+  const taskCheckboxes = parseTaskCheckboxes(content);
+  if (taskCheckboxes.length === 0) {
+    return { kind: "no_checkboxes", tasksPath };
+  }
+
+  return taskCheckboxes.every((checked) => checked)
+    ? { kind: "complete", tasksPath }
+    : { kind: "incomplete", tasksPath };
+}
+
+function parseTaskCheckboxes(content: string): boolean[] {
+  const checkboxPattern = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\]/gm;
+  return [...content.matchAll(checkboxPattern)].map((match) => match[1]?.toLowerCase() === "x");
 }
 
 async function firstExistingPath(paths: string[]): Promise<string | undefined> {

@@ -43,6 +43,10 @@ Local queue state remains ignored and should not be committed:
 - `.openspec-shipper/tmp/`
 - `worktrees/`
 
+The queue lock contains its PID, hostname, owner ID, and a live heartbeat. If a
+runner crashes, the next invocation automatically recovers a stale lock when
+its local PID is no longer running. Do not delete a lock whose PID is alive.
+
 Suggested commit:
 
 ```bash

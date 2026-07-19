@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, utimes, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { cleanupWorkspace, defaultConfig, detectMainSyncStatus, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
@@ -1817,6 +1817,80 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [ ] deliver add-name-greeting <!-- phase: archive; checking: 2026-06-17T12:00:00.000Z -->");
     expect(queue).toContain("![archive checking](https://img.shields.io/badge/archive-checking-yellow)");
+  });
+
+  test("recovers a stale queue lock when its local PID is dead", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    const lockPath = join(harness.config.stateDir, "shipper.lock");
+    await mkdir(harness.config.stateDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({
+      pid: 2_147_483_647,
+      hostname: hostname(),
+      startedAt: "2000-01-01T00:00:00.000Z",
+      heartbeatAt: "2000-01-01T00:00:00.000Z",
+      task: "queue:run",
+    }));
+    let prepared = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      prepareWorkspace: async () => {
+        prepared = true;
+        return "prepared\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(prepared).toBe(true);
+    expect(await access(lockPath).then(() => true).catch(() => false)).toBe(false);
+  });
+
+  test("does not recover an old lock while its local PID is alive", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    const lockPath = join(harness.config.stateDir, "shipper.lock");
+    await mkdir(harness.config.stateDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: "2000-01-01T00:00:00.000Z",
+      heartbeatAt: "2000-01-01T00:00:00.000Z",
+      task: "queue:run",
+    }));
+    let prepared = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      prepareWorkspace: async () => {
+        prepared = true;
+        return "prepared\n";
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(prepared).toBe(false);
+    expect(await access(lockPath).then(() => true).catch(() => false)).toBe(true);
+    await rm(lockPath, { force: true });
+  });
+
+  test("refreshes the owned lock heartbeat while a task runs", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting\n");
+    const lockPath = join(harness.config.stateDir, "shipper.lock");
+    let initialHeartbeat = "";
+    let refreshedHeartbeat = "";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      heartbeatMs: 10,
+      prepareWorkspace: async () => {
+        initialHeartbeat = JSON.parse(await readFile(lockPath, "utf8")).heartbeatAt;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        refreshedHeartbeat = JSON.parse(await readFile(lockPath, "utf8")).heartbeatAt;
+        return "prepared\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(Date.parse(refreshedHeartbeat)).toBeGreaterThan(Date.parse(initialHeartbeat));
   });
 });
 

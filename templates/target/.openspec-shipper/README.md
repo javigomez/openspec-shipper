@@ -83,6 +83,10 @@ to execute a real Bash sandbox probe; it uses one Claude request.
 npx openspec-shipper doctor
 ```
 
+Archive finalization currently pushes directly to the configured `baseBranch`.
+Doctor reports an error when GitHub marks that branch as protected because
+PR-based archive finalization is not supported yet.
+
 ## Add Changes To The Queue
 
 Add one or more active OpenSpec changes:

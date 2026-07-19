@@ -12,6 +12,12 @@ npx openspec-shipper init
 npx openspec-shipper doctor
 ```
 
+Archive finalization currently commits and pushes directly to the configured
+`baseBranch`. `doctor` queries GitHub before the queue starts and fails with a
+clear explanation when that branch is protected. PR-based archive finalization
+is not supported yet; this limitation is intentionally explicit while the
+project gathers real-world workflow requirements.
+
 There is no `postinstall` mutation. `init` is the command that installs project
 assets, and it writes state only under `.openspec-shipper/` plus provider assets
 such as `.opencode/`.

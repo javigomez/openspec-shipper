@@ -3,9 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
-import { checkClaudePlatform, checkWorkingTreeClean, runDoctor } from "../src/application/doctor/doctor";
+import { branchProtectionCheck, checkClaudePlatform, checkWorkingTreeClean, runDoctor } from "../src/application/doctor/doctor";
 
 describe("doctor", () => {
+  test("fails early when the configured base branch is protected", () => {
+    const protectedBranch = branchProtectionCheck("main", 0, "true\n", "");
+    const unprotectedBranch = branchProtectionCheck("develop", 0, "false\n", "");
+    const unknownBranch = branchProtectionCheck("main", 1, "", "HTTP 403");
+
+    expect(protectedBranch.ok).toBe(false);
+    expect(protectedBranch.severity).toBe("error");
+    expect(protectedBranch.message).toContain("archive will fail");
+    expect(unprotectedBranch.ok).toBe(true);
+    expect(unknownBranch.severity).toBe("warning");
+  });
   test("rejects native Windows for the strict Claude sandbox", () => {
     expect(checkClaudePlatform("win32").ok).toBe(false);
     expect(checkClaudePlatform("linux").ok).toBe(true);

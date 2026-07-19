@@ -55,6 +55,7 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
   checks.push(checkCommand("gh", ["--version"], projectDir, "GitHub CLI is available for pull request management"));
   checks.push(checkGitHubCliAuth(projectDir));
   checks.push(checkGitHubPullRequestAccess(projectDir));
+  checks.push(checkBaseBranchProtection(projectDir, config?.baseBranch ?? "main"));
   checks.push(checkProviderCommand(projectDir, config));
   if (config?.executor.provider === "claude-code") {
     checks.push(checkClaudePlatform(process.platform, config.executor.claude.sandbox));
@@ -400,6 +401,54 @@ function checkGitHubPullRequestAccess(projectDir: string): DoctorCheck {
   }
 
   return ok("gh pr access", "GitHub pull requests are accessible through gh");
+}
+
+export function checkBaseBranchProtection(projectDir: string, baseBranch = "main"): DoctorCheck {
+  const repository = detectGitHubRepository(projectDir);
+  if (repository === "missing") {
+    return warning("base branch protection", `Cannot check whether ${baseBranch} is protected because git remote origin is missing`);
+  }
+  if (!repository) {
+    return warning("base branch protection", `Cannot check whether ${baseBranch} is protected because origin is not a GitHub repository URL`);
+  }
+
+  const result = spawnSync("gh", [
+    "api",
+    `repos/${repository.owner}/${repository.repo}/branches/${encodeURIComponent(baseBranch)}`,
+    "--jq",
+    ".protected",
+  ], {
+    cwd: projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  return branchProtectionCheck(baseBranch, result.status, result.stdout, result.stderr, result.error);
+}
+
+export function branchProtectionCheck(
+  baseBranch: string,
+  status: number | null,
+  stdout: string,
+  stderr: string,
+  processError?: Error,
+): DoctorCheck {
+  if (processError || status !== 0) {
+    const detail = processError?.message ?? firstLine(stderr || stdout) ?? "GitHub API request failed";
+    return warning("base branch protection", `Could not determine whether ${baseBranch} is protected: ${detail}`);
+  }
+
+  if (stdout.trim() === "true") {
+    return error(
+      "base branch protection",
+      `${baseBranch} is protected on GitHub. OpenSpec Shipper currently finalizes archive by pushing directly to origin/${baseBranch}, so archive will fail. PR-based archive finalization is not supported yet.`,
+    );
+  }
+
+  if (stdout.trim() === "false") {
+    return ok("base branch protection", `${baseBranch} is not protected; direct archive pushes are supported`);
+  }
+
+  return warning("base branch protection", `GitHub returned an unknown protection state for ${baseBranch}`);
 }
 
 function detectGitHubRepository(projectDir: string): { owner: string; repo: string } | undefined | "missing" {

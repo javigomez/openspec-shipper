@@ -52,9 +52,10 @@ export function openCodeCommandName(phase: DeliverPhase): string {
 }
 
 export function detectFailureSignal(output: string): string | undefined {
-  const blocked = output.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
-  if (blocked?.[1]) {
-    return `Worker reported a blocker: ${blocked[1].trim()}`;
+  const finalOutput = finalOutputSection(output);
+  const blockedReason = finalBlockedReason(output);
+  if (blockedReason) {
+    return `Worker reported a blocker: ${blockedReason}`;
   }
 
   const patterns: Array<[RegExp, string]> = [
@@ -63,9 +64,7 @@ export function detectFailureSignal(output: string): string | undefined {
     [/AI_APICallError/i, "OpenCode stream failed with AI_APICallError"],
     [/not a recognized command or skill/i, "OpenCode did not recognize the command"],
     [/command not found:\s*openspec/i, "OpenSpec CLI was not available"],
-    [/auto-rejecting/i, "OpenCode auto-rejected a permission request"],
-    [/permission requested/i, "OpenCode requested permission in non-interactive mode"],
-    [/\bNo pull request exists\b/i, "Ship worker did not find an open pull request"],
+    [/^OpenCode auto-rejected\b/im, "OpenCode auto-rejected a permission request"],
     [/^#+\s*Blocked:/im, "Worker reported a blocker"],
     [/\bnot push-ready\b/i, "Worker reported a blocker"],
     [/\bnot eligible for push\b/i, "Worker reported a blocker"],
@@ -74,5 +73,22 @@ export function detectFailureSignal(output: string): string | undefined {
     [/\b(worker reported a blocker|task is blocked|cannot continue without)\b/i, "Worker reported a blocker"],
   ];
 
-  return patterns.find(([pattern]) => pattern.test(output))?.[1];
+  return patterns.find(([pattern]) => pattern.test(finalOutput))?.[1];
+}
+
+function finalOutputSection(output: string, lineCount = 80): string {
+  return output
+    .split(/\r?\n/)
+    .slice(-lineCount)
+    .join("\n");
+}
+
+function finalBlockedReason(output: string): string | undefined {
+  const finalLine = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-1)[0];
+  const match = finalLine?.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/i);
+  return match?.[1]?.trim();
 }

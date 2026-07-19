@@ -215,6 +215,24 @@ describe("executor providers", () => {
     expect(parseClaudeResult(`heartbeat\n${completed}\n` )?.structured_output?.status).toBe("completed");
   });
 
+  test("Claude Code provider trusts completed structured output even when text quotes blocker words", () => {
+    const completed = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: [
+        "A test fixture intentionally prints: permission denied.",
+        "The historical log also mentioned max turns and OPENSPEC_SHIPPER_BLOCKED: old failure.",
+      ].join("\n"),
+      structured_output: {
+        status: "completed",
+        summary: "Completed after verifying a quoted permission denied fixture.",
+        reason: null,
+      },
+    });
+
+    expect(claudeCodeProvider.detectFailureSignal(completed)).toBeUndefined();
+  });
+
   test("Claude Code provider detects structured CLI errors and sentinel fallback", () => {
     const cliError = JSON.stringify({ type: "result", is_error: true, subtype: "error_max_turns", result: "turn limit reached" });
     expect(claudeCodeProvider.detectFailureSignal(cliError)).toBe("Claude Code reported an error: turn limit reached");
@@ -237,5 +255,32 @@ describe("executor providers", () => {
     expect(opencodeProvider.detectFailureSignal("Archive blocked because the change was not merged")).toBe(
       "OpenSpec archive worker reported a blocker",
     );
+  });
+
+  test("OpenCode provider ignores blocker-looking text outside the final output section", () => {
+    const output = [
+      "npm test output:",
+      "### Blocked: this heading belongs to a markdown fixture",
+      "OpenCode auto-rejected a permission request in an old copied log",
+      "No pull request exists in this intentionally quoted test fixture",
+      "OPENSPEC_SHIPPER_BLOCKED: copied from an old log",
+      ...Array.from({ length: 90 }, (_, index) => `progress line ${index}`),
+      "All implementation tasks completed.",
+    ].join("\n");
+
+    expect(opencodeProvider.detectFailureSignal(output)).toBeUndefined();
+  });
+
+  test("OpenCode provider still detects final blocker signals without structured output", () => {
+    expect(opencodeProvider.detectFailureSignal([
+      "All checks passed earlier.",
+      ...Array.from({ length: 90 }, (_, index) => `progress line ${index}`),
+      "### Blocked: GitHub permissions are missing",
+    ].join("\n"))).toBe("Worker reported a blocker");
+
+    expect(opencodeProvider.detectFailureSignal([
+      "All checks passed earlier.",
+      "OPENSPEC_SHIPPER_BLOCKED: missing gh auth",
+    ].join("\n"))).toBe("Worker reported a blocker: missing gh auth");
   });
 });

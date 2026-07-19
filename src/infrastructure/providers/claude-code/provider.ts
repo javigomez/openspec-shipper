@@ -66,6 +66,9 @@ export const claudeCodeProvider: ExecutorProvider = {
   },
   detectFailureSignal(output: string): string | undefined {
     const result = parseClaudeResult(output);
+    if (result?.structured_output?.status === "completed") {
+      return undefined;
+    }
     if (result?.structured_output?.status === "blocked") {
       const reason = result.structured_output.reason?.trim() || "Claude Code reported a blocker";
       return `Worker reported a blocker: ${reason}`;
@@ -75,11 +78,11 @@ export const claudeCodeProvider: ExecutorProvider = {
     }
 
     const assistantOutput = result?.result ?? output;
-    const blocked = assistantOutput.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/im);
-    if (blocked?.[1] && blocked[1].trim() !== "<short reason>") {
-      return `Worker reported a blocker: ${blocked[1].trim()}`;
+    const blockedReason = finalBlockedReason(assistantOutput);
+    if (blockedReason && blockedReason !== "<short reason>") {
+      return `Worker reported a blocker: ${blockedReason}`;
     }
-    if (/\b(permission denied|permission required|not logged in|max(?:imum)? turns|max budget)\b/i.test(assistantOutput)) {
+    if (/\b(permission denied|permission required|not logged in|max(?:imum)? turns|max budget)\b/i.test(finalOutputSection(assistantOutput))) {
       return "Claude Code reported a blocker";
     }
     if (!result?.structured_output || result.structured_output.status !== "completed") {
@@ -88,6 +91,23 @@ export const claudeCodeProvider: ExecutorProvider = {
     return undefined;
   },
 };
+
+function finalOutputSection(output: string, lineCount = 80): string {
+  return output
+    .split(/\r?\n/)
+    .slice(-lineCount)
+    .join("\n");
+}
+
+function finalBlockedReason(output: string): string | undefined {
+  const finalLine = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-1)[0];
+  const match = finalLine?.match(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/i);
+  return match?.[1]?.trim();
+}
 
 type ClaudeResult = {
   type?: string;

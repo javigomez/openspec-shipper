@@ -25,6 +25,7 @@ import {
 import { reconcileDeliveryTask } from "../../domain/delivery/reconcile.js";
 import { phaseDefinition } from "../../domain/delivery/phases/index.js";
 import type { DeliveryEvidence } from "../../domain/delivery/phase.js";
+import { shouldRefreshDeliveryBranch } from "../../domain/delivery/refresh-policy.js";
 import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
 import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import {
@@ -1492,16 +1493,12 @@ async function deliveryBranchRefreshRequired(config: RunnerConfig, branch: strin
     return false;
   }
 
-  if (mergeStateStatus === "DIRTY") {
-    return true;
-  }
-  if (policy === "conflicts-only") {
-    return false;
-  }
-  if (policy === "always") {
-    return mergeStateStatus === "BEHIND";
-  }
-  return mergeStateStatus === "BEHIND" && branchProtectionRequiresCurrentBase(config.projectDir, baseBranch);
+  const needsProtectionCheck = policy === "auto" && mergeStateStatus === "BEHIND";
+  return shouldRefreshDeliveryBranch(
+    policy,
+    mergeStateStatus,
+    needsProtectionCheck && branchProtectionRequiresCurrentBase(config.projectDir, baseBranch),
+  );
 }
 
 function branchProtectionRequiresCurrentBase(projectDir: string, baseBranch: string): boolean {

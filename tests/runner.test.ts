@@ -1275,6 +1275,24 @@ describe("runner", () => {
     expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
   });
 
+  test("moves archive publication to waiting for its archive pull request", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: publish_archive -->\n");
+    const archivePullRequestUrl = "https://github.com/example/project/pull/42";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      finalizeArchive: async () => `Archive pull request: ${archivePullRequestUrl}\n`,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase: waiting_for_archive_merge");
+    expect(queue).toContain(`archive_pr_url: ${archivePullRequestUrl}`);
+    expect(queue).toContain(`reason: Archive PR is ready and waits for a human to merge it: ${archivePullRequestUrl}`);
+    expect(queue).toContain("Merged archive PR? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.");
+  });
+
   test("retries a native phase after the internal repair agent succeeds", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: refresh_branch -->\n");
     let repairedReason = "";

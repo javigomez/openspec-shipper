@@ -73,6 +73,7 @@ describe("CLI parser", () => {
         "init",
         projectDir,
         "--yes",
+        "--no-install",
         "--provider",
         "claude-code",
         "--provider-bin",

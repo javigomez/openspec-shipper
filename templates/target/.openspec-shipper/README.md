@@ -77,7 +77,10 @@ Claude provider prompts and generated sandbox settings live in
 
 Set `executor.claude.sandbox` to `strict` (default), `permissive`, or `off`.
 The latter two produce doctor warnings. Run `openspec-shipper doctor --deep`
-to execute a real Bash sandbox probe; it uses one Claude request.
+to verify the exact production CLI flags, structured output, auth, and sandbox;
+it uses one Claude request. The successful result is cached under
+`.openspec-shipper/tmp/` and preflight reruns it only when the Claude version,
+binary, flags, settings, or workflow change.
 
 ```bash
 npx openspec-shipper doctor
@@ -145,3 +148,8 @@ If a task blocks, fix the cause described in the log, then change `[!]` to
 `[ ]` in `.openspec-shipper/queue.md` and run the queue again. The shipper will
 remove the retry hint under the task and reconcile the correct phase before it
 spends tokens.
+
+`init` normally runs the package manager install after updating `package.json`.
+When initialized with `--no-install`, run `npm install`, `pnpm install`, or
+`bun install` before `doctor`; otherwise the required OpenSpec command probes
+will fail.

@@ -1,10 +1,16 @@
-import { mkdtemp } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { parseQueue } from "../src/domain/queue/queue";
 import { codexCliProvider } from "../src/infrastructure/providers/codex-cli/provider";
-import { claudeCodeProvider, claudeSettingsContent, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
+import {
+  buildClaudeCliArgs,
+  claudeCodeProvider,
+  claudeSettingsContent,
+  parseClaudeResult,
+  verifyClaudeCliContract,
+} from "../src/infrastructure/providers/claude-code/provider";
 import { opencodeProvider } from "../src/infrastructure/providers/opencode/provider";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 
@@ -178,6 +184,7 @@ describe("executor providers", () => {
     expect(command.args).toContain("--json-schema");
     expect(command.args).toContain("--strict-mcp-config");
     expect(command.args.join(" ")).toContain(".openspec-shipper/claude/settings.json");
+    expect(command.args).toEqual(buildClaudeCliArgs(projectDir, config.executor.claude));
     expect(command.stdin).toContain("OpenSpec Shipper Claude Phase: implement");
     expect(command.stdin).toContain("add-name-greeting");
   });
@@ -196,6 +203,45 @@ describe("executor providers", () => {
       allowUnsandboxedCommands: true,
     });
     expect(JSON.parse(claudeSettingsContent("off")).sandbox).toEqual({ enabled: false });
+  });
+
+  test("Claude Code contract probe caches the exact production flag contract", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "shipper-claude-contract-"));
+    const claudeDir = join(projectDir, ".openspec-shipper/claude");
+    const tmpDir = join(projectDir, ".openspec-shipper/tmp");
+    const fakeClaude = join(projectDir, "fake-claude");
+    const counterPath = join(tmpDir, "calls.txt");
+    await mkdir(tmpDir, { recursive: true });
+    await mkdir(claudeDir, { recursive: true });
+    await writeFile(join(claudeDir, "settings.json"), claudeSettingsContent("strict"));
+    await writeFile(join(claudeDir, "workflow.md"), "Contract workflow\n");
+    await writeFile(fakeClaude, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "if (args.includes('--version')) { console.log('2.1.215 (Claude Code)'); process.exit(0); }",
+      "const required = ['--permission-mode', '--settings', '--append-system-prompt-file', '--tools', '--allowedTools', '--strict-mcp-config', '--disable-slash-commands', '--output-format', '--json-schema', '--no-session-persistence', '--model', '--effort'];",
+      "const missing = required.filter((flag) => !args.includes(flag));",
+      "if (missing.length) { console.error('missing flags: ' + missing.join(',')); process.exit(1); }",
+      "const input = fs.readFileSync(0, 'utf8');",
+      "const markerLine = input.split(/\\r?\\n/).find((line) => line.includes('printf contract-ok > '));",
+      "const marker = JSON.parse(markerLine.slice(markerLine.indexOf('>') + 1).trim());",
+      "fs.writeFileSync(marker, 'contract-ok');",
+      `fs.appendFileSync(${JSON.stringify(counterPath)}, 'call\\n');`,
+      "console.log(JSON.stringify({ type: 'result', structured_output: { status: 'completed', summary: 'contract-ok', reason: null } }));",
+      "",
+    ].join("\n"));
+    await chmod(fakeClaude, 0o755);
+    const claude = { ...config.executor.claude, bin: fakeClaude };
+
+    const first = await verifyClaudeCliContract({ projectDir, claude });
+    const second = await verifyClaudeCliContract({ projectDir, claude });
+
+    expect(first.ok).toBe(true);
+    expect(first.cached).toBe(false);
+    expect(second.ok).toBe(true);
+    expect(second.cached).toBe(true);
+    expect((await readFile(counterPath, "utf8")).trim().split("\n")).toHaveLength(1);
   });
 
   test("Claude Code provider detects structured blockers and successful results", () => {

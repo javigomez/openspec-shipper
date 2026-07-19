@@ -54,6 +54,26 @@ describe("target setup", () => {
     expect(packageJson.devDependencies["@fission-ai/openspec"]).toBe("^1.2.0");
   });
 
+  test("can install project dependencies after init", async () => {
+    const harness = await createHarness();
+    const installs: Array<{ projectDir: string; packageManager: string }> = [];
+
+    await installShipperKit({
+      rootDir: harness.rootDir,
+      projectDir: harness.projectDir,
+      profile: "node-npm",
+      installDependencies: true,
+      dependencyInstaller: async (input) => {
+        installs.push(input);
+        await writeFile(join(input.projectDir, "package-lock.json"), "{}\n");
+        return "installed\n";
+      },
+    });
+
+    expect(installs).toEqual([{ projectDir: harness.projectDir, packageManager: "npm" }]);
+    expect(await readFile(join(harness.projectDir, "package-lock.json"), "utf8")).toBe("{}\n");
+  });
+
   test("installs Codex provider assets without installing OpenCode assets", async () => {
     const harness = await createHarness();
 

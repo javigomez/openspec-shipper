@@ -34,9 +34,12 @@ import { providerById } from "../../infrastructure/providers/registry.js";
 import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
 import { codexPromptPath, codexWorkflowPath } from "../../infrastructure/providers/codex-cli/provider.js";
 import {
+  type ClaudeCliOptions,
+  type ClaudeContractResult,
   claudePromptPath,
   claudeSettingsPath,
   claudeWorkflowPath,
+  verifyClaudeCliContract,
 } from "../../infrastructure/providers/claude-code/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
 
@@ -89,6 +92,7 @@ export type RunnerConfig = {
   tasksCompleteDetector?: TasksCompleteDetector;
   worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
   reconcileWorktreeDependencies?: ReconcileWorktreeDependencies;
+  claudeContractVerifier?: ClaudeContractVerifier;
   syncBaseBranch?: SyncBaseBranch;
   prepareWorkspace?: PrepareWorkspace;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
@@ -143,6 +147,7 @@ export type MergedPullRequestDetector = (projectDir: string, branch: string) => 
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type ReconcileWorktreeDependencies = (projectDir: string, changeName: string) => Promise<string>;
+export type ClaudeContractVerifier = (projectDir: string, claude: ClaudeCliOptions) => Promise<ClaudeContractResult>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
 export type SyncBaseBranch = (projectDir: string, baseBranch: string) => Promise<string>;
 export type PrepareWorkspaceInput = {
@@ -640,6 +645,20 @@ async function validateTaskPreflight(
         };
       }
     }
+    const verifier = config.claudeContractVerifier
+      ?? ((projectDir: string, claude: ClaudeCliOptions) => verifyClaudeCliContract({ projectDir, claude }));
+    const contract = await verifier(config.projectDir, configuredClaudeOptions(config)).catch((cause: unknown) => ({
+      ok: false,
+      cached: false,
+      message: cause instanceof Error ? cause.message : String(cause),
+    }));
+    if (!contract.ok) {
+      return {
+        ok: false,
+        commandPath,
+        reason: `CLI contract check failed: ${contract.message}`,
+      };
+    }
     return { ok: true, commandPath };
   }
 
@@ -734,6 +753,9 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
   }
   if (!(await worktreeDependenciesReadyDetector(config.projectDir, task.change))) {
     return `Worktree dependencies are not installed for ${task.change}; return the task to prepare_worktree.`;
+  }
+  if (!(readShipperConfigSync(config.projectDir) ?? defaultShipperConfig()).checks.openspec.trim()) {
+    return "checks.openspec is not configured in .openspec-shipper/config.json; cannot validate OpenSpec before push.";
   }
 
   return undefined;
@@ -1328,19 +1350,23 @@ function buildConfiguredProviderCommand(config: RunnerConfig, task: QueueTask): 
           model: config.codexModel,
           reasoningEffort: config.codexReasoningEffort,
         },
-        claude: {
-          bin: config.claudeBin ?? "claude",
-          model: config.claudeModel,
-          effort: config.claudeEffort,
-          permissionMode: config.claudePermissionMode,
-          maxTurns: config.claudeMaxTurns,
-          maxBudgetUsd: config.claudeMaxBudgetUsd,
-        },
+        claude: configuredClaudeOptions(config),
       },
       opencodePrintLogs: config.opencodePrintLogs,
       opencodeLogLevel: config.opencodeLogLevel,
     },
   });
+}
+
+function configuredClaudeOptions(config: RunnerConfig): ClaudeCliOptions {
+  return {
+    bin: config.claudeBin ?? "claude",
+    model: config.claudeModel,
+    effort: config.claudeEffort,
+    permissionMode: config.claudePermissionMode,
+    maxTurns: config.claudeMaxTurns,
+    maxBudgetUsd: config.claudeMaxBudgetUsd,
+  };
 }
 
 function provider(config: RunnerConfig) {
@@ -1722,7 +1748,7 @@ async function worktreeDependencyInputsReady(worktreeDir: string): Promise<boole
 }
 
 async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<string> {
-  const config = readShipperConfigSync(input.projectDir);
+  const config = readShipperConfigSync(input.projectDir) ?? defaultShipperConfig();
   if (config?.safety.enablePush === false) {
     throw new Error("OpenSpec Shipper push safety is disabled in .openspec-shipper/config.json.");
   }
@@ -1749,11 +1775,12 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
     throw new Error(`Implementation tasks are not complete for ${input.changeName}.`);
   }
 
-  const openspecCommand = config?.checks.openspec;
-  if (openspecCommand) {
-    // prepare_worktree installs dependencies so validation uses this worktree's lockfile, not the parent checkout.
-    messages.push(runShell(input.worktreeDir, `${openspecCommand} validate ${shellQuote(input.changeName)}`, "OpenSpec validation").trim());
+  const openspecCommand = config.checks.openspec.trim();
+  if (!openspecCommand) {
+    throw new Error("checks.openspec is not configured in .openspec-shipper/config.json; cannot validate OpenSpec before push.");
   }
+  // prepare_worktree installs dependencies so validation uses this worktree's lockfile, not the parent checkout.
+  messages.push(runShell(input.worktreeDir, `${openspecCommand} validate ${shellQuote(input.changeName)}`, "OpenSpec validation").trim());
 
   const effectiveBranch = runGit(input.worktreeDir, ["branch", "--show-current"]).trim();
   if (!effectiveBranch) {

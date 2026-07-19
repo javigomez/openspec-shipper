@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -9,6 +10,7 @@ import {
   readShipperConfig,
   type ClaudeSandboxMode,
   type ExecutorProviderId,
+  type PackageManager,
   type ShipperProfile,
 } from "../../domain/config/shipper-config.js";
 import { claudeSettingsContent } from "../../infrastructure/providers/claude-code/provider.js";
@@ -24,6 +26,14 @@ export type SetupConfig = {
   permissionMode?: "dontAsk" | "bypassPermissions";
   claudeSandbox?: ClaudeSandboxMode;
   force?: boolean;
+  installDependencies?: boolean;
+  dependencyInstaller?: DependencyInstaller;
+};
+
+export type DependencyInstaller = (input: DependencyInstallInput) => Promise<string>;
+export type DependencyInstallInput = {
+  projectDir: string;
+  packageManager: PackageManager;
 };
 
 export type InstalledFile = {
@@ -118,8 +128,47 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   installed.push(await ensureShipperGitignore(config, gitignorePath));
 
   installed.push(await updatePackageJson(config));
+  if (config.installDependencies) {
+    const installer = config.dependencyInstaller ?? installProjectDependencies;
+    await installer({ projectDir: config.projectDir, packageManager: shipperConfig.packageManager });
+  }
 
   return installed;
+}
+
+export async function installProjectDependencies(input: DependencyInstallInput): Promise<string> {
+  const args = dependencyInstallArgs(input.packageManager);
+  const command = args[0];
+  if (!command) {
+    throw new Error(`Unsupported package manager: ${input.packageManager}`);
+  }
+  const commandArgs = args.slice(1);
+  const result = spawnSync(command, commandArgs, {
+    cwd: input.projectDir,
+    env: process.env,
+    encoding: "utf8",
+    timeout: 10 * 60_000,
+  });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+  if (result.error) {
+    throw new Error(`Dependency install failed: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`Dependency install failed with ${args.join(" ")}: ${firstLine(output) ?? `exit code ${result.status}`}`);
+  }
+
+  return output || `${args.join(" ")} completed.`;
+}
+
+function dependencyInstallArgs(packageManager: PackageManager): string[] {
+  switch (packageManager) {
+    case "bun":
+      return ["bun", "install"];
+    case "pnpm":
+      return ["pnpm", "install"];
+    case "npm":
+      return ["npm", "install"];
+  }
 }
 
 function applyProviderOptions(
@@ -370,6 +419,10 @@ function defaultDevDependencies(): Record<string, string> {
     "@commitlint/config-conventional": "^21.0.2",
     "@fission-ai/openspec": "^1.2.0",
   };
+}
+
+function firstLine(value: string): string | undefined {
+  return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
 }
 
 function defaultEnvExample(provider: ExecutorProviderId = "opencode"): string {

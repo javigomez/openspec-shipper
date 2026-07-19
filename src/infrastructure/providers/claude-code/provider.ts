@@ -1,10 +1,16 @@
+import { spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DeliverPhase } from "../../../domain/queue/queue.js";
 import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
 import type { ClaudeSandboxMode } from "../../../domain/config/shipper-config.js";
 
-const RESULT_SCHEMA = JSON.stringify({
+export const CLAUDE_MIN_VERSION = "2.1.69";
+export const CLAUDE_MAX_TESTED_VERSION = "2.1.215";
+
+export const CLAUDE_RESULT_SCHEMA = JSON.stringify({
   type: "object",
   properties: {
     status: { type: "string", enum: ["completed", "blocked"] },
@@ -22,44 +28,10 @@ export const claudeCodeProvider: ExecutorProvider = {
   activeProcessNames: ["claude"],
   buildCommand(input: BuildCommandInput) {
     const claude = input.config.executor.claude;
-    const args = [
-      "-p",
-      "--permission-mode",
-      claude.permissionMode ?? "dontAsk",
-      "--settings",
-      claudeSettingsPath(input.projectDir),
-      "--append-system-prompt-file",
-      claudeWorkflowPath(input.projectDir),
-      "--tools",
-      "Bash,Read,Edit,Write,Glob,Grep",
-      "--allowedTools",
-      "Bash,Read,Edit,Write,Glob,Grep",
-      "--strict-mcp-config",
-      "--disable-slash-commands",
-      "--output-format",
-      "json",
-      "--json-schema",
-      RESULT_SCHEMA,
-      "--no-session-persistence",
-    ];
-
-    if (claude.model) {
-      args.push("--model", claude.model);
-    }
-    if (claude.effort) {
-      args.push("--effort", claude.effort);
-    }
-    if (claude.maxTurns) {
-      args.push("--max-turns", String(claude.maxTurns));
-    }
-    if (claude.maxBudgetUsd) {
-      args.push("--max-budget-usd", String(claude.maxBudgetUsd));
-    }
-    args.push("Execute the OpenSpec Shipper phase described in stdin.");
 
     return {
       command: claude.bin,
-      args,
+      args: buildClaudeCliArgs(input.projectDir, claude),
       cwd: input.projectDir,
       stdin: buildClaudePrompt(input),
     };
@@ -91,6 +63,198 @@ export const claudeCodeProvider: ExecutorProvider = {
     return undefined;
   },
 };
+
+export type ClaudeCliOptions = {
+  bin: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+};
+
+export function buildClaudeCliArgs(projectDir: string, claude: ClaudeCliOptions): string[] {
+  const args = [
+    "-p",
+    "--permission-mode",
+    claude.permissionMode ?? "dontAsk",
+    "--settings",
+    claudeSettingsPath(projectDir),
+    "--append-system-prompt-file",
+    claudeWorkflowPath(projectDir),
+    "--tools",
+    "Bash,Read,Edit,Write,Glob,Grep",
+    "--allowedTools",
+    "Bash,Read,Edit,Write,Glob,Grep",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--output-format",
+    "json",
+    "--json-schema",
+    CLAUDE_RESULT_SCHEMA,
+    "--no-session-persistence",
+  ];
+
+  if (claude.model) {
+    args.push("--model", claude.model);
+  }
+  if (claude.effort) {
+    args.push("--effort", claude.effort);
+  }
+  if (claude.maxTurns) {
+    args.push("--max-turns", String(claude.maxTurns));
+  }
+  if (claude.maxBudgetUsd) {
+    args.push("--max-budget-usd", String(claude.maxBudgetUsd));
+  }
+  args.push("Execute the OpenSpec Shipper phase described in stdin.");
+  return args;
+}
+
+export type ClaudeContractResult = {
+  ok: boolean;
+  cached: boolean;
+  message: string;
+  version?: string;
+  fingerprint?: string;
+};
+
+type ClaudeContractCache = {
+  version: 1;
+  fingerprint: string;
+  claudeVersion: string;
+  checkedAt: string;
+};
+
+export async function verifyClaudeCliContract(input: {
+  projectDir: string;
+  claude: ClaudeCliOptions;
+  force?: boolean;
+}): Promise<ClaudeContractResult> {
+  const versionResult = spawnSync(input.claude.bin, ["--version"], {
+    cwd: input.projectDir,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const version = extractClaudeVersion(versionResult.stdout || versionResult.stderr);
+  if (versionResult.error || versionResult.status !== 0 || !version) {
+    return {
+      ok: false,
+      cached: false,
+      message: firstNonEmptyLine(versionResult.stderr || versionResult.stdout)
+        ?? versionResult.error?.message
+        ?? "could not read Claude Code version",
+    };
+  }
+
+  const args = buildClaudeCliArgs(input.projectDir, input.claude);
+  const fingerprint = await claudeContractFingerprint(input.projectDir, input.claude.bin, version, args);
+  const cachePath = claudeContractCachePath(input.projectDir);
+  if (!input.force) {
+    const cache = await readClaudeContractCache(cachePath);
+    if (cache?.fingerprint === fingerprint && cache.claudeVersion === version) {
+      return { ok: true, cached: true, message: `CLI contract already verified for Claude Code ${version}`, version, fingerprint };
+    }
+  }
+
+  const tmpDir = join(input.projectDir, ".openspec-shipper", "tmp");
+  await mkdir(tmpDir, { recursive: true });
+  const marker = join(tmpDir, `claude-contract-${randomUUID()}.txt`);
+  const stdin = [
+    "This is an OpenSpec Shipper CLI contract check, not a project task.",
+    "Use the Bash tool exactly once.",
+    `Run this exact command: printf contract-ok > ${JSON.stringify(marker)}`,
+    "After it succeeds, return status completed, summary contract-ok, and reason null.",
+  ].join("\n");
+  const result = spawnSync(input.claude.bin, args, {
+    cwd: input.projectDir,
+    encoding: "utf8",
+    input: stdin,
+    timeout: 120_000,
+  });
+  const markerContent = await readFile(marker, "utf8").catch(() => undefined);
+  await unlink(marker).catch(() => undefined);
+  const parsed = parseClaudeResult(result.stdout);
+  const completed = parsed?.structured_output?.status === "completed";
+  if (result.error || result.status !== 0 || markerContent !== "contract-ok" || !completed) {
+    const detail = firstNonEmptyLine(result.stderr)
+      ?? parsed?.result
+      ?? firstNonEmptyLine(result.stdout)
+      ?? result.error?.message
+      ?? `Claude exited with code ${result.status}`;
+    return { ok: false, cached: false, message: detail, version, fingerprint };
+  }
+
+  const cache: ClaudeContractCache = {
+    version: 1,
+    fingerprint,
+    claudeVersion: version,
+    checkedAt: new Date().toISOString(),
+  };
+  await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
+  return { ok: true, cached: false, message: `CLI contract verified for Claude Code ${version}`, version, fingerprint };
+}
+
+export function extractClaudeVersion(output: string): string | undefined {
+  return output.match(/(\d+)\.(\d+)\.(\d+)/)?.[0];
+}
+
+export function compareClaudeVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
+}
+
+async function claudeContractFingerprint(
+  projectDir: string,
+  command: string,
+  version: string,
+  args: string[],
+): Promise<string> {
+  const [settings, workflow] = await Promise.all([
+    readFile(claudeSettingsPath(projectDir), "utf8"),
+    readFile(claudeWorkflowPath(projectDir), "utf8"),
+  ]);
+  const executable = resolveExecutable(command, projectDir);
+  return createHash("sha256").update(JSON.stringify({
+    executable,
+    version,
+    args,
+    platform: process.platform,
+    arch: process.arch,
+    settings,
+    workflow,
+  })).digest("hex");
+}
+
+function resolveExecutable(command: string, cwd: string): string {
+  const resolver = process.platform === "win32" ? "where" : "which";
+  const result = spawnSync(resolver, [command], { cwd, encoding: "utf8", timeout: 10_000 });
+  return firstNonEmptyLine(result.stdout) ?? command;
+}
+
+function claudeContractCachePath(projectDir: string): string {
+  return join(projectDir, ".openspec-shipper", "tmp", "claude-contract.json");
+}
+
+async function readClaudeContractCache(path: string): Promise<ClaudeContractCache | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as ClaudeContractCache;
+    return parsed.version === 1 ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function firstNonEmptyLine(value: string): string | undefined {
+  return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+}
 
 function finalOutputSection(output: string, lineCount = 80): string {
   return output

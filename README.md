@@ -172,6 +172,11 @@ npx openspec-shipper init --profile node-npm
 - package scripts and missing dev dependencies
 - `.gitignore` entries for shipper state and worktrees
 
+By default, `init` runs the target package manager install after updating
+`package.json` (`npm install`, `pnpm install`, or `bun install`). Use
+`--no-install` only when you want to install dependencies yourself before
+running `doctor` or the queue.
+
 The installer does not overwrite the target repo's root `README.md`; that file
 belongs to the application. A repo-local usage guide is installed at
 `.openspec-shipper/README.md`.
@@ -188,6 +193,10 @@ once before running the queue:
 gh auth login
 openspec-shipper doctor
 ```
+
+`doctor` treats runner-required checks as errors. It verifies the required
+package scripts and executes the configured OpenSpec probes:
+`checks.openspec --version` and `checks.validateProposal --help`.
 
 ```bash
 git status --short
@@ -387,9 +396,19 @@ Provider assets are installed under `.openspec-shipper/claude/`. Shipper does
 not create or modify `.claude/`, so existing project skills, agents, hooks, and
 settings remain application-owned. Each phase receives an explicit prompt,
 a configurable sandbox, a restricted tool surface, and a structured completion
-contract. `doctor --deep` forces one trivial Bash tool call to verify the selected
-mode on the current machine; this performs one Claude request and may incur a
-small cost.
+contract. `doctor --deep` runs the exact production CLI flag set against a
+trivial structured task that also forces one Bash tool call. This verifies
+authentication, flags, model, effort, output schema, parsing, and sandbox in one
+request, which may incur a small cost.
+
+Successful contract checks are cached in
+`.openspec-shipper/tmp/claude-contract.json`. Before a real Claude phase,
+preflight reuses that result only when the Claude version, resolved binary,
+production arguments, platform, settings, and workflow still match. Otherwise
+it reruns the probe and reports `CLI contract check failed: <Claude error>`
+without starting or charging the real queue task. Versions newer than the
+maximum tested release produce a doctor warning and rely on this probe rather
+than being rejected.
 
 ```json
 {

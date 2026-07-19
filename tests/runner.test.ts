@@ -1282,6 +1282,34 @@ describe("runner", () => {
     expect(queue).toContain("Claude Code provider asset not found");
   });
 
+  test("blocks Claude Code before execution when the CLI contract fails", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
+    await installClaudeTemplates({ rootDir: join(import.meta.dir, ".."), projectDir: harness.rootDir });
+    await writeFile(join(harness.rootDir, ".openspec-shipper/claude/settings.json"), claudeSettingsContent("strict"));
+    let called = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      providerId: "claude-code",
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      claudeContractVerifier: async () => ({
+        ok: false,
+        cached: false,
+        message: "unknown option --json-schema",
+      }),
+      executor: async () => {
+        called = true;
+        return { exitCode: 0, output: "done" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(called).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("CLI contract check failed: unknown option");
+  });
+
   test("blocks ship before execution when git remote origin is missing", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
     let called = false;
@@ -1900,6 +1928,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     pullRequestDetector: async () => undefined,
     worktreeDependenciesReadyDetector: async () => true,
     reconcileWorktreeDependencies: async () => "dependencies already reconciled\n",
+    claudeContractVerifier: async () => ({ ok: true, cached: true, message: "contract cached" }),
     prepareWorkspace: async (input) => `prepared ${input.changeName} at ${input.worktreeDir}\n`,
     finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),

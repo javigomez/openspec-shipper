@@ -41,6 +41,7 @@ export async function runCli(argv: string[]): Promise<void> {
       permissionMode: options.permissionMode,
       claudeSandbox: options.claudeSandbox,
       force: options.force,
+      installDependencies: command !== "update" && !options.noInstall,
     });
     console.log(`Processed ${installed.length} OpenSpec Shipper file(s) for ${projectDir}:`);
     for (const file of installed) {
@@ -54,6 +55,10 @@ export async function runCli(argv: string[]): Promise<void> {
     if (installedConfig?.executor.provider === "claude-code") {
       console.log("  Authenticate Claude Code if this machine is not already authenticated:");
       console.log(`  ${installedConfig.executor.claude.bin} auth login`);
+    }
+    if (command !== "update" && options.noInstall) {
+      console.log("  Install dependencies before running doctor or the queue:");
+      console.log(`  ${dependencyInstallCommand(installedConfig?.packageManager ?? packageManagerFromProfile(options.profile))}`);
     }
     console.log("  Review and commit the installed files on the configured base branch before running the queue.");
     console.log("  Do not commit .openspec-shipper/.env, queue.md, shipper.lock, stop, runs/, tmp/, or worktrees/.");
@@ -137,6 +142,7 @@ function parseTargetOptions(argv: string[]): {
   claudeSandbox?: ClaudeSandboxMode;
   force: boolean;
   yes: boolean;
+  noInstall: boolean;
 } {
   let projectDir: string | undefined;
   let profile: ShipperProfile = "node-npm";
@@ -148,6 +154,7 @@ function parseTargetOptions(argv: string[]): {
   let claudeSandbox: ClaudeSandboxMode | undefined;
   let force = false;
   let yes = false;
+  let noInstall = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -162,6 +169,11 @@ function parseTargetOptions(argv: string[]): {
 
     if (arg === "--yes" || arg === "-y") {
       yes = true;
+      continue;
+    }
+
+    if (arg === "--no-install") {
+      noInstall = true;
       continue;
     }
 
@@ -241,7 +253,7 @@ function parseTargetOptions(argv: string[]): {
     }
   }
 
-  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, force, yes };
+  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, force, yes, noInstall };
 }
 
 function profileForPackageManager(packageManager: PackageManager): ShipperProfile {
@@ -296,6 +308,10 @@ async function promptInitOptions(
           parsed.claudeSandbox ?? "strict",
         ), parsed.claudeSandbox ?? "strict")
       : parsed.claudeSandbox;
+    const installDependencies = parseYesNo(
+      answerOrDefault(await rl.question(`Install dependencies now? yes|no (${parsed.noInstall ? "no" : "yes"}): `), parsed.noInstall ? "no" : "yes"),
+      !parsed.noInstall,
+    );
 
     return {
       ...parsed,
@@ -306,6 +322,7 @@ async function promptInitOptions(
       model,
       effort,
       claudeSandbox,
+      noInstall: !installDependencies,
     };
   } finally {
     rl.close();
@@ -331,6 +348,40 @@ function parseDoctorOptions(argv: string[]): { projectDir?: string; deep: boolea
 
 function parseClaudeEffort(value: string, fallback: string): string {
   return value === "low" || value === "medium" || value === "high" ? value : fallback;
+}
+
+function parseYesNo(value: string, fallback: boolean): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "yes" || normalized === "y") {
+    return true;
+  }
+  if (normalized === "no" || normalized === "n") {
+    return false;
+  }
+  return fallback;
+}
+
+function packageManagerFromProfile(profile: ShipperProfile): PackageManager {
+  switch (profile) {
+    case "node-pnpm":
+      return "pnpm";
+    case "bun":
+      return "bun";
+    case "generic":
+    case "node-npm":
+      return "npm";
+  }
+}
+
+function dependencyInstallCommand(packageManager: PackageManager): string {
+  switch (packageManager) {
+    case "bun":
+      return "bun install";
+    case "pnpm":
+      return "pnpm install";
+    case "npm":
+      return "npm install";
+  }
 }
 
 function answerOrDefault(answer: string, fallback: string): string {

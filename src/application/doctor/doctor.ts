@@ -1,11 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, unlink } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import { readShipperConfig, type ClaudeSandboxMode, type ShipperConfig } from "../../domain/config/shipper-config.js";
-import { claudeSettingsContent, claudeSettingsPath } from "../../infrastructure/providers/claude-code/provider.js";
+import {
+  CLAUDE_MAX_TESTED_VERSION,
+  CLAUDE_MIN_VERSION,
+  claudeSettingsContent,
+  claudeSettingsPath,
+  compareClaudeVersions,
+  extractClaudeVersion,
+  verifyClaudeCliContract,
+} from "../../infrastructure/providers/claude-code/provider.js";
 
 export type DoctorCheck = {
   name: string;
@@ -35,12 +42,12 @@ const REQUIRED_CLAUDE_ASSETS = [
 const REQUIRED_PACKAGE_SCRIPTS = [
   "openspec:cli",
   "openspec:validate-proposal",
-  "lint:branch",
 ];
+const OPTIONAL_PACKAGE_SCRIPTS = ["lint:branch"];
 
 export type DoctorOptions = {
   deep?: boolean;
-  claudeSandboxProbe?: (projectDir: string, config: ShipperConfig) => Promise<DoctorCheck>;
+  claudeContractProbe?: (projectDir: string, config: ShipperConfig) => Promise<DoctorCheck>;
 };
 
 export async function runDoctor(projectDir: string, options: DoctorOptions = {}): Promise<DoctorCheck[]> {
@@ -81,22 +88,20 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
 
   if (config?.executor.provider === "claude-code") {
     if (!options.deep) {
-      checks.push(warning("claude sandbox probe", "Runtime sandbox probe not run; use `openspec-shipper doctor --deep` to verify it (uses one Claude request)"));
+      checks.push(warning("claude CLI contract", "CLI contract probe not run; use `openspec-shipper doctor --deep` to verify production flags, auth, structured output, and sandbox (uses one Claude request)"));
     } else if (checks.some((check) => isClaudeProbeBlocker(check, config))) {
-      checks.push(warning("claude sandbox probe", "Runtime probe skipped until the preceding Claude configuration errors are fixed"));
+      checks.push(warning("claude CLI contract", "CLI contract probe skipped until the preceding Claude configuration errors are fixed"));
     } else {
-      checks.push(await (options.claudeSandboxProbe ?? probeClaudeSandbox)(projectDir, config));
+      checks.push(await (options.claudeContractProbe ?? probeClaudeCliContract)(projectDir, config));
     }
   }
 
   if (packageJson) {
-    for (const script of REQUIRED_PACKAGE_SCRIPTS) {
-      checks.push(
-        packageJson.scripts?.[script]
-          ? ok(`script:${script}`, `package script ${script} found`)
-          : warning(`script:${script}`, `package script ${script} missing; configure .openspec-shipper/config.json if your repo uses another command`),
-      );
-    }
+    checks.push(...checkPackageScripts(packageJson));
+  }
+
+  if (config) {
+    checks.push(...checkRequiredConfiguredCommands(projectDir, config));
   }
 
   checks.push(
@@ -106,6 +111,72 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
   );
 
   return checks;
+}
+
+function checkPackageScripts(packageJson: { scripts?: Record<string, string> }): DoctorCheck[] {
+  return [
+    ...REQUIRED_PACKAGE_SCRIPTS.map((script) =>
+      packageJson.scripts?.[script]
+        ? ok(`script:${script}`, `package script ${script} found`)
+        : error(`script:${script}`, `package script ${script} is required by the default OpenSpec Shipper checks`),
+    ),
+    ...OPTIONAL_PACKAGE_SCRIPTS.map((script) =>
+      packageJson.scripts?.[script]
+        ? ok(`script:${script}`, `package script ${script} found`)
+        : warning(`script:${script}`, `package script ${script} missing; branch-name validation may be unavailable`),
+    ),
+  ];
+}
+
+function checkRequiredConfiguredCommands(projectDir: string, config: ShipperConfig): DoctorCheck[] {
+  return [
+    checkConfiguredCommand(
+      "checks.openspec",
+      config.checks.openspec,
+      "--version",
+      projectDir,
+      "Configured OpenSpec command works",
+      "OpenSpec validation is required before push",
+    ),
+    checkConfiguredCommand(
+      "checks.validateProposal",
+      config.checks.validateProposal,
+      "--help",
+      projectDir,
+      "Configured proposal validation command works",
+      "Proposal validation is required by the installed OpenSpec workflow",
+    ),
+  ];
+}
+
+function checkConfiguredCommand(
+  name: string,
+  command: string | undefined,
+  probeArg: string,
+  cwd: string,
+  successMessage: string,
+  missingMessage: string,
+): DoctorCheck {
+  const trimmed = command?.trim();
+  if (!trimmed) {
+    return error(name, `${missingMessage}; configure ${name} in .openspec-shipper/config.json`);
+  }
+
+  const probe = `${trimmed} ${shellQuote(probeArg)}`;
+  const result = spawnSync(probe, {
+    cwd,
+    shell: true,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  if (result.error) {
+    return error(name, result.error.message);
+  }
+  if (result.status !== 0) {
+    return error(name, firstLine(result.stderr || result.stdout) ?? `${probe} exited with code ${result.status}`);
+  }
+
+  return ok(name, successMessage);
 }
 
 function isClaudeProbeBlocker(check: DoctorCheck, config: ShipperConfig): boolean {
@@ -166,27 +237,24 @@ function checkClaudeConfig(config: ShipperConfig): DoctorCheck {
 
 function checkClaudeVersion(command: string, cwd: string): DoctorCheck {
   const result = spawnSync(command, ["--version"], { cwd, encoding: "utf8", timeout: 10_000 });
-  if (result.error) {
-    return error(command, result.error.message);
-  }
-  if (result.status !== 0) {
-    return error(command, firstLine(result.stderr || result.stdout) ?? `exited with code ${result.status}`);
-  }
-  const version = (result.stdout || result.stderr).match(/(\d+)\.(\d+)\.(\d+)/);
-  if (version && compareVersion(version.slice(1).map(Number) as [number, number, number], [2, 1, 69]) < 0) {
-    return error(command, `Claude Code ${version[0]} is too old; version 2.1.69 or newer is required`);
-  }
-  return ok(command, version ? `Claude Code ${version[0]} is available` : "Claude Code CLI is available");
+  return claudeVersionCheck(command, result.status, result.stdout || result.stderr, result.error);
 }
 
-function compareVersion(left: [number, number, number], right: [number, number, number]): number {
-  for (let index = 0; index < left.length; index += 1) {
-    const difference = left[index]! - right[index]!;
-    if (difference !== 0) {
-      return difference;
-    }
+export function claudeVersionCheck(command: string, status: number | null, output: string, processError?: Error): DoctorCheck {
+  if (processError) {
+    return error(command, processError.message);
   }
-  return 0;
+  if (status !== 0) {
+    return error(command, firstLine(output) ?? `exited with code ${status}`);
+  }
+  const version = extractClaudeVersion(output);
+  if (version && compareClaudeVersions(version, CLAUDE_MIN_VERSION) < 0) {
+    return error(command, `Claude Code ${version} is too old; version ${CLAUDE_MIN_VERSION} or newer is required`);
+  }
+  if (version && compareClaudeVersions(version, CLAUDE_MAX_TESTED_VERSION) > 0) {
+    return warning(command, `Claude Code ${version} is newer than the tested maximum ${CLAUDE_MAX_TESTED_VERSION}; run the CLI contract probe`);
+  }
+  return ok(command, version ? `Claude Code ${version} is within the tested range` : "Claude Code CLI is available");
 }
 
 async function checkProviderAssets(projectDir: string, config: ShipperConfig | undefined): Promise<DoctorCheck[]> {
@@ -240,41 +308,15 @@ async function checkClaudeSettings(projectDir: string, mode: ClaudeSandboxMode):
   }
 }
 
-async function probeClaudeSandbox(projectDir: string, config: ShipperConfig): Promise<DoctorCheck> {
-  const mode = config.executor.claude.sandbox;
-  const tmpDir = join(projectDir, ".openspec-shipper", "tmp");
-  await mkdir(tmpDir, { recursive: true });
-  const marker = join(tmpDir, `claude-sandbox-probe-${randomUUID()}.txt`);
-  const prompt = [
-    "Use the Bash tool exactly once.",
-    `Run this exact command: printf sandbox-ok > ${JSON.stringify(marker)}`,
-    "Do not merely describe the command. After Bash succeeds, answer only: ok",
-  ].join("\n");
-  const result = spawnSync(config.executor.claude.bin, [
-    "-p",
-    "--permission-mode", config.executor.claude.permissionMode ?? "dontAsk",
-    "--settings", claudeSettingsPath(projectDir),
-    "--tools", "Bash",
-    "--allowedTools", "Bash",
-    "--max-turns", "2",
-    "--max-budget-usd", "0.10",
-    "--output-format", "json",
-    "--no-session-persistence",
-    prompt,
-  ], {
-    cwd: projectDir,
-    encoding: "utf8",
-    timeout: 120_000,
+async function probeClaudeCliContract(projectDir: string, config: ShipperConfig): Promise<DoctorCheck> {
+  const result = await verifyClaudeCliContract({
+    projectDir,
+    claude: config.executor.claude,
+    force: true,
   });
-
-  const markerContent = await readFile(marker, "utf8").catch(() => undefined);
-  await unlink(marker).catch(() => undefined);
-  if (result.error || result.status !== 0 || markerContent !== "sandbox-ok") {
-    const detail = result.error?.message ?? firstLine(result.stderr || result.stdout) ?? "Claude did not execute the sandboxed Bash probe";
-    return error("claude sandbox probe", `${mode} execution probe failed: ${detail}`);
-  }
-
-  return ok("claude sandbox probe", `Claude Bash execution probe passed in ${mode} mode`);
+  return result.ok
+    ? ok("claude CLI contract", result.message)
+    : error("claude CLI contract", `CLI contract check failed: ${result.message}`);
 }
 
 function asWarning(check: DoctorCheck): DoctorCheck {
@@ -481,6 +523,10 @@ function parseGitHubRepository(remoteUrl: string): { owner: string; repo: string
 
 function packageManagerCommand(config: ShipperConfig | undefined): string {
   return config?.packageManager ?? "npm";
+}
+
+function shellQuote(value: string): string {
+  return /^[a-zA-Z0-9_./:=@-]+$/.test(value) ? value : JSON.stringify(value);
 }
 
 async function readPackageJson(projectDir: string): Promise<{ scripts?: Record<string, string> } | undefined> {

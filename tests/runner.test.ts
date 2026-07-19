@@ -3,11 +3,11 @@ import { access, mkdir, mkdtemp, readFile, readdir, realpath, utimes, writeFile 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { cleanupWorkspace, defaultConfig, detectMainSyncStatus, prepareWorkspace, reconcileWorktreeDependencies, runQueue, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
+import { cleanupWorkspace, defaultConfig, detectMainSyncStatus, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
-import { claudeSettingsContent } from "../src/infrastructure/providers/claude-code/provider";
+import { claudeSettingsContent, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -1006,6 +1006,47 @@ describe("runner", () => {
       models: "5",
       days: undefined,
     });
+  });
+
+  test("spawnExecutor keeps runner heartbeats out of machine-readable output", async () => {
+    const harness = await createHarness("");
+    const logPath = join(harness.config.stateDir, "runs/heartbeat-json.log");
+    const script = [
+      "process.stdout.write('{\"type\":\"result\",');",
+      "setTimeout(() => process.stdout.write('\"structured_output\":{\"status\":\"completed\",\"summary\":\"Done\",\"reason\":null}}'), 40);",
+      "setTimeout(() => process.exit(0), 80);",
+    ].join("");
+    const stdoutWrite = process.stdout.write;
+    const stderrWrite = process.stderr.write;
+    let terminalOutput = "";
+    process.stdout.write = ((chunk: string | Uint8Array, ..._args: unknown[]) => {
+      terminalOutput += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    process.stderr.write = ((chunk: string | Uint8Array, ..._args: unknown[]) => {
+      terminalOutput += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    let result: Awaited<ReturnType<typeof spawnExecutor>>;
+    try {
+      result = await spawnExecutor(process.execPath, ["-e", script], {
+        cwd: harness.rootDir,
+        logPath,
+        timeoutMs: 1_000,
+        heartbeatMs: 10,
+      });
+    } finally {
+      process.stdout.write = stdoutWrite;
+      process.stderr.write = stderrWrite;
+    }
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("{\"type\":\"result\",\"structured_output\":{\"status\":\"completed\",\"summary\":\"Done\",\"reason\":null}}");
+    expect(result.output).not.toContain("still running");
+    expect(parseClaudeResult(result.output)?.structured_output?.status).toBe("completed");
+    expect(terminalOutput).toContain("still running");
+    expect(await readFile(logPath, "utf8")).toContain("still running");
   });
 
   test("marks the first pending task blocked on non-zero exit", async () => {

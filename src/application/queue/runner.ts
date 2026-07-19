@@ -126,6 +126,7 @@ type StatsOptions = {
 export type ExecutorResult = {
   exitCode: number | null;
   output: string;
+  failureReason?: string;
 };
 
 export type ProcessDetector = () => Promise<string[]>;
@@ -783,9 +784,10 @@ async function executeTask(
     heartbeatMs: config.heartbeatMs,
     stdin: providerCommand.stdin,
     stats: buildStatsOptions(config),
-  }).catch((error: unknown) => ({
+  }).catch((error: unknown): ExecutorResult => ({
     exitCode: null,
-    output: error instanceof Error ? error.message : String(error),
+    output: "",
+    failureReason: error instanceof Error ? error.message : String(error),
   }));
 
   const failureSignal = provider(config).detectFailureSignal(result.output);
@@ -883,7 +885,7 @@ async function executeTask(
   }
 
   const reason =
-    failureSignal ?? (result.exitCode === null ? result.output : `command exited with code ${result.exitCode}`);
+    failureSignal ?? result.failureReason ?? (result.exitCode === null ? result.output : `command exited with code ${result.exitCode}`);
   const nextContent = markTask(lines, task, "blocked", {
     timestamp: (config.now?.() ?? new Date()).toISOString(),
     reason,
@@ -1366,6 +1368,7 @@ export async function spawnExecutor(
     activeChildProcess = child;
     const log = createWriteStream(options.logPath, { flags: "a" });
     let output = "";
+    let failureReason: string | undefined;
     let forceKillTimeout: Timer | undefined;
     let heartbeat: Timer | undefined;
     const startedAt = Date.now();
@@ -1387,7 +1390,7 @@ export async function spawnExecutor(
       }
 
       const message = `\nOpenSpec Shipper task timed out after ${formatDuration(options.timeoutMs)}; terminating executor.\n`;
-      output = capOutput(`${output}${message}`);
+      failureReason = message.trim();
       process.stderr.write(message);
       log.write(message);
       terminateChild(child, "SIGTERM");
@@ -1417,7 +1420,6 @@ export async function spawnExecutor(
             lastStatsError = next.lastStatsError;
           },
         })}\n`;
-        output = capOutput(`${output}${message}`);
         process.stderr.write(message);
         log.write(message);
       }, options.heartbeatMs);
@@ -1449,7 +1451,7 @@ export async function spawnExecutor(
       if (activeChildProcess === child) {
         activeChildProcess = undefined;
       }
-      resolve({ exitCode, output });
+      resolve({ exitCode, output, failureReason });
     });
   });
 }

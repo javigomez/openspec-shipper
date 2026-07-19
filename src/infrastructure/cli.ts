@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
 import { printDoctorReport, runDoctor } from "../application/doctor/doctor.js";
-import { isShipperProfile, readShipperConfig, type ClaudeSandboxMode, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
+import { isShipperProfile, readShipperConfig, type ArchivePublishMode, type ClaudeSandboxMode, type DeliveryRefreshPolicy, type ExecutorProviderId, type PackageManager, type ShipperProfile } from "../domain/config/shipper-config.js";
 import { defaultConfig, runQueue, type RunnerMode } from "../application/queue/runner.js";
 import { installShipperKit } from "../application/init/setup.js";
 import { loadShipperEnv, type ShipperCliFlags } from "./env/load-shipper-env.js";
@@ -40,6 +40,8 @@ export async function runCli(argv: string[]): Promise<void> {
       effort: options.effort,
       permissionMode: options.permissionMode,
       claudeSandbox: options.claudeSandbox,
+      archivePublishMode: options.archivePublishMode,
+      refreshPolicy: options.refreshPolicy,
       force: options.force,
       installDependencies: command !== "update" && !options.noInstall,
     });
@@ -140,6 +142,8 @@ function parseTargetOptions(argv: string[]): {
   effort?: string;
   permissionMode?: "dontAsk" | "bypassPermissions";
   claudeSandbox?: ClaudeSandboxMode;
+  archivePublishMode?: ArchivePublishMode;
+  refreshPolicy?: DeliveryRefreshPolicy;
   force: boolean;
   yes: boolean;
   noInstall: boolean;
@@ -152,6 +156,8 @@ function parseTargetOptions(argv: string[]): {
   let effort: string | undefined;
   let permissionMode: "dontAsk" | "bypassPermissions" | undefined;
   let claudeSandbox: ClaudeSandboxMode | undefined;
+  let archivePublishMode: ArchivePublishMode | undefined;
+  let refreshPolicy: DeliveryRefreshPolicy | undefined;
   let force = false;
   let yes = false;
   let noInstall = false;
@@ -226,6 +232,26 @@ function parseTargetOptions(argv: string[]): {
       throw new Error("Expected --claude-sandbox to be one of strict, permissive, off.");
     }
 
+    if (arg === "--archive-publish") {
+      const next = argv[index + 1];
+      if (next === "direct" || next === "pull-request") {
+        archivePublishMode = next;
+        index += 1;
+        continue;
+      }
+      throw new Error("Expected --archive-publish to be direct or pull-request.");
+    }
+
+    if (arg === "--refresh-policy") {
+      const next = argv[index + 1];
+      if (next === "auto" || next === "always" || next === "conflicts-only" || next === "never") {
+        refreshPolicy = next;
+        index += 1;
+        continue;
+      }
+      throw new Error("Expected --refresh-policy to be auto, always, conflicts-only, or never.");
+    }
+
     if (arg === "--package-manager") {
       const next = argv[index + 1];
       if (next === "npm" || next === "pnpm" || next === "bun") {
@@ -253,7 +279,7 @@ function parseTargetOptions(argv: string[]): {
     }
   }
 
-  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, force, yes, noInstall };
+  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, archivePublishMode, refreshPolicy, force, yes, noInstall };
 }
 
 function profileForPackageManager(packageManager: PackageManager): ShipperProfile {
@@ -308,6 +334,20 @@ async function promptInitOptions(
           parsed.claudeSandbox ?? "strict",
         ), parsed.claudeSandbox ?? "strict")
       : parsed.claudeSandbox;
+    const archivePublishMode = parseArchivePublishMode(
+      answerOrDefault(
+        await rl.question(`Archive publication direct|pull-request (${parsed.archivePublishMode ?? "direct"}): `),
+        parsed.archivePublishMode ?? "direct",
+      ),
+      parsed.archivePublishMode ?? "direct",
+    );
+    const refreshPolicy = parseRefreshPolicy(
+      answerOrDefault(
+        await rl.question(`Delivery refresh auto|always|conflicts-only|never (${parsed.refreshPolicy ?? "auto"}): `),
+        parsed.refreshPolicy ?? "auto",
+      ),
+      parsed.refreshPolicy ?? "auto",
+    );
     const installDependencies = parseYesNo(
       answerOrDefault(await rl.question(`Install dependencies now? yes|no (${parsed.noInstall ? "no" : "yes"}): `), parsed.noInstall ? "no" : "yes"),
       !parsed.noInstall,
@@ -322,11 +362,23 @@ async function promptInitOptions(
       model,
       effort,
       claudeSandbox,
+      archivePublishMode,
+      refreshPolicy,
       noInstall: !installDependencies,
     };
   } finally {
     rl.close();
   }
+}
+
+function parseRefreshPolicy(value: string, fallback: DeliveryRefreshPolicy): DeliveryRefreshPolicy {
+  return value === "auto" || value === "always" || value === "conflicts-only" || value === "never"
+    ? value
+    : fallback;
+}
+
+function parseArchivePublishMode(value: string, fallback: ArchivePublishMode): ArchivePublishMode {
+  return value === "direct" || value === "pull-request" ? value : fallback;
 }
 
 function parseClaudeSandbox(value: string, fallback: ClaudeSandboxMode): ClaudeSandboxMode {

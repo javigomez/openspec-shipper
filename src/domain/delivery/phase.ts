@@ -19,6 +19,7 @@ export type DeliveryEvidence = {
   archivePublished?: boolean;
   hasOpenArchivePullRequest?: boolean;
   hasMergedArchivePullRequest?: boolean;
+  archivePullRequestUrl?: string;
 };
 
 export type PhaseDecision =

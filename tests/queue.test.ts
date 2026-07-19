@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   advanceDeliverTask,
   BLOCKED_TASK_RETRY_HINT,
+  WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT,
   buildOpenCodeArgs,
   detectFailureSignal,
   deliverPhase,
@@ -242,6 +243,20 @@ describe("queue parser", () => {
     expect(next).not.toContain(BLOCKED_TASK_RETRY_HINT);
     expect(next).toContain("- [ ] deliver add-name-greeting");
     expect(next).toContain("- [ ] deliver add-spanish-greeting");
+  });
+
+  test("uses and removes the archive PR retry hint", () => {
+    const result = parseQueue("- [ ] deliver add-name-greeting <!-- phase: waiting_for_archive_merge -->\n");
+    const blocked = markTask(result.lines, result.tasks[0]!, "blocked", {
+      timestamp: "2026-07-19T12:00:00.000Z",
+      reason: "Archive PR is ready",
+      pullRequestUrl: "https://github.com/example/demo/pull/2",
+    });
+
+    expect(blocked).toContain(WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT);
+    expect(blocked).toContain("[PR](https://github.com/example/demo/pull/2)");
+    const manuallyUnblocked = blocked.replace("- [!]", "- [ ]");
+    expect(removeRetryHintsForUnblockedTasks(manuallyUnblocked)).not.toContain(WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT);
   });
 
   test("finds the first runnable task after waiting dependencies", () => {

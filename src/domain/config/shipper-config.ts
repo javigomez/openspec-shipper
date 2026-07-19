@@ -201,6 +201,7 @@ function migrateConfig(config: Partial<ShipperConfig>): ShipperConfig {
   return {
     ...defaults,
     ...config,
+    version: 2,
     executor: {
       ...defaults.executor,
       ...(config.executor ?? {}),

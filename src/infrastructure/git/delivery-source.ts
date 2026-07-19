@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { QueueTask } from "../../domain/queue/queue.js";
 
 export type DeliverySource = {
@@ -45,6 +45,15 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
   const baseRef = `origin/${baseBranch}`;
   const baseHasChange = changeExistsAtRef(projectDir, baseRef, changePath);
   const candidates = sourceBranchCandidates(projectDir, task.change, baseRef, changePath);
+  if (
+    changeExistsAtRef(projectDir, baseBranch, changePath)
+    && hasChangeCommitsAfterBase(projectDir, baseRef, baseBranch, changePath)
+  ) {
+    const commit = resolveCommit(projectDir, baseBranch);
+    if (!candidates.some((candidate) => candidate.commit === commit)) {
+      candidates.push({ branch: baseBranch, commit });
+    }
+  }
 
   if (baseHasChange) {
     const newerCandidates = candidates.filter((candidate) => hasChangeCommitsAfterBase(projectDir, baseRef, candidate.branch, changePath));
@@ -67,6 +76,7 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
   }
 
   const worktreeCandidates = listedWorktrees(projectDir)
+    .filter((worktree) => resolve(worktree.path) !== resolve(projectDir))
     .filter((worktree) => existsSync(join(worktree.path, changePath)))
     .filter((worktree) => !worktree.path.endsWith(`/worktrees/${task.change}`));
   if (worktreeCandidates.length === 1) {
@@ -76,7 +86,7 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
       kind: "worktree",
       commit: resolveCommit(candidate!.path, "HEAD"),
       branch: candidate!.branch,
-      worktree: candidate!.path,
+      worktree: relative(projectDir, candidate!.path),
     };
   }
   if (worktreeCandidates.length > 1) {

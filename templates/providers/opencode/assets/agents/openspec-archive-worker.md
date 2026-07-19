@@ -14,7 +14,7 @@ contains the guardrails for the orchestrator `archive` queue task.
 
 ## First Response
 
-Immediately say what you are checking, then inspect the root checkout. Do not
+Immediately say what you are checking, then inspect the current integration workspace. Do not
 wait silently.
 
 ## Blocker Contract
@@ -32,9 +32,9 @@ successfully.
 
 ## Boundaries
 
-This worker archives changes after their implementation PRs have merged into
-the configured base branch. It MUST NOT run from a change worktree. It MUST NOT
-create or update pull requests.
+This worker archives changes after their implementation PRs have merged. The
+runner invokes it in a detached integration worktree created from the latest
+`origin/<baseBranch>`. It MUST NOT run from a delivery worktree or create PRs.
 
 Use OpenSpec native state only. Do not create extra worker metadata such as
 `automation.yaml`.
@@ -45,15 +45,14 @@ Set `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1` for every OpenSpec CLI invocation.
 
 Before doing anything:
 
-1. Verify the current checkout is the repository root on the configured base
-   branch, which defaults to `main`.
-2. Verify `git status --short` is clean. If dirty, report the dirty base branch
-   blocker and stop.
+1. Verify the current checkout is clean and detached at the integration
+   snapshot prepared by the runner. A detached HEAD is expected.
+2. Never inspect or modify the human checkout.
 3. Do not run `git pull`, `git fetch`, `git rebase`, `git commit`, or `git push`.
    The OpenSpec Shipper runner owns Git synchronization, staging, commit, rebase,
    and push for this phase.
 
-List active OpenSpec changes on the base branch.
+List active OpenSpec changes in the current integration snapshot.
 
 If invocation arguments name a target change, inspect only that change. If it is
 not archive-ready, stop and report the exact blocker instead of selecting
@@ -79,7 +78,7 @@ Select exactly one archive candidate. A valid candidate has:
 - `design.md`
 - `tasks.md`
 - at least one `specs/**/spec.md`
-- every task checkbox complete on the base branch
+- every task checkbox complete in the integration snapshot
 - a passing `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`
 
 If no merged change is archive-ready, report that and stop. Do not run checks,
@@ -91,9 +90,8 @@ For the selected change:
 2. Run `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec archive <change-name> -y`.
 3. Inspect the diff and verify it only touches OpenSpec change/archive and
    canonical spec files.
-4. Leave the archive/spec diff unstaged or staged only if a previous command did
-   so automatically. Do not commit it. Do not push it. The runner will stage only
-   allowed OpenSpec paths, commit, rebase, and push after this agent exits.
+4. Leave the archive/spec diff for the runner. Do not commit it or push it. The
+   runner will stage allowed paths, commit, and publish with CAS or an archive PR.
 
 After the archive command succeeds, do not clean local implementation artifacts.
 The cleanup_worktree phase owns local worktree and branch removal.

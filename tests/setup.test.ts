@@ -24,6 +24,9 @@ describe("target setup", () => {
     expect(shipperConfig.profile).toBe("node-npm");
     expect(shipperConfig.safety).toEqual({ enablePush: true, enableArchive: true });
     expect(shipperConfig.worktree).toEqual({ install: true, installTimeoutMs: 600000 });
+    expect(shipperConfig.version).toBe(2);
+    expect(shipperConfig.delivery).toEqual({ refreshPolicy: "auto" });
+    expect(shipperConfig.archive).toEqual({ publishMode: "direct", maxAttempts: 3 });
     expect(shipperConfig.github.autoOpenPr).toBe(false);
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
     const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");
@@ -44,6 +47,7 @@ describe("target setup", () => {
       ".openspec-shipper/stop",
       ".openspec-shipper/runs/",
       ".openspec-shipper/tmp/",
+      ".openspec-shipper/workspaces/",
       "worktrees/",
       "",
     ].join("\n"));
@@ -199,6 +203,7 @@ describe("target setup", () => {
       ".openspec-shipper/stop",
       ".openspec-shipper/runs/",
       ".openspec-shipper/tmp/",
+      ".openspec-shipper/workspaces/",
       "",
     ].join("\n"));
   });

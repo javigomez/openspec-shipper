@@ -1,169 +1,110 @@
 # OpenSpec Shipper
 
-This repository has OpenSpec Shipper installed. OpenSpec Shipper runs an
-OpenSpec delivery queue through an AI executor, using provider assets installed
-in this repo.
-
-## Installed Files
-
-The installer created or updated these project assets:
-
-- `.openspec-shipper/config.json`
-- `.openspec-shipper/.env.example`
-- `.openspec-shipper/queue.md`
-- `.openspec-shipper/queue.example.md`
-- `.openspec-shipper/openspec-config.example.yaml`
-- `.openspec-shipper/scripts/`
-- provider assets:
-  - OpenCode: `.opencode/commands`, `.opencode/agents`, `.opencode/rules`
-  - Codex CLI: `.openspec-shipper/codex/`
-  - Claude Code: `.openspec-shipper/claude/`
-- `package.json`
-- `.gitignore`
+This repository has OpenSpec Shipper installed. It turns committed OpenSpec
+changes into isolated implementation worktrees, pull requests, canonical specs,
+and cleaned local state without taking over the human checkout.
 
 ## Required After Init
 
-Review and commit the installed project assets on the configured base branch
-(`main` by default) before running the queue. The native `prepare_worktree`
-phase creates feature worktrees from `HEAD`; if the base branch is
-dirty after `init`, the new worktree would miss the freshly installed scripts,
-provider commands, and package changes.
-
-`openspec-shipper doctor` checks this and fails when the base branch checkout
-has non-runtime changes. Ignored runtime files such as
-`.openspec-shipper/queue.md`, logs, lock files, and `worktrees/` are allowed.
-
-Local queue state remains ignored and should not be committed:
-
-- `.openspec-shipper/.env`
-- `.openspec-shipper/queue.md`
-- `.openspec-shipper/shipper.lock`
-- `.openspec-shipper/stop`
-- `.openspec-shipper/runs/`
-- `.openspec-shipper/tmp/`
-- `worktrees/`
-
-The queue lock contains its PID, hostname, owner ID, and a live heartbeat. If a
-runner crashes, the next invocation automatically recovers a stale lock when
-its local PID is no longer running. Do not delete a lock whose PID is alive.
-
-Suggested commit:
+Review and commit the installed project assets. They must be available from the
+repository's remote base before delivery starts:
 
 ```bash
 git status --short
 git add <reviewed installed files>
 git commit -m "chore: install openspec shipper"
+git push
 ```
 
-## Check The Installation
-
-OpenSpec Shipper requires GitHub CLI for pull request creation and PR state
-reconciliation:
+Authenticate GitHub CLI and check the installation:
 
 ```bash
 gh auth login
-gh auth status
-```
-
-The runner uses `gh` to create the PR after pushing the implementation branch
-and to detect when that PR has merged.
-
-When `executor.provider` is `claude-code`, authenticate Claude Code as well:
-
-```bash
-claude auth login
-claude auth status
-```
-
-Claude provider prompts and generated sandbox settings live in
-`.openspec-shipper/claude/`. OpenSpec Shipper does not modify the project's
-`.claude/` directory.
-
-Set `executor.claude.sandbox` to `strict` (default), `permissive`, or `off`.
-The latter two produce doctor warnings. Run `openspec-shipper doctor --deep`
-to verify the exact production CLI flags, structured output, auth, and sandbox;
-it uses one Claude request. The successful result is cached under
-`.openspec-shipper/tmp/` and preflight reruns it only when the Claude version,
-binary, flags, settings, or workflow change.
-
-```bash
 npx openspec-shipper doctor
 ```
 
-Archive finalization currently pushes directly to the configured `baseBranch`.
-Doctor reports an error when GitHub marks that branch as protected because
-PR-based archive finalization is not supported yet.
+`init` installs dependencies by default. If it was run with `--no-install`, run
+the selected package manager before `doctor`.
 
-## Add Changes To The Queue
+## Human Handoff
 
-Add one or more active OpenSpec changes:
-
-```bash
-npx openspec-shipper queue add add-name-greeting
-npx openspec-shipper queue add add-spanish-greeting --depends-on add-name-greeting
-npx openspec-shipper queue add add-shouting-greeting --depends-on add-spanish-greeting
-```
-
-Or edit `.openspec-shipper/queue.md` directly:
+Create and validate a change on main, an ordinary branch, or a worktree. Commit
+the complete planning snapshot, then edit the queue directly:
 
 ```md
 - [ ] deliver add-name-greeting
 - [ ] deliver add-spanish-greeting <!-- depends_on: add-name-greeting -->
-- [ ] deliver add-shouting-greeting <!-- depends_on: add-spanish-greeting -->
 ```
 
-## Run Conservatively
+The equivalent convenience command is:
+
+```bash
+npx openspec-shipper queue add add-name-greeting
+```
+
+The pending markdown line is the handoff. Shipper resolves the committed source
+once and records its immutable `source_commit` in that same task. The human
+checkout may then stay on any branch and may contain unrelated planning work;
+delivery phases never switch, stash, reset, clean, or commit it.
+
+## Delivery Flow
+
+```text
+prepare_worktree -> implement -> refresh_branch -> push -> waiting_for_merge
+-> archive -> publish_archive -> [waiting_for_archive_merge] -> cleanup_worktree
+```
+
+- `prepare_worktree` creates `worktrees/<change>` from the remote base, adopts
+  the committed planning snapshot, and runs `checks.install` when required.
+- `implement` is the intelligent coding phase.
+- `refresh_branch` integrates the current remote base before first push, and
+  refreshes open PRs only when conflicts, branch protection, or config require it.
+- `push` validates, pushes, and creates or reuses a PR through `gh`.
+- `archive` performs semantic OpenSpec reconciliation in the detached
+  `.openspec-shipper/workspaces/integration` worktree.
+- `publish_archive` uses a CAS push by default or an archive PR when
+  `archive.publishMode` is `pull-request`.
+- `cleanup_worktree` removes the delivery worktree and local branch only after
+  positive archive/merge evidence.
+
+`queue.md` is reconciled from repository and GitHub evidence before every
+command. If it is recreated without phase metadata, Shipper infers the most
+advanced valid phase instead of blindly starting over.
+
+When independent changes touch the same `### Requirement:`, Shipper adds
+`archive_after` automatically. Their implementation can remain concurrent while
+canonical-spec publication is serialized.
+
+## Run
 
 ```bash
 npx openspec-shipper queue dry-run
 npx openspec-shipper queue run
 ```
 
-The default `deliver` flow is:
+Waiting for a human and actual errors both use `[!]`. The task comment contains
+the reason and the badge links to the complete run log. After fixing or merging,
+change `[!]` to `[ ]` and run the queue again; Shipper reconciles before retrying.
+
+## Local State
+
+These paths are local and ignored:
 
 ```text
-prepare_worktree -> implement -> push -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
+.openspec-shipper/.env
+.openspec-shipper/queue.md
+.openspec-shipper/shipper.lock
+.openspec-shipper/stop
+.openspec-shipper/runs/
+.openspec-shipper/tmp/
+.openspec-shipper/workspaces/
+worktrees/
 ```
 
-`prepare_worktree` is native runner logic: it creates or reconnects
-`worktrees/<change-name>`, prepares the deterministic implementation branch,
-and runs `checks.install` inside that worktree before any model call. Existing
-worktrees without dependencies are prepared again. Set `worktree.install` to
-`false` for repositories that vendor dependencies or need no install. The
-default install timeout is controlled by `worktree.installTimeoutMs`.
+Provider prompts have package defaults. Installed OpenCode, Codex, and Claude
+assets are project overrides, so local customization remains possible without
+making a missing prompt a runtime blocker. Claude sandbox settings remain local
+and are validated by `doctor`.
 
-After `implement`, Shipper detects newer dependency manifests or lockfiles and
-runs `checks.updateDependencies` natively. This lets strict agents add a package
-without requiring network access inside their sandbox. If validation remains,
-the queue returns to `implement` with the refreshed worktree.
-
-OpenSpec Shipper tracks implementation progress through `tasks.md` markdown
-checkboxes. Use `- [ ]`, `* [ ]`, `+ [ ]`, or numbered `1. [ ]` task items, and
-mark completed tasks with `[x]`. A `tasks.md` with no checkboxes blocks
-immediately because Shipper cannot know which work remains.
-
-A successful `implement` must produce a new commit, update `tasks.md`, or change
-the worktree diff. A provider that reports success without observable progress
-is blocked immediately. This guard compares the worktree before and after each
-call and stores no counters or secondary task state.
-
-`implement` then implements inside that prepared workspace. `push` validates
-OpenSpec against the installed worktree, pushes the implementation branch, and
-opens or reuses a pull request with `gh`.
-After the PR merges, the queue can continue through `sync_main` and `archive`,
-then `cleanup_worktree`.
-
-`archive` is the OpenSpec-native step. `cleanup_worktree` is OpenSpec Shipper
-housekeeping: it removes clean local implementation worktrees and deletes local
-branches normally, falling back to force deletion only when PR/archive evidence
-proves the change has landed. Missing worktree or branch is a successful no-op.
-
-If a task blocks, fix the cause described in the log, then change `[!]` to
-`[ ]` in `.openspec-shipper/queue.md` and run the queue again. The shipper will
-remove the retry hint under the task and reconcile the correct phase before it
-spends tokens.
-
-`init` normally runs the package manager install after updating `package.json`.
-When initialized with `--no-install`, run `npm install`, `pnpm install`, or
-`bun install` before `doctor`; otherwise the required OpenSpec command probes
-will fail.
+The queue lock contains a PID and heartbeat. A later run recovers it only when
+the local owner process is no longer alive.

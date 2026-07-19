@@ -17,6 +17,7 @@ import {
   markTaskRunning,
   parseQueue,
   removeRetryHintsForUnblockedTasks,
+  rewritePendingTask,
   taskSlug,
   type DeliverPhase,
   type QueueTask,
@@ -33,7 +34,7 @@ import {
   readShipperConfigSync,
 } from "../../domain/config/shipper-config.js";
 import { providerById } from "../../infrastructure/providers/registry.js";
-import { openCodeCommandName } from "../../infrastructure/providers/opencode/provider.js";
+import { openCodeCommandName, openCodeCommandPath, openCodeConfigDir } from "../../infrastructure/providers/opencode/provider.js";
 import { codexPromptPath, codexWorkflowPath } from "../../infrastructure/providers/codex-cli/provider.js";
 import {
   type ClaudeCliOptions,
@@ -41,6 +42,7 @@ import {
   claudePromptPath,
   claudeSettingsPath,
   claudeWorkflowPath,
+  buildClaudeCliArgs,
   verifyClaudeCliContract,
 } from "../../infrastructure/providers/claude-code/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
@@ -87,8 +89,6 @@ export type RunnerConfig = {
   executor?: Executor;
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
-  gitStatusDetector?: GitStatusDetector;
-  mainSyncDetector?: MainSyncDetector;
   activeChangeDetector?: ActiveChangeDetector;
   archivedChangeDetector?: ArchivedChangeDetector;
   localClaimDetector?: LocalClaimDetector;
@@ -100,7 +100,6 @@ export type RunnerConfig = {
   worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
   reconcileWorktreeDependencies?: ReconcileWorktreeDependencies;
   claudeContractVerifier?: ClaudeContractVerifier;
-  syncBaseBranch?: SyncBaseBranch;
   prepareWorkspace?: PrepareWorkspace;
   refreshDeliveryBranch?: RefreshDeliveryBranch;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
@@ -108,6 +107,7 @@ export type RunnerConfig = {
   finalizeArchive?: FinalizeArchive;
   sourceResolver?: SourceResolver;
   prepareArchiveWorkspace?: PrepareArchiveWorkspace;
+  repairNativeFailure?: RepairNativeFailure;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -124,6 +124,7 @@ type ExecutorOptions = {
   timeoutMs: number;
   heartbeatMs: number;
   stdin?: string;
+  env?: Record<string, string>;
   stats?: StatsOptions;
 };
 
@@ -145,8 +146,6 @@ export type ExecutorResult = {
 
 export type ProcessDetector = () => Promise<string[]>;
 export type GitRemoteDetector = (projectDir: string) => Promise<string | undefined>;
-export type GitStatusDetector = (projectDir: string) => Promise<string[]>;
-export type MainSyncDetector = (projectDir: string, baseBranch: string) => Promise<MainSyncStatus>;
 export type ActiveChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type ArchivedChangeDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type LocalClaimDetector = (projectDir: string, changeName: string) => Promise<boolean>;
@@ -166,7 +165,6 @@ export type ClaudeContractVerifier = (projectDir: string, claude: ClaudeCliOptio
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
 export type RefreshDeliveryBranch = (projectDir: string, changeName: string, baseBranch: string) => Promise<string>;
 export type SourceResolver = (projectDir: string, task: QueueTask, baseBranch: string) => DeliverySource;
-export type SyncBaseBranch = (projectDir: string, baseBranch: string) => Promise<string>;
 export type PrepareWorkspaceInput = {
   projectDir: string;
   changeName: string;
@@ -197,11 +195,14 @@ export type FinalizeArchiveInput = {
 };
 export type FinalizeArchive = (input: FinalizeArchiveInput) => Promise<string>;
 export type PrepareArchiveWorkspace = (projectDir: string, baseBranch: string) => Promise<string>;
+export type RepairNativeFailure = (
+  config: RunnerConfig,
+  task: QueueTask,
+  reason: string,
+  logPath: string,
+) => Promise<{ repaired: boolean; output: string }>;
 export type Sleep = (ms: number) => Promise<void>;
 
-type MainSyncStatus =
-  | { ok: true }
-  | { ok: false; reason: string };
 
 const DEFAULT_LOOP_DELAY_MS = 5_000;
 const DEFAULT_BUSY_DELAY_MS = 60_000;
@@ -756,7 +757,7 @@ async function validateTaskPreflight(
     isNativePhase(phase)
       ? `(native ${phase} phase)`
       : currentProvider.id === "opencode"
-      ? join(config.projectDir, ".opencode", "commands", `${commandName}.md`)
+      ? openCodeCommandPath(config.projectDir, phase)
       : currentProvider.id === "codex-cli"
       ? codexPromptPath(config.projectDir, phase)
       : claudePromptPath(config.projectDir, phase);
@@ -950,16 +951,6 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
   return undefined;
 }
 
-async function gitStatus(config: RunnerConfig): Promise<string[]> {
-  const detector = config.gitStatusDetector ?? detectGitStatus;
-  return await detector(config.projectDir);
-}
-
-async function gitMainSyncStatus(config: RunnerConfig): Promise<MainSyncStatus> {
-  const detector = config.mainSyncDetector ?? detectMainSyncStatus;
-  return await detector(config.projectDir, configuredBaseBranch(config));
-}
-
 function configuredBaseBranch(config: RunnerConfig): string {
   return config.baseBranch ?? "main";
 }
@@ -999,6 +990,7 @@ async function executeTask(
     timeoutMs: config.taskTimeoutMs,
     heartbeatMs: config.heartbeatMs,
     stdin: providerCommand.stdin,
+    env: providerCommand.env,
     stats: buildStatsOptions(config),
   }).catch((error: unknown): ExecutorResult => ({
     exitCode: null,
@@ -1177,7 +1169,7 @@ async function reconcileQueue(
   queue: Awaited<ReturnType<typeof loadQueue>>,
 ): Promise<Awaited<ReturnType<typeof loadQueue>>> {
   const originalContent = queue.lines.join("\n");
-  let content = removeRetryHintsForUnblockedTasks(originalContent);
+  let content = await inferArchiveDependencies(config, removeRetryHintsForUnblockedTasks(originalContent));
   let changed = content !== originalContent;
   let cursor = 0;
 
@@ -1206,11 +1198,19 @@ async function reconcileQueue(
     const decision = reconcileDeliveryTask(currentTask, evidence);
     if (decision.kind === "transition" && decision.phase !== deliverPhase(currentTask)) {
       const timestamp = (config.now?.() ?? new Date()).toISOString();
+      const interventionUrl = decision.phase === "waiting_for_archive_merge"
+        ? evidence.archivePullRequestUrl
+        : evidence.pullRequestUrl;
       content = shipResultRequiresHuman(decision.phase)
-        ? markTask(currentQueue.lines, { ...currentTask, phase: decision.phase }, "blocked", {
+        ? markTask(currentQueue.lines, {
+            ...currentTask,
+            phase: decision.phase,
+            pullRequestUrl: decision.phase === "waiting_for_merge" ? interventionUrl : currentTask.pullRequestUrl,
+            archivePullRequestUrl: decision.phase === "waiting_for_archive_merge" ? interventionUrl : currentTask.archivePullRequestUrl,
+          }, "blocked", {
             timestamp,
-            reason: humanInterventionReason(decision.phase, evidence.pullRequestUrl),
-            pullRequestUrl: evidence.pullRequestUrl,
+            reason: humanInterventionReason(decision.phase, interventionUrl),
+            pullRequestUrl: interventionUrl,
           })
         : advanceDeliverTaskToPhase(currentQueue.lines, currentTask, decision.phase, {
             timestamp,
@@ -1238,8 +1238,103 @@ async function reconcileQueue(
   return await loadQueue(config.queuePath);
 }
 
+async function inferArchiveDependencies(config: RunnerConfig, content: string): Promise<string> {
+  let current = parseQueue(content);
+  const requirements = new Map<string, Set<string>>();
+  for (const task of current.tasks) {
+    if (!task.change) {
+      continue;
+    }
+    requirements.set(task.change, await requirementKeysForTask(config, task));
+  }
+
+  for (let index = 0; index < current.tasks.length; index += 1) {
+    const task = current.tasks[index];
+    if (!task?.change || task.status === "done") {
+      continue;
+    }
+    const own = requirements.get(task.change) ?? new Set<string>();
+    if (own.size === 0) {
+      continue;
+    }
+    const inferred = new Set(task.archiveAfter);
+    for (const previous of current.tasks.slice(0, index)) {
+      if (!previous.change || task.dependsOn.includes(previous.change)) {
+        continue;
+      }
+      const previousRequirements = requirements.get(previous.change) ?? new Set<string>();
+      if ([...own].some((key) => previousRequirements.has(key))) {
+        inferred.add(previous.change);
+      }
+    }
+    if (inferred.size === task.archiveAfter.length) {
+      continue;
+    }
+    const inferredTask = { ...task, archiveAfter: [...inferred] };
+    content = rewritePendingTask(current.lines, inferredTask);
+    console.warn(`Inferred archive_after for ${task.change}: ${inferredTask.archiveAfter.join(", ")} (shared OpenSpec requirements).`);
+    current = parseQueue(content);
+  }
+  return content;
+}
+
+async function requirementKeysForTask(config: RunnerConfig, task: QueueTask): Promise<Set<string>> {
+  const changeName = task.change!;
+  const worktreeSpecs = join(config.projectDir, "worktrees", changeName, "openspec", "changes", changeName, "specs");
+  if (await pathExists(worktreeSpecs)) {
+    return await requirementKeysFromDirectory(worktreeSpecs);
+  }
+
+  try {
+    const source = (config.sourceResolver ?? resolveDeliverySource)(config.projectDir, task, configuredBaseBranch(config));
+    return requirementKeysFromGit(config.projectDir, source.commit, `openspec/changes/${changeName}/specs`);
+  } catch {
+    return new Set();
+  }
+}
+
+async function requirementKeysFromDirectory(specsDir: string): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const visit = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await visit(path);
+      } else if (entry.name === "spec.md") {
+        addRequirementKeys(keys, relative(specsDir, path), await readFile(path, "utf8"));
+      }
+    }
+  };
+  await visit(specsDir);
+  return keys;
+}
+
+function requirementKeysFromGit(projectDir: string, commit: string, specsPath: string): Set<string> {
+  const keys = new Set<string>();
+  const files = spawnSync("git", ["-C", projectDir, "ls-tree", "-r", "--name-only", commit, "--", specsPath], { encoding: "utf8" });
+  if (files.status !== 0) {
+    return keys;
+  }
+  for (const path of files.stdout.split(/\r?\n/).filter((candidate) => candidate.endsWith("/spec.md"))) {
+    const content = spawnSync("git", ["-C", projectDir, "show", `${commit}:${path}`], { encoding: "utf8" });
+    if (content.status === 0) {
+      addRequirementKeys(keys, path.slice(specsPath.length + 1), content.stdout);
+    }
+  }
+  return keys;
+}
+
+function addRequirementKeys(keys: Set<string>, specPath: string, content: string): void {
+  for (const match of content.matchAll(/^### Requirement:\s*(.+?)\s*$/gim)) {
+    const requirement = match[1]?.trim().toLowerCase();
+    if (requirement) {
+      keys.add(`${specPath}:${requirement}`);
+    }
+  }
+}
+
 function shipResultRequiresHuman(phase: DeliverPhase): boolean {
-  return phase === "waiting_for_merge";
+  return phase === "waiting_for_merge" || phase === "waiting_for_archive_merge";
 }
 
 function humanInterventionReason(phase: DeliverPhase, pullRequestUrl?: string): string {
@@ -1247,6 +1342,12 @@ function humanInterventionReason(phase: DeliverPhase, pullRequestUrl?: string): 
     return pullRequestUrl
       ? `PR is ready and waits for a human to merge it: ${pullRequestUrl}`
       : "PR is ready and waits for a human to merge it";
+  }
+
+  if (phase === "waiting_for_archive_merge") {
+    return pullRequestUrl
+      ? `Archive PR is ready and waits for a human to merge it: ${pullRequestUrl}`
+      : "Archive PR is ready and waits for a human to merge it";
   }
 
   return "Human intervention required";
@@ -1304,7 +1405,13 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   ]);
   const refreshRequired = openPullRequest
     ? await deliveryBranchRefreshRequired(config, branch, configuredBaseBranch(config))
-    : false;
+    : declaredPhase === "refresh_branch" && !localClaimPublished;
+  const shouldCheckArchivePullRequest = Boolean(task.archivePullRequestUrl)
+    || !phasePrecedesForEvidence(declaredPhase, "publish_archive")
+    || Boolean(mergedPullRequest);
+  const archivePullRequest = shouldCheckArchivePullRequest
+    ? await detectArchivePullRequestState(config.projectDir, task)
+    : undefined;
 
   return {
     changeName,
@@ -1322,7 +1429,45 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     tasksComplete,
     refreshRequired,
     archivePublished: hasArchivedChange,
+    hasOpenArchivePullRequest: archivePullRequest?.state === "OPEN",
+    hasMergedArchivePullRequest: archivePullRequest?.state === "MERGED",
+    archivePullRequestUrl: archivePullRequest?.url,
   };
+}
+
+async function detectArchivePullRequestState(
+  projectDir: string,
+  task: QueueTask,
+): Promise<{ state: "OPEN" | "MERGED"; url: string } | undefined> {
+  const args = task.archivePullRequestUrl
+    ? ["pr", "view", task.archivePullRequestUrl, "--json", "state,url"]
+    : ["pr", "list", "--state", "all", "--json", "headRefName,state,url", "--limit", "100"];
+  const result = spawnSync("gh", args, {
+    cwd: projectDir,
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(result.stdout) as
+      | { state?: unknown; url?: unknown }
+      | Array<{ headRefName?: unknown; state?: unknown; url?: unknown }>;
+    const candidate = Array.isArray(parsed)
+      ? parsed.find((entry) =>
+          typeof entry.headRefName === "string" && entry.headRefName.startsWith(`openspec-shipper/archive-${task.change}-`),
+        )
+      : parsed;
+    const state = String(candidate?.state ?? "").toUpperCase();
+    const url = candidate?.url;
+    return (state === "OPEN" || state === "MERGED") && typeof url === "string"
+      ? { state, url }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function deliveryBranchRefreshRequired(config: RunnerConfig, branch: string, baseBranch: string): Promise<boolean> {
@@ -1507,7 +1652,7 @@ async function executeNativeTask(
     const publicationUrl = phase === "publish_archive" ? extractPullRequestUrl(output) : undefined;
     const nextContent =
       effectiveTask.action === "deliver" && phase === "push"
-        ? markTask(lines, { ...effectiveTask, phase: "waiting_for_merge" }, "blocked", {
+        ? markTask(lines, { ...effectiveTask, phase: "waiting_for_merge", pullRequestUrl: extractPullRequestUrl(output) }, "blocked", {
             timestamp,
             reason: humanInterventionReason("waiting_for_merge", extractPullRequestUrl(output)),
             pullRequestUrl: extractPullRequestUrl(output),
@@ -1561,6 +1706,29 @@ async function executeNativeTask(
           startedAt,
         }));
         console.log(`[${new Date().toISOString()}] archive publication raced with origin; recalculating (${attempts}/${maxAttempts})`);
+        return 0;
+      }
+    }
+    const repairAttempts = Number(effectiveTask.metadata.repair_attempts ?? "0");
+    if (!(error instanceof NativeTaskError) && repairAttempts < 2) {
+      const repairer = config.repairNativeFailure ?? repairNativeFailure;
+      const repair = await repairer(config, effectiveTask, reason, logPath).catch((repairError: unknown) => ({
+        repaired: false,
+        output: repairError instanceof Error ? repairError.message : String(repairError),
+      }));
+      await appendFile(logPath, `\n## Native repair attempt\n\n${repair.output}\n`);
+      if (repair.repaired) {
+        const retryTask = {
+          ...effectiveTask,
+          metadata: { ...effectiveTask.metadata, repair_attempts: String(repairAttempts + 1) },
+        };
+        await writeFile(config.queuePath, advanceDeliverTaskToPhase(lines, retryTask, deliverPhase(retryTask), {
+          timestamp: (config.now?.() ?? new Date()).toISOString(),
+          logPath: relativeLogPath,
+          checkedAt: activity.checkedAt,
+          startedAt,
+        }));
+        console.log(`[${new Date().toISOString()}] native repair completed; ${task.rawCommand} will be reconciled and retried`);
         return 0;
       }
     }
@@ -1636,6 +1804,73 @@ async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<str
     baseBranch: configuredBaseBranch(config),
     source,
   });
+}
+
+async function repairNativeFailure(
+  config: RunnerConfig,
+  task: QueueTask,
+  reason: string,
+  logPath: string,
+): Promise<{ repaired: boolean; output: string }> {
+  const phase = deliverPhase(task);
+  const changeName = task.change ?? "unknown-change";
+  const deliveryWorktree = task.deliveryWorktree
+    ? join(config.projectDir, task.deliveryWorktree)
+    : join(config.projectDir, "worktrees", changeName);
+  const cwd = ["refresh_branch", "push", "cleanup_worktree"].includes(phase) && existsSync(deliveryWorktree)
+    ? deliveryWorktree
+    : ["publish_archive"].includes(phase) && existsSync(archiveIntegrationWorkspace(config.projectDir))
+      ? archiveIntegrationWorkspace(config.projectDir)
+      : config.projectDir;
+  const prompt = [
+    "You are the internal OpenSpec Shipper repair agent.",
+    `A native ${phase} operation for ${changeName} failed: ${reason}`,
+    `Inspect the repository and repair the underlying Git or GitHub condition when it is safe and deterministic.`,
+    `The integration boundary is origin/${configuredBaseBranch(config)}.`,
+    "Do not edit, reset, stash, switch, commit, or clean the human checkout.",
+    "Only modify the current delivery/integration workspace and its branch.",
+    "Never force-push an implementation branch and never rewrite remote history.",
+    "Use git and gh directly. If a merge conflict needs semantic judgment, resolve it, run relevant checks, and commit the resolution.",
+    "If repair is unsafe or requires a human decision, finish with exactly: OPENSPEC_SHIPPER_BLOCKED: <short reason>",
+    "If repaired, explain the evidence that the native operation can now be retried.",
+  ].join("\n");
+  const currentProvider = provider(config);
+  let command: string;
+  let args: string[];
+  let stdin: string | undefined;
+  if (currentProvider.id === "codex-cli") {
+    command = config.codexBin ?? "codex";
+    args = ["exec", "-C", cwd, "--sandbox", "workspace-write", "-c", 'approval_policy="never"'];
+    if (config.codexModel) args.push("--model", config.codexModel);
+    if (config.codexReasoningEffort) args.push("-c", `model_reasoning_effort="${config.codexReasoningEffort}"`);
+    args.push(prompt);
+  } else if (currentProvider.id === "claude-code") {
+    command = config.claudeBin ?? "claude";
+    args = buildClaudeCliArgs(config.projectDir, configuredClaudeOptions(config));
+    stdin = prompt;
+  } else {
+    command = config.opencodeBin;
+    args = ["run"];
+    if (config.opencodePrintLogs) args.push("--print-logs");
+    if (config.opencodeLogLevel) args.push("--log-level", config.opencodeLogLevel);
+    if (config.opencodeModel) args.push("--model", config.opencodeModel);
+    args.push(prompt);
+  }
+
+  const executor = config.executor ?? spawnExecutor;
+  const result = await executor(command, args, {
+    cwd,
+    logPath,
+    timeoutMs: config.taskTimeoutMs,
+    heartbeatMs: config.heartbeatMs,
+    stdin,
+    env: currentProvider.id === "opencode" ? { OPENCODE_CONFIG_DIR: openCodeConfigDir(config.projectDir) } : undefined,
+  });
+  const failure = currentProvider.detectFailureSignal(result.output) ?? result.failureReason;
+  return {
+    repaired: result.exitCode === 0 && !failure,
+    output: failure ?? result.output ?? `repair exited with code ${result.exitCode}`,
+  };
 }
 
 async function createRunLogPath(config: RunnerConfig, task: QueueTask, timestamp: string) {
@@ -1791,7 +2026,7 @@ export async function spawnExecutor(
     let settled = false;
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: childEnvForCwd(options.cwd),
+      env: { ...childEnvForCwd(options.cwd), ...(options.env ?? {}) },
       detached: true,
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
@@ -1941,120 +2176,6 @@ export async function detectGitStatus(projectDir: string): Promise<string[]> {
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter(Boolean);
-}
-
-export async function detectMainSyncStatus(projectDir: string, baseBranch = "main"): Promise<MainSyncStatus> {
-  const branch = runGit(projectDir, ["branch", "--show-current"]).trim();
-  if (branch !== baseBranch) {
-    return { ok: false, reason: `Prepare must run from ${baseBranch}; current branch is ${branch || "(detached)"}.` };
-  }
-
-  const remoteBranch = spawnSync("git", ["-C", projectDir, "ls-remote", "--exit-code", "--heads", "origin", baseBranch], {
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-    timeout: 10_000,
-  });
-  if (remoteBranch.status !== 0) {
-    return {
-      ok: false,
-      reason: `Cannot verify ${baseBranch} against origin/${baseBranch} before preparing a worktree: ${formatGitError(remoteBranch)}`,
-    };
-  }
-
-  const upstreamRef = localUpstreamRef(projectDir, baseBranch);
-  if (!upstreamRef) {
-    return { ok: true };
-  }
-
-  const head = runGit(projectDir, ["rev-parse", "HEAD"]).trim();
-  const upstreamHead = runGit(projectDir, ["rev-parse", upstreamRef]).trim();
-  if (head === upstreamHead) {
-    return { ok: true };
-  }
-
-  const base = runGit(projectDir, ["merge-base", "HEAD", upstreamRef]).trim();
-  if (base === head || base === upstreamHead) {
-    return { ok: true };
-  }
-
-  return { ok: false, reason: `${baseBranch} has diverged from origin/${baseBranch}; reconcile ${baseBranch} before preparing a new worktree.` };
-}
-
-function localUpstreamRef(projectDir: string, baseBranch: string): string | undefined {
-  const upstream = spawnSync("git", ["-C", projectDir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-  });
-  if (upstream.status === 0) {
-    return "@{u}";
-  }
-
-  const originBase = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", `refs/remotes/origin/${baseBranch}`], {
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-  });
-  return originBase.status === 0 ? `origin/${baseBranch}` : undefined;
-}
-
-export async function synchronizeBaseBranchWithOrigin(projectDir: string, baseBranch = "main"): Promise<string> {
-  const messages = [`Synchronizing ${baseBranch} with origin/${baseBranch}`];
-  const branch = runGit(projectDir, ["branch", "--show-current"]).trim();
-  if (branch !== baseBranch) {
-    throw new Error(`Sync must run from ${baseBranch}; current branch is ${branch || "(detached)"}.`);
-  }
-
-  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin"], {
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-  });
-  if (fetch.status !== 0) {
-    throw new Error(`Cannot fetch origin before synchronizing ${baseBranch}: ${formatGitError(fetch)}`);
-  }
-
-  const upstreamRef = localUpstreamRef(projectDir, baseBranch) ?? `origin/${baseBranch}`;
-  const originBase = spawnSync("git", ["-C", projectDir, "rev-parse", "--verify", upstreamRef], {
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-  });
-  if (originBase.status !== 0) {
-    throw new Error(`${baseBranch} has no upstream configured and origin/${baseBranch} does not exist; push ${baseBranch} before preparing a worktree.`);
-  }
-
-  const head = runGit(projectDir, ["rev-parse", "HEAD"]).trim();
-  const upstreamHead = runGit(projectDir, ["rev-parse", upstreamRef]).trim();
-  if (head === upstreamHead) {
-    messages.push(`${baseBranch} is already synchronized.`);
-    return `${messages.join("\n")}\n`;
-  }
-
-  const base = runGit(projectDir, ["merge-base", "HEAD", upstreamRef]).trim();
-  if (base === head) {
-    const merge = spawnSync("git", ["-C", projectDir, "merge", "--ff-only", upstreamRef], {
-      env: childEnvForCwd(projectDir),
-      encoding: "utf8",
-    });
-    if (merge.status === 0) {
-      messages.push(merge.stdout.trim() || `${baseBranch} fast-forwarded to ${upstreamRef}.`);
-      return `${messages.filter(Boolean).join("\n")}\n`;
-    }
-
-    throw new Error(`${baseBranch} is behind ${upstreamRef} but could not be fast-forwarded: ${formatGitError(merge)}`);
-  }
-
-  if (base === upstreamHead) {
-    const push = spawnSync("git", ["-C", projectDir, "push", "origin", `HEAD:${baseBranch}`], {
-      env: childEnvForCwd(projectDir),
-      encoding: "utf8",
-    });
-    if (push.status === 0) {
-      messages.push(push.stdout.trim() || `${baseBranch} pushed to origin/${baseBranch}.`);
-      return `${messages.filter(Boolean).join("\n")}\n`;
-    }
-
-    throw new Error(`${baseBranch} has local commits but could not be pushed to origin/${baseBranch}: ${formatGitError(push)}`);
-  }
-
-  throw new Error(`${baseBranch} has diverged from origin/${baseBranch}; reconcile ${baseBranch} before preparing a new worktree.`);
 }
 
 export async function refreshDeliveryBranch(projectDir: string, changeName: string, baseBranch = "main"): Promise<string> {
@@ -2506,6 +2627,17 @@ async function gitStatusFromArgs(projectDir: string, args: string[]): Promise<st
 }
 
 export async function cleanupWorkspace(input: CleanupWorkspaceInput): Promise<string> {
+  const baseBranch = readShipperConfigSync(input.projectDir)?.baseBranch ?? "main";
+  const origin = spawnSync("git", ["-C", input.projectDir, "remote", "get-url", "origin"], { encoding: "utf8" });
+  if (origin.status === 0) {
+    const fetch = spawnSync("git", ["-C", input.projectDir, "fetch", "--quiet", "origin", baseBranch], {
+      env: childEnvForCwd(input.projectDir),
+      encoding: "utf8",
+    });
+    if (fetch.status !== 0) {
+      throw new Error(`Cannot refresh origin/${baseBranch} before cleanup: ${formatGitError(fetch)}`);
+    }
+  }
   const archived = await detectArchivedChange(input.projectDir, input.changeName);
   if (!archived) {
     throw new Error(`OpenSpec change ${input.changeName} is not archived yet; cleanup is unsafe.`);

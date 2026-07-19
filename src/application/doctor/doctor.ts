@@ -99,6 +99,7 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
   }
 
   if (config) {
+    checks.push(checkDeliveryConfig(config));
     checks.push(...checkRequiredConfiguredCommands(projectDir, config));
   }
 
@@ -107,8 +108,29 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
       ? ok(".gitignore worktrees", "worktrees/ is ignored")
       : warning(".gitignore worktrees", "Add worktrees/ to .gitignore before running implement workers"),
   );
+  checks.push(
+    (await gitignoreContains(projectDir, ".openspec-shipper/workspaces/"))
+      ? ok(".gitignore integration workspace", ".openspec-shipper/workspaces/ is ignored")
+      : warning(".gitignore integration workspace", "Add .openspec-shipper/workspaces/ to .gitignore before archiving changes"),
+  );
 
   return checks;
+}
+
+function checkDeliveryConfig(config: ShipperConfig): DoctorCheck {
+  if (!["auto", "always", "conflicts-only", "never"].includes(config.delivery.refreshPolicy)) {
+    return error("delivery config", `Unsupported delivery.refreshPolicy: ${config.delivery.refreshPolicy}`);
+  }
+  if (!["direct", "pull-request"].includes(config.archive.publishMode)) {
+    return error("delivery config", `Unsupported archive.publishMode: ${config.archive.publishMode}`);
+  }
+  if (!Number.isInteger(config.archive.maxAttempts) || config.archive.maxAttempts < 1) {
+    return error("delivery config", "archive.maxAttempts must be a positive integer");
+  }
+  return ok(
+    "delivery config",
+    `refresh ${config.delivery.refreshPolicy}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s)`,
+  );
 }
 
 function checkPackageScripts(packageJson: { scripts?: Record<string, string> }): DoctorCheck[] {
@@ -290,7 +312,9 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
 
   const checks: DoctorCheck[] = [];
   for (const file of REQUIRED_OPENCODE_COMMANDS) {
-    checks.push((await fileExists(join(projectDir, file))) ? ok(file, `${file} found`) : error(file, `${file} missing`));
+    checks.push((await fileExists(join(projectDir, file)))
+      ? ok(file, `${file} project override found`)
+      : ok(file, `${file} is not overridden; packaged default will be used through OPENCODE_CONFIG_DIR`));
   }
   return checks;
 }

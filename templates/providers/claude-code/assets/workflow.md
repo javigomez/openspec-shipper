@@ -5,11 +5,15 @@ the intelligent `implement` and `archive` phases.
 
 ## Ownership
 
-- The configured base branch, normally `main`, is the planning, synchronization,
-  and archive checkout.
+- `origin/<baseBranch>` is the integration boundary. The human checkout may be
+  on any branch and is never a Shipper execution surface.
+- Planning may originate in main, an ordinary branch, or a worktree; Shipper
+  adopts one committed snapshot.
 - Product implementation happens only in `worktrees/<change-name>`.
-- Shipper creates worktrees, pushes branches, creates pull requests with `gh`,
-  synchronizes the base branch, finalizes archive commits, and cleans worktrees.
+- Shipper creates worktrees, conditionally refreshes delivery branches, pushes,
+  creates PRs with `gh`, publishes archive commits, and cleans worktrees.
+- Archive runs in a detached integration worktree created from the latest
+  remote base, never in the human checkout.
 - Claude must not duplicate native Shipper phases.
 
 ## Safety

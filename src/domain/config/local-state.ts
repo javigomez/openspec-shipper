@@ -8,6 +8,7 @@ const LOCAL_STATE_PATHS = [
 const LOCAL_STATE_PREFIXES = [
   ".openspec-shipper/runs/",
   ".openspec-shipper/tmp/",
+  ".openspec-shipper/workspaces/",
   "worktrees/",
 ];
 

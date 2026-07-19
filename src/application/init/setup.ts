@@ -8,7 +8,9 @@ import {
   ENV_EXAMPLE_PATH,
   defaultShipperConfig,
   readShipperConfig,
+  type ArchivePublishMode,
   type ClaudeSandboxMode,
+  type DeliveryRefreshPolicy,
   type ExecutorProviderId,
   type PackageManager,
   type ShipperProfile,
@@ -25,6 +27,8 @@ export type SetupConfig = {
   effort?: string;
   permissionMode?: "dontAsk" | "bypassPermissions";
   claudeSandbox?: ClaudeSandboxMode;
+  archivePublishMode?: ArchivePublishMode;
+  refreshPolicy?: DeliveryRefreshPolicy;
   force?: boolean;
   installDependencies?: boolean;
   dependencyInstaller?: DependencyInstaller;
@@ -58,6 +62,7 @@ const SHIPPER_GITIGNORE_ENTRIES = [
   ".openspec-shipper/stop",
   ".openspec-shipper/runs/",
   ".openspec-shipper/tmp/",
+  ".openspec-shipper/workspaces/",
   "worktrees/",
 ];
 
@@ -100,7 +105,7 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   ];
 
   const configPath = join(config.projectDir, CONFIG_PATH);
-  const shipperConfig = defaultShipperConfig(profile);
+  const shipperConfig = existingConfig ?? defaultShipperConfig(profile);
   shipperConfig.executor.provider = selectedProvider;
   applyProviderOptions(shipperConfig, selectedProvider, config);
   if (selectedProvider === "claude-code") {
@@ -108,6 +113,8 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
       ?? existingConfig?.executor.claude.sandbox
       ?? "strict";
   }
+  shipperConfig.archive.publishMode = config.archivePublishMode ?? shipperConfig.archive.publishMode;
+  shipperConfig.delivery.refreshPolicy = config.refreshPolicy ?? shipperConfig.delivery.refreshPolicy;
   const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
   if (selectedProvider === "claude-code") {

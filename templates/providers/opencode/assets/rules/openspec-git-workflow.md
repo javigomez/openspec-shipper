@@ -5,19 +5,18 @@ execution surface for agents.
 
 ## Core Model
 
-- The configured base branch is the canonical OpenSpec planning and archive checkout.
-  It defaults to `main`.
-- Create, continue, list, status, sync, validate proposal artifacts, and
-  archive OpenSpec changes on the base branch.
+- `origin/<baseBranch>` is the integration boundary. The human checkout is not
+  a Shipper execution surface and may remain on any branch.
+- Planning may happen on the base branch, an ordinary branch, or a worktree.
+- The queue adopts one immutable committed planning snapshot.
 - The shipper runner prepares deterministic worktrees before model-driven
   implementation starts.
-- Only apply/implementation work runs in the selected change worktree.
+- Implementation runs in `worktrees/<change-name>`.
 - Never edit product code for an OpenSpec change directly on the base branch.
 - Pull requests are created after implementation, before archive.
-- Archive only after the PR is merged and the native `sync_main` phase has
-  reconciled the base branch with origin.
-- The native runner reconciles the base branch with origin; agents must not
-  edit files or create commits for `sync_main`.
+- Archive runs in `.openspec-shipper/workspaces/integration`, rebuilt from the
+  latest remote base after the implementation PR merges.
+- The runner owns refresh, push, PR creation, archive publication, and cleanup.
 
 ## Branches and Worktrees
 
@@ -108,32 +107,23 @@ If your repo uses an SSH alias, configure `origin` consistently:
 git remote set-url origin git@github.com:YOUR_GITHUB_USER/YOUR_REPO.git
 ```
 
-## Proposal Phase
+## Human Planning
 
-1. Run only from the root base branch checkout.
-2. Verify the base branch checkout is clean.
-3. Create or continue the OpenSpec proposal artifacts.
-4. Validate the change before treating it as durable.
-5. If your repo adds a stricter proposal wrapper, run that wrapper here.
-6. Commit complete proposal artifacts on the base branch.
+1. Create or continue OpenSpec artifacts in main, a branch, or a worktree.
+2. Validate them and commit the complete planning snapshot.
+3. Add the change to `.openspec-shipper/queue.md` by command or direct edit.
+4. After adoption, later planning commits are not silently added to the run.
 
 ## Prepare Phase
 
-1. Run from the root base branch checkout.
-2. Verify the base branch checkout is clean. If it is dirty, keep discovery on the local
-   snapshot and stop before creating a new worktree.
-3. Do not pull, push, or create worktrees directly; the native
+1. Do not inspect or modify the human checkout.
+2. Do not pull, push, or create worktrees directly; the native
    `prepare_worktree` phase owns that setup.
-4. List active OpenSpec changes.
-5. Skip incomplete scaffolds and 100% complete changes.
-6. Skip changes with an existing open PR.
-7. Continue an existing branch/worktree when present.
-8. Do not edit product code and do not mark OpenSpec tasks complete.
+3. Continue the exact snapshot and delivery worktree selected by the runner.
 
 ## Apply Phase
 
-1. Run discovery from the root base branch checkout.
-2. Verify the selected `worktrees/<change-name>` already exists.
+1. Verify the selected `worktrees/<change-name>` already exists.
 3. Never create branches or worktrees in implement; the native `prepare_worktree` phase owns
    that setup.
 4. Enter the selected worktree.
@@ -151,20 +141,21 @@ the pull request with GitHub CLI.
 
 ## Archive Phase
 
-1. Run only from the root base branch checkout.
-2. Verify the base branch checkout is clean.
+1. Run only from the detached integration worktree prepared from
+   `origin/<baseBranch>`.
+2. Verify that integration worktree is clean before archiving.
 3. Do not run `git pull`, `git fetch`, `git rebase`, `git commit`, or `git push`.
    The runner owns Git synchronization and finalization for archive.
-4. Select changes whose tasks are 100% complete on the base branch.
+4. Select the named change whose tasks are complete in this snapshot.
 5. Select exactly one eligible change per run. Do not archive batches.
 6. Run `openspec validate <change-name>`.
 7. Run `openspec archive <change-name> -y`.
 8. Verify the diff only touches OpenSpec change/archive and canonical spec files.
-9. Leave the diff for the runner to stage, commit, rebase, and push.
+9. Leave the diff for the runner to stage, commit, and publish.
 10. Do not clean local worktrees or branches in this phase.
 
-## Native Cleanup And Main Sync Phases
+## Native Delivery Phases
 
-OpenSpec Shipper owns `cleanup_worktree` and `sync_main` in runner code. OpenCode
-agents must not remove worktrees, delete branches, reconcile the base branch, or
-call GitHub APIs for these phases.
+OpenSpec Shipper owns `prepare_worktree`, `refresh_branch`, `push`,
+`publish_archive`, and `cleanup_worktree`. OpenCode agents must not duplicate
+those operations or call GitHub APIs.

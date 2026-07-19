@@ -20,19 +20,20 @@ Git state, failed archive reconciliation, or anything requiring human action.
 
 ## Boundaries
 
-Archive runs only from the root base-branch checkout. Do not run from a change
-worktree. Do not create or update PRs. Do not clean worktrees or branches. Do
+Archive runs only from the detached integration worktree prepared by Shipper
+from `origin/<baseBranch>`. Do not run from a delivery worktree or the human
+checkout. Do not create PRs or clean worktrees or branches. Do
 not run `git pull`, `git fetch`, `git rebase`, `git commit`, or `git push`.
-Shipper owns synchronization, staging, commit, rebase, and push.
+Shipper owns synchronization, staging, commit, CAS/PR publication, and retry.
 
 Set `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1` for every OpenSpec invocation.
 
 ## Archive Rules
 
-From repository root:
+From the current integration worktree:
 
-1. Verify the current checkout is the configured base branch.
-2. Verify `git status --short` is clean except ignored Shipper runtime state.
+1. Verify HEAD is detached; this is expected for the integration workspace.
+2. Verify `git status --short` is clean.
 3. Inspect only `openspec/changes/{{CHANGE_NAME}}`.
 
 If the active change is missing, check whether it is already archived:
@@ -46,7 +47,7 @@ If exactly one valid archive exists, return `completed` without changing files.
 For an active change:
 
 1. Verify proposal, design, tasks, and at least one `specs/**/spec.md` exist.
-2. Verify every task checkbox is complete on the base branch.
+2. Verify every task checkbox is complete in this integration snapshot.
 3. Run the configured OpenSpec validation command from
    `.openspec-shipper/config.json` (`checks.openspec`).
 4. Run the configured equivalent of

@@ -14,7 +14,7 @@ queue task.
 
 Goals:
 
-- Run only from the root base branch checkout.
+- Run only from the detached archive integration worktree prepared by Shipper.
 - Select exactly one merged completed OpenSpec change.
 - Validate and archive that change.
 - Leave the archive/spec-sync diff for the OpenSpec Shipper runner to commit

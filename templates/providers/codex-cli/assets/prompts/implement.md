@@ -26,10 +26,12 @@ Use `.openspec-shipper/config.json` for configured project commands. Use
 to `npm run openspec:cli --`. The native `prepare_worktree` phase installs the
 initial dependencies using `checks.install` before this phase starts.
 
-Run from repository root:
+Locate the prepared worktree from the repository root, then run all discovery
+and implementation inside it:
 
 ```bash
 pwd
+cd worktrees/{{CHANGE_NAME}}
 git branch --show-current
 git status --short
 test -f openspec/changes/{{CHANGE_NAME}}/proposal.md
@@ -37,13 +39,10 @@ test -f openspec/changes/{{CHANGE_NAME}}/design.md
 test -f openspec/changes/{{CHANGE_NAME}}/tasks.md
 find openspec/changes/{{CHANGE_NAME}}/specs -name spec.md -print
 OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> validate {{CHANGE_NAME}}
-test -d worktrees/{{CHANGE_NAME}}
-test -f worktrees/{{CHANGE_NAME}}/openspec/changes/{{CHANGE_NAME}}/tasks.md
 ```
 
-If the root base branch checkout is dirty, do not edit it. Continue only inside the already
-prepared `worktrees/{{CHANGE_NAME}}` checkout. If that worktree is missing,
-stop with:
+The human checkout may be dirty or on any branch. Never edit, switch, stash,
+reset, clean, or commit it. If the prepared worktree is missing, stop with:
 
 ```text
 OPENSPEC_SHIPPER_BLOCKED: prepared worktree missing for {{CHANGE_NAME}}

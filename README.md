@@ -12,11 +12,9 @@ npx openspec-shipper init
 npx openspec-shipper doctor
 ```
 
-Archive finalization currently commits and pushes directly to the configured
-`baseBranch`. `doctor` queries GitHub before the queue starts and fails with a
-clear explanation when that branch is protected. PR-based archive finalization
-is not supported yet; this limitation is intentionally explicit while the
-project gathers real-world workflow requirements.
+Shipper treats `origin/<baseBranch>` as the integration boundary. Delivery and
+archive work happen in dedicated worktrees, so the human checkout can remain on
+main, an ordinary branch, or another worktree while the queue runs.
 
 There is no `postinstall` mutation. `init` is the command that installs project
 assets, and it writes state only under `.openspec-shipper/` plus provider assets
@@ -31,13 +29,8 @@ such as `.opencode/`.
 
 `gh` is used by the runner to create pull requests after branch push and to
 reconcile PR state before spending tokens. That is how `push` becomes
-`waiting_for_merge`, and how `waiting_for_merge` becomes `sync_main` after a PR
-has been merged.
-
-Before running the queue, the configured base branch (`main` by default) should be clean except for ignored shipper
-runtime state such as `.openspec-shipper/queue.md`, logs, lock files, and
-`worktrees/`. `doctor` fails when it sees non-runtime changes because the native
-`prepare_worktree` phase creates feature worktrees from the base branch checkout.
+`waiting_for_merge`, and how a merged PR becomes eligible for archive without
+switching or updating the human checkout.
 
 ## Commands
 
@@ -82,6 +75,7 @@ Runtime state lives in the target repository:
   queue.md
   runs/
   tmp/
+  workspaces/
   installed.json
   shipper.lock
   stop
@@ -138,6 +132,7 @@ the queue. Set it to `0` for strict single-executor mode.
 .openspec-shipper/stop
 .openspec-shipper/runs/
 .openspec-shipper/tmp/
+.openspec-shipper/workspaces/
 worktrees/
 ```
 
@@ -154,6 +149,7 @@ Non-interactive mode:
 ```bash
 npx openspec-shipper init --yes --provider opencode --package-manager npm
 npx openspec-shipper init --yes --provider claude-code --model sonnet --effort low
+npx openspec-shipper init --yes --archive-publish pull-request --refresh-policy auto
 ```
 
 Current implementation still uses the previous profile flag while the
@@ -186,10 +182,11 @@ The installer does not overwrite the target repo's root `README.md`; that file
 belongs to the application. A repo-local usage guide is installed at
 `.openspec-shipper/README.md`.
 
-Commit the installed project assets on the configured base branch (`main` by default)
-before running the queue. The native `prepare_worktree` phase creates feature worktrees from `HEAD`; if the base branch is dirty after
-`init`, the new worktree would miss the freshly installed scripts,
-provider commands, and package changes. Local queue state remains ignored.
+Commit the installed project assets so they are available from the repository's
+remote base. Queue state, logs, locks, delivery worktrees, and the archive
+integration worktree remain ignored. After that commit, the human checkout is
+free for planning work and is never switched, stashed, reset, cleaned, or
+committed by delivery phases.
 
 OpenSpec Shipper uses GitHub CLI to create and inspect pull requests. Authenticate
 once before running the queue:
@@ -230,16 +227,39 @@ Queue format:
 - [ ] deliver add-spanish-greeting <!-- depends_on: add-name-greeting -->
 ```
 
+Editing `queue.md` directly is a first-class workflow. `queue add` is only a
+convenience command.
+
+### Human Handoff
+
+Create a new OpenSpec change in whichever workspace is natural:
+
+1. Work on main, an ordinary planning branch such as `spec/<change>`, or a
+   separate worktree.
+2. Validate the proposal and commit the complete planning snapshot.
+3. Add `- [ ] deliver <change>` to `queue.md`, manually or with `queue add`.
+4. Run the queue. Shipper resolves the source once and records
+   `source_branch` and `source_commit` in the markdown task.
+
+If the change already exists on `origin/<baseBranch>`, that remote snapshot
+wins unless a unique branch has later commits touching that change. Multiple
+plausible sources block with an actionable request to add `source_branch` or
+`source_worktree` metadata. Later planning commits are reported but never
+silently added to an adopted delivery.
+
 `deliver` is the only public queue action. OpenSpec Shipper stores its current
 phase as metadata on that task and advances it through:
 
 ```text
-prepare_worktree -> implement -> push -> waiting_for_merge -> sync_main -> archive -> cleanup_worktree
+prepare_worktree -> implement -> refresh_branch -> push -> waiting_for_merge
+-> archive -> publish_archive -> [waiting_for_archive_merge] -> cleanup_worktree
 ```
 
 `prepare_worktree` creates or reconnects the implementation worktree and runs
 the configured `checks.install` command there before starting an AI executor.
-This keeps concurrent worktrees isolated from the root checkout's dependencies.
+It creates the delivery branch from `origin/<baseBranch>` and copies only the
+committed OpenSpec planning snapshot into it. This keeps concurrent worktrees
+isolated from the human checkout and from each other's dependencies.
 Existing worktrees missing `node_modules` are prepared again. Disable this for
 vendored or dependency-free repositories with `worktree.install: false`; adjust
 the default ten-minute timeout with `worktree.installTimeoutMs`.
@@ -270,13 +290,18 @@ sequenceDiagram
   participant OpenSpec
 
   Human->>OpenSpec: Create change
-  Human->>Shipper: Add change to queue.md
-  Shipper->>Shipper: prepare_worktree
+  Human->>Human: Validate and commit planning snapshot
+  Human->>Shipper: Add change to queue.md manually or by CLI
+  Shipper->>Shipper: Adopt source_commit and prepare_worktree
   Shipper->>Shipper: implement in worktree
+  Shipper->>Shipper: refresh_branch when required
   Shipper->>Shipper: push branch and open PR with gh
   Human->>Shipper: Review and merge PR
-  Shipper->>Shipper: sync_main
-  Shipper->>OpenSpec: archive merged change
+  Shipper->>OpenSpec: archive in detached integration worktree
+  Shipper->>Shipper: publish_archive with CAS or PR
+  opt archive PR mode
+    Human->>Shipper: Merge archive PR
+  end
   Shipper->>Shipper: cleanup_worktree
   Shipper-->>Human: Mark task done and start next task
 
@@ -292,10 +317,15 @@ sequenceDiagram
 any AI executor is called. `implement` then spends model tokens only on
 implementation inside that prepared workspace.
 
+`refresh_branch` always checks the latest remote base before the first push.
+For an open PR it refreshes only when there is a real conflict, branch
+protection requires an up-to-date branch, or config says `always`. The default
+`auto` policy avoids unnecessary CI reruns and stale-review dismissal.
+
 `waiting_for_merge` is intentionally not runnable. The runner uses `gh` to
-notice when the PR has merged and then reconciles the task to `phase: sync_main`, so
-the shipper can synchronize the configured base branch, archive safely, and
-clean local artifacts.
+notice the merge, then prepares `.openspec-shipper/workspaces/integration` from
+the latest `origin/<baseBranch>` and archives there. It never synchronizes the
+human checkout.
 
 ### Reverse State Inference
 
@@ -306,10 +336,12 @@ instead of trusting the phase comment blindly:
 ```text
 archived and locally clean -> done
 archived but local work remains -> cleanup_worktree
-merged PR -> sync_main
+published archive -> cleanup_worktree
+open archive PR -> waiting_for_archive_merge
+merged implementation PR -> archive
 open PR -> waiting_for_merge
 remote branch without PR -> push
-local work complete -> push
+local work complete -> refresh_branch
 local work incomplete -> implement
 active change without local work -> prepare_worktree
 nothing found -> blocked
@@ -338,9 +370,18 @@ remove the hint, reconcile the task from repository evidence, and retry or move
 it to the correct phase.
 
 The `archive` phase keeps the intelligent work narrow: the provider validates
-and reconciles OpenSpec archive/spec files, then the runner owns the deterministic
-Git finalization: staging only OpenSpec paths, committing, rebasing, and pushing
-to the configured base branch. The `cleanup_worktree` phase is OpenSpec Shipper
+and reconciles OpenSpec archive/spec files in a detached integration worktree.
+The runner then stages only OpenSpec paths and commits them. In `direct` mode it
+publishes with a compare-and-swap push; if remote moved, it discards the stale
+result and recalculates archive from the new base, up to `archive.maxAttempts`.
+In `pull-request` mode it opens a separate archive PR and waits for its merge.
+
+Independent changes may implement concurrently but touch the same canonical
+requirement. Shipper infers `archive_after` from matching `### Requirement:`
+headers and serializes only their archive phases. You can also write that
+metadata explicitly in `queue.md`.
+
+The `cleanup_worktree` phase is OpenSpec Shipper
 housekeeping: it removes a clean local `worktrees/<change-name>` worktree and
 deletes the local branch with regular `git branch -d` when Git recognizes it as
 merged. For squash or rebase merges, Shipper falls back to `git branch -D` only
@@ -398,7 +439,7 @@ codex exec -C <projectDir> --sandbox workspace-write -c 'approval_policy="never"
 
 Claude Code support is experimental. It runs `claude -p` non-interactively for
 the intelligent `implement` and `archive` phases, while Shipper continues to own
-worktrees, push, pull requests, base-branch sync, archive finalization, and
+worktrees, branch refresh, push, pull requests, archive publication, and
 cleanup.
 
 ```bash

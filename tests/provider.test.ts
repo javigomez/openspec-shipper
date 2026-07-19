@@ -62,6 +62,9 @@ describe("executor providers", () => {
         "add-name-greeting",
       ],
       cwd: "/repo",
+      env: {
+        OPENCODE_CONFIG_DIR: join(import.meta.dir, "..", "templates/providers/opencode/assets"),
+      },
     });
   });
 
@@ -77,6 +80,20 @@ describe("executor providers", () => {
 
     expect(command.args).toContain("openspec-archive-merged");
     expect(command.args.at(-1)).toBe("add-name-greeting");
+  });
+
+  test("OpenCode resolves project overrides per command and otherwise uses packaged defaults", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "shipper-opencode-assets-"));
+    await mkdir(join(projectDir, ".opencode/commands"), { recursive: true });
+    await writeFile(join(projectDir, ".opencode/commands/openspec-apply-worktree.md"), "custom implement\n");
+    const implementTask = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
+    const archiveTask = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n").tasks[0]!;
+
+    const implement = opencodeProvider.buildCommand({ phase: "implement", task: implementTask, projectDir, config });
+    const archive = opencodeProvider.buildCommand({ phase: "archive", task: archiveTask, projectDir, config });
+
+    expect(implement.env?.OPENCODE_CONFIG_DIR).toBe(join(projectDir, ".opencode"));
+    expect(archive.env?.OPENCODE_CONFIG_DIR).toBe(join(import.meta.dir, "..", "templates/providers/opencode/assets"));
   });
 
   test("Codex CLI provider builds an experimental exec command from installed prompts", async () => {

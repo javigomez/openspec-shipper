@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeF
 import { join } from "node:path";
 import { hostname, tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { cleanupWorkspace, defaultConfig, detectMainSyncStatus, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, synchronizeBaseBranchWithOrigin, type Executor, type RunnerConfig } from "../src/runner";
+import { cleanupWorkspace, defaultConfig, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
@@ -775,6 +775,23 @@ describe("runner", () => {
     expect(queue).toContain("phase: implement");
   });
 
+  test("infers archive ordering when independent changes touch the same requirement", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver change-a\n- [ ] deliver change-b\n",
+    );
+    for (const change of ["change-a", "change-b"]) {
+      const specsDir = join(harness.rootDir, "worktrees", change, "openspec", "changes", change, "specs", "hello-cli");
+      await mkdir(specsDir, { recursive: true });
+      await writeFile(join(specsDir, "spec.md"), "## MODIFIED Requirements\n\n### Requirement: Greeting output\n");
+    }
+
+    const exitCode = await runQueue("status", harness.config);
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("deliver change-b <!-- archive_after: change-a;");
+  });
+
   test("blocks deliver tasks waiting for merge", async () => {
     const harness = await createHarness(
       [
@@ -1258,6 +1275,32 @@ describe("runner", () => {
     expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
   });
 
+  test("retries a native phase after the internal repair agent succeeds", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: refresh_branch -->\n");
+    let repairedReason = "";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => true,
+      localClaimPublishedDetector: async () => false,
+      refreshDeliveryBranch: async () => {
+        throw new Error("merge conflict with origin/main");
+      },
+      repairNativeFailure: async (_config, _task, reason) => {
+        repairedReason = reason;
+        return { repaired: true, output: "resolved conflict and committed merge" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(repairedReason).toContain("merge conflict");
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: refresh_branch");
+    expect(queue).toContain("repair_attempts: 1");
+    expect(queue).not.toContain("[!]");
+  });
+
   test("marks the first pending task blocked when the executor cannot start", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 
@@ -1274,7 +1317,7 @@ describe("runner", () => {
     expect(queue).toContain("spawn failed");
   });
 
-  test("blocks before execution when the project command file is missing", async () => {
+  test("uses packaged OpenCode commands when the project override is missing", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n", { createCommandFiles: false });
     let called = false;
 
@@ -1286,11 +1329,11 @@ describe("runner", () => {
       },
     });
 
-    expect(exitCode).toBe(1);
-    expect(called).toBe(false);
+    expect(exitCode).toBe(0);
+    expect(called).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("OpenCode command file not found");
+    expect(queue).toContain("phase: publish_archive");
+    expect(queue).not.toContain("OpenCode command file not found");
   });
 
   test("dry-runs native prepare without requiring an OpenCode command file", async () => {
@@ -1304,7 +1347,7 @@ describe("runner", () => {
     expect(queue).not.toContain("OpenCode command file not found");
   });
 
-  test("blocks Codex execution before spending tokens when prompts are missing", async () => {
+  test("uses packaged Codex prompts when project overrides are missing", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n", { createCommandFiles: false });
     let called = false;
 
@@ -1320,11 +1363,11 @@ describe("runner", () => {
       },
     });
 
-    expect(exitCode).toBe(1);
-    expect(called).toBe(false);
+    expect(exitCode).toBe(0);
+    expect(called).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("Codex workflow file not found");
+    expect(queue).toContain("phase: refresh_branch");
+    expect(queue).not.toContain("Codex workflow file not found");
   });
 
   test("runs Codex with installed phase prompts", async () => {
@@ -1520,37 +1563,6 @@ describe("runner", () => {
     expect(queue).toContain("phase: implement");
   });
 
-  test("detects synchronizable main without mutating when it is behind origin", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "shipper-main-sync-"));
-    const originDir = join(rootDir, "origin.git");
-    const seedDir = join(rootDir, "seed");
-    const cloneDir = join(rootDir, "clone");
-
-    git(rootDir, ["init", "--bare", originDir]);
-    await mkdir(seedDir, { recursive: true });
-    git(seedDir, ["init", "-b", "main"]);
-    git(seedDir, ["config", "user.name", "Test User"]);
-    git(seedDir, ["config", "user.email", "test@example.com"]);
-    await writeFile(join(seedDir, "README.md"), "one\n");
-    git(seedDir, ["add", "README.md"]);
-    git(seedDir, ["commit", "-m", "chore: initial"]);
-    git(seedDir, ["remote", "add", "origin", originDir]);
-    git(seedDir, ["push", "-u", "origin", "main"]);
-
-    git(rootDir, ["clone", originDir, cloneDir]);
-    const before = git(cloneDir, ["rev-parse", "HEAD"]).trim();
-
-    await writeFile(join(seedDir, "README.md"), "two\n");
-    git(seedDir, ["add", "README.md"]);
-    git(seedDir, ["commit", "-m", "chore: update"]);
-    git(seedDir, ["push"]);
-
-    const status = await detectMainSyncStatus(cloneDir);
-
-    expect(status).toEqual({ ok: true });
-    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(before);
-  });
-
   test("dry-run prepare does not push local main commits", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "shipper-dry-run-no-push-"));
     const originDir = join(rootDir, "origin.git");
@@ -1608,44 +1620,12 @@ describe("runner", () => {
     expect(git(originDir, ["rev-parse", "main"]).trim()).toBe(originBefore);
   });
 
-  test("synchronizes main by pushing local commits when no upstream is configured", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "shipper-main-no-upstream-"));
-    const originDir = join(rootDir, "origin.git");
-    const seedDir = join(rootDir, "seed");
-    const cloneDir = join(rootDir, "clone");
-
-    git(rootDir, ["init", "--bare", originDir]);
-    await mkdir(seedDir, { recursive: true });
-    git(seedDir, ["init", "-b", "main"]);
-    git(seedDir, ["config", "user.name", "Test User"]);
-    git(seedDir, ["config", "user.email", "test@example.com"]);
-    await writeFile(join(seedDir, "README.md"), "one\n");
-    git(seedDir, ["add", "README.md"]);
-    git(seedDir, ["commit", "-m", "chore: initial"]);
-    git(seedDir, ["remote", "add", "origin", originDir]);
-    git(seedDir, ["push", "-u", "origin", "main"]);
-
-    git(rootDir, ["clone", originDir, cloneDir]);
-    git(cloneDir, ["branch", "--unset-upstream", "main"]);
-    git(cloneDir, ["config", "user.name", "Test User"]);
-    git(cloneDir, ["config", "user.email", "test@example.com"]);
-    await writeFile(join(cloneDir, "local.txt"), "local\n");
-    git(cloneDir, ["add", "local.txt"]);
-    git(cloneDir, ["commit", "-m", "chore: local"]);
-
-    const output = await synchronizeBaseBranchWithOrigin(cloneDir, "main");
-
-    expect(output).toContain("main");
-    expect(git(cloneDir, ["rev-parse", "HEAD"]).trim()).toBe(git(cloneDir, ["rev-parse", "origin/main"]).trim());
-  });
-
   test("prepare does not depend on the human checkout sync status", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
     let prepareCalled = false;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      mainSyncDetector: async () => ({ ok: false, reason: "Main has diverged from origin/main; reconcile main before preparing a new worktree." }),
       prepareWorkspace: async () => {
         prepareCalled = true;
         return "prepared\n";
@@ -1711,7 +1691,6 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      mainSyncDetector: async () => ({ ok: false, reason: "Main is behind origin/main" }),
       executor: async () => {
         executorCalled = true;
         return { exitCode: 0, output: "done" };
@@ -2161,8 +2140,6 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
     gitStatusDetector: async () => [],
-    mainSyncDetector: async () => ({ ok: true }),
-    syncBaseBranch: async (_projectDir, baseBranch) => `synced ${baseBranch}\n`,
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
     worktreeDependenciesReadyDetector: async () => true,
@@ -2175,6 +2152,7 @@ async function createHarness(queueContent: string, options: { createCommandFiles
       branch: "origin/main",
     }),
     prepareArchiveWorkspace: async (_projectDir, baseBranch) => `prepared archive workspace from origin/${baseBranch}\n`,
+    repairNativeFailure: async () => ({ repaired: false, output: "repair unavailable in test harness" }),
     refreshDeliveryBranch: async (_projectDir, changeName, baseBranch) => `refreshed ${changeName} from origin/${baseBranch}\n`,
     finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),

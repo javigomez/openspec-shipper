@@ -1,5 +1,7 @@
 import { commandAcceptsChangeArgument, type DeliverPhase } from "../../../domain/queue/queue.js";
 import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
+import { dirname, join } from "node:path";
+import { resolveProviderAsset, resolveProviderDirectory } from "../../templates/provider-assets.js";
 
 export const opencodeProvider: ExecutorProvider = {
   id: "opencode",
@@ -31,10 +33,27 @@ export const opencodeProvider: ExecutorProvider = {
       command: input.config.executor.opencode.bin,
       args,
       cwd: input.projectDir,
+      env: { OPENCODE_CONFIG_DIR: openCodeConfigDir(input.assetsDir ?? input.projectDir, input.phase) },
     };
   },
   detectFailureSignal,
 };
+
+export function openCodeConfigDir(projectDir: string, phase?: DeliverPhase): string {
+  if (phase) {
+    return dirname(dirname(openCodeCommandPath(projectDir, phase)));
+  }
+  return resolveProviderDirectory(projectDir, ".opencode", join("opencode", "assets"));
+}
+
+export function openCodeCommandPath(projectDir: string, phase: DeliverPhase): string {
+  const fileName = `${openCodeCommandName(phase)}.md`;
+  return resolveProviderAsset(
+    projectDir,
+    join(".opencode", "commands", fileName),
+    join("opencode", "assets", "commands", fileName),
+  );
+}
 
 export function openCodeCommandName(phase: DeliverPhase): string {
   switch (phase) {

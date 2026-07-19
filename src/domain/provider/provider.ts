@@ -6,6 +6,7 @@ export type ProviderCommand = {
   args: string[];
   cwd: string;
   stdin?: string;
+  env?: Record<string, string>;
 };
 
 export type BuildCommandInput = {

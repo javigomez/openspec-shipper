@@ -32,7 +32,7 @@ action. Do not include this line when the phase completes successfully.
 
 ## Discovery Commands
 
-Always run these from the repository root:
+Start from the repository root only to locate the prepared delivery worktree:
 
 ```bash
 pwd
@@ -40,12 +40,8 @@ git branch --show-current
 git status --short
 ```
 
-If the current branch is not the configured base branch, stop and report that the
-implement queue must be discovered from the root base branch checkout.
-
-If the base branch checkout is dirty, do not edit it. Continue only inside the
-already prepared change worktree. Do not run `git pull --ff-only` from a dirty
-base branch checkout.
+The human checkout may be on any branch and may be dirty. Do not inspect it as
+delivery evidence and never edit, switch, stash, reset, clean, or commit it.
 
 Use relative repository paths only. Never invent or type absolute paths under
 `/Users/...`; if an absolute path is needed, derive it from `pwd` first. If a
@@ -65,30 +61,22 @@ leave checks that require the new dependencies unchecked, and finish this phase
 successfully. The native runner executes `checks.updateDependencies` and
 schedules another `implement` pass to finish validation.
 
-When invocation arguments identify a target change, do targeted discovery only.
-Do not run `openspec list --json`. Instead inspect and validate that exact
-change:
+When invocation arguments identify a target change, enter its prepared
+worktree first and inspect the exact change there:
 
 ```bash
+cd worktrees/<change-name>
 test -f openspec/changes/<change-name>/proposal.md
 test -f openspec/changes/<change-name>/design.md
 test -f openspec/changes/<change-name>/tasks.md
 find openspec/changes/<change-name>/specs -name spec.md -print
 OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> validate <change-name>
-test -d worktrees/<change-name>
-test -f worktrees/<change-name>/openspec/changes/<change-name>/tasks.md
 ```
 
 If the targeted change is not eligible, stop and report the exact blocker. Do
 not select another change.
 
-Only when invocation arguments do not identify a target change, discover the
-general implement queue:
-
-```bash
-OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> list --json
-find worktrees -maxdepth 3 -name tasks.md -print 2>/dev/null
-```
+The runner always supplies a target change. Do not select another change.
 
 ## Candidate Rules
 
@@ -96,20 +84,16 @@ Select exactly one ready change.
 
 A ready change has:
 
-- `openspec/changes/<change-name>/proposal.md`
-- `openspec/changes/<change-name>/design.md`
-- `openspec/changes/<change-name>/tasks.md`
-- at least one `openspec/changes/<change-name>/specs/**/spec.md`
+- `worktrees/<change-name>/openspec/changes/<change-name>/proposal.md`
+- `worktrees/<change-name>/openspec/changes/<change-name>/design.md`
+- `worktrees/<change-name>/openspec/changes/<change-name>/tasks.md`
+- at least one `worktrees/<change-name>/openspec/changes/<change-name>/specs/**/spec.md`
 - a passing configured OpenSpec validation command for `<change-name>`
 - at least one unchecked task in `tasks.md`
 - an already prepared `worktrees/<change-name>` worktree
 
-If a change exists only in a worktree, treat that worktree as the authoritative
-place to continue the change only when the root base branch checkout confirms that
-the change has not already been archived.
-
-Skip changes that already have an open PR when `gh` can confirm it. If `gh` is
-unavailable, use local branch and worktree state as the claim lock.
+The prepared delivery worktree is the authoritative implementation snapshot.
+The runner owns PR and archive-state reconciliation.
 
 ## Worktree Rules
 

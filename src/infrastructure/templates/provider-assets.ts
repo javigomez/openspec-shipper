@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
-const PACKAGE_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
+const PACKAGE_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 export function resolveProviderAsset(projectDir: string, projectRelativePath: string, packageRelativePath: string): string {
   const projectOverride = join(projectDir, projectRelativePath);
@@ -10,4 +10,8 @@ export function resolveProviderAsset(projectDir: string, projectRelativePath: st
     return projectOverride;
   }
   return join(PACKAGE_ROOT, "templates", "providers", packageRelativePath);
+}
+
+export function resolveProviderDirectory(projectDir: string, projectRelativePath: string, packageRelativePath: string): string {
+  return resolveProviderAsset(projectDir, projectRelativePath, packageRelativePath);
 }

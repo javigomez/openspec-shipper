@@ -21,20 +21,21 @@ include it after success.
 
 ## Boundaries
 
-Archive runs only from the root base branch checkout. Do not run from a change
-worktree. Do not create or update PRs. Do not clean local worktrees or branches.
+Archive runs only from the detached integration worktree prepared by Shipper
+from `origin/<baseBranch>`. Do not run from a delivery worktree or the human
+checkout. Do not create PRs or clean local worktrees or branches.
 Do not run `git pull`, `git fetch`, `git rebase`, `git commit`, or `git push`.
-The OpenSpec Shipper runner owns Git synchronization, staging, commit, rebase,
-and push for this phase.
+The runner owns Git synchronization, staging, commit, CAS/PR publication, and
+retry for this phase.
 
 Set `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1` for every OpenSpec CLI invocation.
 
 ## Archive Rules
 
-From repository root:
+From the current integration worktree:
 
-1. Verify current checkout is the repository base branch.
-2. Verify `git status --short` is clean except ignored shipper runtime state.
+1. Verify HEAD is detached; this is expected for the integration workspace.
+2. Verify `git status --short` is clean.
 3. Inspect only `openspec/changes/{{CHANGE_NAME}}`.
 
 If `openspec/changes/{{CHANGE_NAME}}/` is missing, check whether it is already
@@ -50,7 +51,7 @@ complete and exit successfully. Do not emit the blocker line.
 For an active change:
 
 1. Verify proposal, design, tasks, and at least one `specs/**/spec.md` exist.
-2. Verify every task checkbox is complete on the base branch.
+2. Verify every task checkbox is complete in this integration snapshot.
 3. Run the configured OpenSpec validation command from
    `.openspec-shipper/config.json` (`checks.openspec`). The default npm profile
    expands to `npm run openspec:cli -- validate {{CHANGE_NAME}}`.

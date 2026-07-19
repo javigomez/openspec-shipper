@@ -5,14 +5,17 @@ execution surface for implementation agents.
 
 ## Core Model
 
-- The configured base branch is the canonical OpenSpec planning, sync, and
-  archive checkout. It defaults to `main`.
+- `origin/<baseBranch>` is the integration boundary. The human checkout may be
+  on any branch and must not be changed by Codex or Shipper phases.
+- Planning may originate in main, an ordinary branch, or a worktree; Shipper
+  adopts one committed snapshot.
 - Implementation work runs only in `worktrees/<change-name>`.
 - The shipper runner owns the native `prepare_worktree` phase. Codex must not
   create branches or worktrees during `implement`.
 - The shipper runner owns branch push and pull request creation through `git`
   and `gh`. Codex must not push branches or create PRs during `implement`.
-- Archive runs only after the implementation PR has merged.
+- Archive runs only after the implementation PR has merged, inside a detached
+  integration worktree built from the latest remote base.
 - Cleanup is native shipper housekeeping after OpenSpec archive has completed
   and pushed.
 
@@ -72,10 +75,11 @@ invent a scope.
 - `push` is native OpenSpec Shipper logic: it validates the completed worktree,
   pushes the selected implementation branch, and creates or reuses a PR with
   `gh`.
-- `sync_main` is native OpenSpec Shipper logic: it reconciles the root base
-  branch checkout with its origin branch.
-- `archive` runs OpenSpec archive from the root base branch checkout and leaves
-  the archive/spec diff for the runner. It must not commit, push, or clean
-  worktrees.
+- `refresh_branch` is native Shipper logic and updates delivery branches only
+  when required by conflicts, branch protection, or config.
+- `archive` runs from `.openspec-shipper/workspaces/integration` and leaves the
+  archive/spec diff for the runner. It must not commit, push, or clean worktrees.
+- `publish_archive` uses a compare-and-swap push or an archive PR, according to
+  config. Codex does not publish it.
 - `cleanup_worktree` is native OpenSpec Shipper logic: it removes only clean
   local implementation worktrees and merged local branches.

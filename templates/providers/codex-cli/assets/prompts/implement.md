@@ -57,6 +57,10 @@ Inside `worktrees/{{CHANGE_NAME}}`:
 2. Read proposal, design, delta specs, and tasks.
 3. Implement the next small unchecked task.
 4. Mark a task complete only after the work and relevant validation are done.
+   Keep task items as markdown checkboxes. OpenSpec Shipper accepts `- [ ]`,
+   `* [ ]`, `+ [ ]`, or numbered `1. [ ]` checkboxes, but completed work must
+   be marked with `[x]`. Do not convert task checkboxes to plain bullets or
+   plain numbered lists.
 5. Run the narrowest useful checks from this worktree.
 6. Run scoped formatting on changed files when the repo provides a formatter.
 7. Commit useful progress with a Conventional Commit.

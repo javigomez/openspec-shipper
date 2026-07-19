@@ -141,6 +141,10 @@ Once inside the selected worktree:
 2. Read the change proposal, design, delta specs, and tasks.
 3. Implement the next small unchecked task.
 4. Mark a task complete only after the work and relevant validation are done.
+   Keep task items as markdown checkboxes. OpenSpec Shipper accepts `- [ ]`,
+   `* [ ]`, `+ [ ]`, or numbered `1. [ ]` checkboxes, but completed work must
+   be marked with `[x]`. Do not convert task checkboxes to plain bullets or
+   plain numbered lists.
 5. Run the narrowest useful checks from this selected worktree so they exercise
    the claimed branch. If Jest reports no tests because the repo config ignores
    `/worktrees/`, rerun Jest from this worktree with `testPathIgnorePatterns`

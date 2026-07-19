@@ -137,6 +137,11 @@ runs `checks.updateDependencies` natively. This lets strict agents add a package
 without requiring network access inside their sandbox. If validation remains,
 the queue returns to `implement` with the refreshed worktree.
 
+OpenSpec Shipper tracks implementation progress through `tasks.md` markdown
+checkboxes. Use `- [ ]`, `* [ ]`, `+ [ ]`, or numbered `1. [ ]` task items, and
+mark completed tasks with `[x]`. A `tasks.md` with no checkboxes blocks
+immediately because Shipper cannot know which work remains.
+
 `implement` then implements inside that prepared workspace. `push` validates
 OpenSpec against the installed worktree, pushes the implementation branch, and
 opens or reuses a pull request with `gh`.

@@ -588,6 +588,61 @@ describe("runner", () => {
     expect(queue).toContain("phase: cleanup_worktree");
   });
 
+  test("treats star, plus, and numbered task checkboxes as complete before push", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    await writeWorktreeTasks(
+      harness.rootDir,
+      "add-name-greeting",
+      [
+        "  * [x] Implement optional name argument.",
+        "+ [X] Add Spanish greeting coverage.",
+        "1. [x] Run npm run check.",
+        "2) [X] Update docs.",
+      ].join("\n"),
+    );
+
+    let pushed = false;
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      localClaimPublishedDetector: async () => false,
+      pushBranchAndOpenPullRequest: async () => {
+        pushed = true;
+        return "pushed and opened PR https://github.com/example/project/pull/1\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(pushed).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_merge");
+  });
+
+  test("blocks implement preflight when tasks.md has no checkboxes", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    await writeWorktreeTasks(
+      harness.rootDir,
+      "add-name-greeting",
+      ["1. Implement optional name argument.", "2. Run npm run check."].join("\n"),
+    );
+
+    let executorCalled = false;
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async (_projectDir, changeName) => changeName === "add-name-greeting",
+      executor: async () => {
+        executorCalled = true;
+        return { exitCode: 0, output: "done\n" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(executorCalled).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("tasks.md has no task checkboxes");
+    expect(queue).toContain("![implement blocked](https://img.shields.io/badge/implement-blocked-red)");
+  });
+
   test("marks a deliver task done after cleanup succeeds", async () => {
     const harness = await createHarness(
       "- [ ] deliver test-20-migrate-notebook-access-button-rntl <!-- phase: cleanup_worktree -->\n",
@@ -1953,6 +2008,12 @@ async function createArchivedChange(projectDir: string, changeName: string): Pro
   await writeFile(join(archiveDir, "proposal.md"), "# Proposal\n");
   await writeFile(join(archiveDir, "design.md"), "# Design\n");
   await writeFile(join(archiveDir, "tasks.md"), "- [x] Done\n");
+}
+
+async function writeWorktreeTasks(projectDir: string, changeName: string, content: string): Promise<void> {
+  const changeDir = join(projectDir, "worktrees", changeName, "openspec", "changes", changeName);
+  await mkdir(changeDir, { recursive: true });
+  await writeFile(join(changeDir, "tasks.md"), `${content}\n`);
 }
 
 function implementedChangeEvidence(changeName: string): Partial<RunnerConfig> {

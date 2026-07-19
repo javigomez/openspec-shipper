@@ -251,6 +251,12 @@ and schedules another `implement` pass when validation tasks remain. The default
 npm profile uses `npm ci` for initial preparation and `npm install` for this
 post-implementation reconciliation.
 
+Shipper tracks implementation progress through markdown checkboxes in each
+change's `tasks.md`. It accepts `- [ ]`, `* [ ]`, `+ [ ]`, or numbered
+`1. [ ]` task items, and completed work must be marked with `[x]`. A `tasks.md`
+with no checkboxes blocks immediately because the queue cannot infer what work
+remains.
+
 ```mermaid
 sequenceDiagram
   participant Human

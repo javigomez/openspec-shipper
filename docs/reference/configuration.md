@@ -48,3 +48,32 @@ From highest to lowest priority:
 The `checks` object adapts Shipper to the target repository. Empty typecheck,
 lint, format, or unit commands are valid; Shipper does not assume every project
 uses the same language or scripts.
+
+## Executor models
+
+Each provider accepts a model (and, where supported, an effort level) in the
+`executor` section:
+
+```json
+{
+  "executor": {
+    "provider": "opencode",
+    "opencode": { "model": "opencode-go/deepseek-v4-pro" },
+    "codex": { "model": "gpt-5.5", "reasoningEffort": "low" },
+    "claude": { "model": "sonnet", "effort": "low" }
+  }
+}
+```
+
+The matching environment overrides are:
+
+```bash
+OPENSPEC_SHIPPER_OPENCODE_MODEL=
+OPENSPEC_SHIPPER_CODEX_MODEL=
+OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=
+OPENSPEC_SHIPPER_CLAUDE_MODEL=
+OPENSPEC_SHIPPER_CLAUDE_EFFORT=
+```
+
+See [Pick the right model for each job](../guide/choosing-models.md) for how to
+choose values.

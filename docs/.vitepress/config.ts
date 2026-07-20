@@ -9,17 +9,20 @@ export default defineConfig({
   head: [["meta", { name: "theme-color", content: "#0f766e" }]],
   themeConfig: {
     nav: [
-      { text: "Guide", link: "/guide/getting-started" },
+      { text: "Learn", link: "/guide/quick-start" },
       { text: "Providers", link: "/providers/" },
       { text: "Reference", link: "/reference/cli" },
     ],
     sidebar: [
       {
-        text: "Guide",
+        text: "Learn",
         items: [
-          { text: "Getting started", link: "/guide/getting-started" },
-          { text: "Delivery flow", link: "/guide/delivery-flow" },
-          { text: "Queue", link: "/guide/queue" },
+          { text: "1. Quick start", link: "/guide/quick-start" },
+          { text: "2. Master the queue", link: "/guide/queue" },
+          { text: "3. Plan changes while Shipper ships", link: "/guide/plan-changes" },
+          { text: "4. When the queue blocks", link: "/guide/blocked-queue" },
+          { text: "5. Pick the right model", link: "/guide/choosing-models" },
+          { text: "6. Ship like a team of two", link: "/guide/ship-like-a-team" },
         ],
       },
       {
@@ -29,13 +32,10 @@ export default defineConfig({
       {
         text: "Reference",
         items: [
+          { text: "Delivery flow", link: "/reference/delivery-flow" },
           { text: "CLI", link: "/reference/cli" },
           { text: "Configuration", link: "/reference/configuration" },
         ],
-      },
-      {
-        text: "Troubleshooting",
-        items: [{ text: "Blocked tasks", link: "/troubleshooting/blocked-tasks" }],
       },
     ],
     search: { provider: "local" },

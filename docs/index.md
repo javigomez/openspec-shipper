@@ -6,28 +6,21 @@ titleTemplate: Documentation
 
 # OpenSpec Shipper
 
-OpenSpec Shipper turns committed OpenSpec changes into isolated implementation
-worktrees, pull requests, canonical specifications, and cleaned local state. It
-reconciles the queue against Git and GitHub before every action, so Markdown
-remains the human-readable control surface without becoming a fragile state
-database.
+You write OpenSpec changes. Shipper implements them with an AI agent, opens the pull request, and archives the spec once you merge. Your job shifts from multitasking between branches to two things only: **writing specs** and **reviewing PRs**.
 
-```bash
-npm install -D openspec-shipper
-npx openspec-shipper init
-npx openspec-shipper doctor
-npx openspec-shipper queue add my-change
-npx openspec-shipper queue run
-```
+This documentation is organized as a learning path. Follow it in order the first time; each step builds on the previous one.
 
-## What it owns
+## The path
 
-- An editable delivery queue in `.openspec-shipper/queue.md`.
-- Dedicated worktrees for implementation and archive integration.
-- Native Git refresh, push, pull-request creation, publication, and cleanup.
-- Intelligent `implement` and `archive` phases powered by OpenCode, Codex CLI,
-  or Claude Code.
-- Explicit human handoffs when a merge or repair is required.
+1. **[Quick start](./guide/quick-start.md)** — install Shipper in your repo and ship your first change.
+2. **[Master the queue](./guide/queue.md)** — the queue is a Markdown file you own; learn to add, order, and control work.
+3. **[Plan changes while Shipper ships](./guide/plan-changes.md)** — write new OpenSpec changes on main, a branch, or a worktree, and feed them to the queue.
+4. **[When the queue blocks](./guide/blocked-queue.md)** — blocks are normal and expected; most fixes are one character.
+5. **[Pick the right model for each job](./guide/choosing-models.md)** — plan with powerful models, implement with cheaper ones.
+6. **[Ship like a team of two](./guide/ship-like-a-team.md)** — work habits that make you and Shipper a productive pair.
 
-Start with [Getting started](./guide/getting-started.md), then read the
-[delivery flow](./guide/delivery-flow.md) to understand each phase.
+Want to see it working before installing anything? Clone the **[one-minute demo repo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** and follow its README.
+
+## Reference
+
+When you need exact details: [Delivery flow](./reference/delivery-flow.md), [Providers](./providers/index.md), [CLI](./reference/cli.md), and [Configuration](./reference/configuration.md).

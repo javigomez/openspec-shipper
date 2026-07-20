@@ -1460,6 +1460,23 @@ describe("runner", () => {
     expect(queue).not.toContain("[!]");
   });
 
+  test("keeps push after a successful refresh when the branch is not published yet", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: refresh_branch -->\n");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => true,
+      localClaimPublishedDetector: async () => false,
+      refreshDeliveryBranch: async () => "Delivery branch already contains origin/main.\n",
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: push");
+    expect(queue).not.toContain("phase: refresh_branch");
+  });
+
   test("marks the first pending task blocked when the executor cannot start", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 

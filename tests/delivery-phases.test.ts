@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { DeliveryEvidence } from "../src/domain/delivery/phase";
 import { phaseDefinition } from "../src/domain/delivery/phases";
+import { reconcileDeliveryTask } from "../src/domain/delivery/reconcile";
+import { parseQueue } from "../src/domain/queue/queue";
 
 const evidence: DeliveryEvidence = {
   changeName: "add-name-greeting",
@@ -18,6 +20,23 @@ const evidence: DeliveryEvidence = {
 };
 
 describe("delivery phase definitions", () => {
+  test("does not move push back to refresh while the local commit is unpublished", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: push -->\n").tasks[0]!;
+    const decision = reconcileDeliveryTask(task, {
+      ...evidence,
+      declaredPhase: "push",
+      hasLocalClaim: true,
+      tasksComplete: true,
+      localClaimPublished: false,
+    });
+
+    expect(decision).toEqual({
+      kind: "unchanged",
+      phase: "push",
+      decision: { kind: "ready", phase: "push" },
+    });
+  });
+
   test("prepare transitions to implementation when a workspace already exists", () => {
     const phase = phaseDefinition("prepare_worktree");
 

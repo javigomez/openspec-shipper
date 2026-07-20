@@ -1,3 +1,5 @@
+**Languages:** English | [Español](README.es.md) | [Català](README.ca.md) | [简体中文](README.zh.md)
+
 # openspec-shipper
 
 **Ship OpenSpec changes on autopilot.** You write the spec, `openspec-shipper` queues it, hands it to an AI coding agent, opens the PR, and archives the change once it's merged — hands off.
@@ -19,7 +21,7 @@ Your working checkout is never touched. Everything happens in dedicated worktree
 
 ## See it in action (1 minute)
 
-Check out **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** — a tiny repo pre-loaded with OpenSpec changes ready to be shipped. Clone it and run the queue to watch the whole flow end to end.
+Check out **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** — a tiny repo pre-loaded with OpenSpec changes ready to be shipped. Clone it and follow the steps in its README to watch the whole flow end to end in about a minute.
 
 ## Try it yourself
 

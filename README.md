@@ -4,6 +4,8 @@
 
 **Ship OpenSpec changes on autopilot.** You write the spec, `openspec-shipper` queues it, hands it to an AI coding agent, opens the PR, and archives the change once it's merged — hands off.
 
+![openspec-shipper in action](https://raw.githubusercontent.com/javigomez/openspec-shipper/main/docs/images/openspec-shipper-teaser.gif)
+
 Free, MIT-licensed, and open source. Fork it, hack it, send a PR.
 
 ## What it does

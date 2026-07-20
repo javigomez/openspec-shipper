@@ -4,6 +4,8 @@
 
 **自动交付 OpenSpec 变更。** 你负责编写规格，`openspec-shipper` 负责将变更加入队列、交给 AI 编码代理实现、创建 PR，并在合并后完成归档。
 
+![openspec-shipper 演示](https://raw.githubusercontent.com/javigomez/openspec-shipper/main/docs/images/openspec-shipper-teaser.gif)
+
 免费、开源，并采用 MIT 许可证。欢迎 fork、修改和提交 PR。
 
 ## 它能做什么

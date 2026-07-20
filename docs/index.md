@@ -8,6 +8,8 @@ titleTemplate: Documentation
 
 You write OpenSpec changes. Shipper implements them with an AI agent, opens the pull request, and archives the spec once you merge. Your job shifts from multitasking between branches to two things only: **writing specs** and **reviewing PRs**.
 
+![openspec-shipper in action](./images/openspec-shipper-teaser.gif)
+
 This documentation is organized as a learning path. Follow it in order the first time; each step builds on the previous one.
 
 ## The path

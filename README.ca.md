@@ -4,6 +4,8 @@
 
 **Lliura canvis d'OpenSpec en pilot automàtic.** Tu escrius l'especificació; `openspec-shipper` l'afegeix a la cua, la passa a un agent de programació amb IA, obre la PR i arxiva el canvi quan es fusiona.
 
+![openspec-shipper en acció](https://raw.githubusercontent.com/javigomez/openspec-shipper/main/docs/images/openspec-shipper-teaser.gif)
+
 Gratuït, amb llicència MIT i de codi obert. Fes un fork, modifica'l, envia un PR.
 
 ## Què fa

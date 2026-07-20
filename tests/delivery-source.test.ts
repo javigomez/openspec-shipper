@@ -30,6 +30,32 @@ describe("delivery source resolution", () => {
     });
   });
 
+  test("blocks a planning branch whose change has uncommitted edits", async () => {
+    const repo = await createRepository();
+    git(repo, ["switch", "-c", "spec/add-name-greeting"]);
+    await writeChange(repo, "add-name-greeting", "planning branch");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "docs: plan name greeting"]);
+    await writeFile(join(repo, "openspec", "changes", "add-name-greeting", "proposal.md"), "# Proposal\n\nunfinished edit\n");
+
+    expect(() => resolveDeliverySource(repo, queueTask("add-name-greeting"), "main"))
+      .toThrow("has uncommitted changes in openspec/changes/add-name-greeting");
+  });
+
+  test("blocks an explicit source snapshot when its planning branch has uncommitted change edits", async () => {
+    const repo = await createRepository();
+    git(repo, ["switch", "-c", "spec/add-name-greeting"]);
+    await writeChange(repo, "add-name-greeting", "snapshot");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "docs: snapshot"]);
+    const commit = git(repo, ["rev-parse", "HEAD"]).trim();
+    await writeFile(join(repo, "openspec", "changes", "add-name-greeting", "tasks.md"), "- [ ] unfinished planning edit\n");
+
+    const task = queueTask("add-name-greeting", `source_branch: spec/add-name-greeting; source_commit: ${commit}`);
+    expect(() => resolveDeliverySource(repo, task, "main"))
+      .toThrow("has uncommitted changes in openspec/changes/add-name-greeting");
+  });
+
   test("prefers origin main when a leftover planning branch has no newer change commit", async () => {
     const repo = await createRepository();
     git(repo, ["switch", "-c", "spec/add-name-greeting"]);

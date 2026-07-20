@@ -20,6 +20,7 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
 
   if (task.sourceCommit) {
     requireChangeAtRef(projectDir, task.sourceCommit, changePath);
+    requireCleanPlanningBranch(projectDir, task.sourceBranch, task.change);
     return {
       kind: "snapshot",
       commit: resolveCommit(projectDir, task.sourceCommit),
@@ -39,6 +40,7 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
   if (task.sourceBranch) {
     const commit = resolveCommit(projectDir, task.sourceBranch);
     requireChangeAtRef(projectDir, commit, changePath);
+    requireCleanPlanningBranch(projectDir, task.sourceBranch, task.change);
     return { kind: "branch", commit, branch: task.sourceBranch };
   }
 
@@ -62,6 +64,7 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
     }
     if (newerCandidates.length === 1) {
       const [candidate] = newerCandidates;
+      requireCleanPlanningBranch(projectDir, candidate!.branch, task.change);
       return { kind: "branch", commit: candidate!.commit, branch: candidate!.branch };
     }
     throw ambiguousSource(task.change, newerCandidates.map((candidate) => candidate.branch));
@@ -69,6 +72,7 @@ export function resolveDeliverySource(projectDir: string, task: QueueTask, baseB
 
   if (candidates.length === 1) {
     const [candidate] = candidates;
+    requireCleanPlanningBranch(projectDir, candidate!.branch, task.change);
     return { kind: "branch", commit: candidate!.commit, branch: candidate!.branch };
   }
   if (candidates.length > 1) {
@@ -155,6 +159,23 @@ function requireCleanWorktree(worktree: string, changeName: string): void {
   if (dirty) {
     throw new Error(
       `Planning worktree for ${changeName} has uncommitted changes. Commit the planning snapshot before handing it to OpenSpec Shipper.`,
+    );
+  }
+}
+
+function requireCleanPlanningBranch(projectDir: string, branch: string | undefined, changeName: string): void {
+  if (!branch || branch.startsWith("origin/")) {
+    return;
+  }
+  const worktree = listedWorktrees(projectDir).find((candidate) => candidate.branch === branch);
+  if (!worktree) {
+    return;
+  }
+  const changePath = `openspec/changes/${changeName}`;
+  const dirty = git(worktree.path, ["status", "--short", "--untracked-files=all", "--", changePath], true).trim();
+  if (dirty) {
+    throw new Error(
+      `Planning source ${branch} has uncommitted changes in ${changePath}. Commit or discard them before handing the change to OpenSpec Shipper.`,
     );
   }
 }

@@ -236,7 +236,9 @@ Create a new OpenSpec change in whichever workspace is natural:
 
 1. Work on main, an ordinary planning branch such as `spec/<change>`, or a
    separate worktree.
-2. Validate the proposal and commit the complete planning snapshot.
+2. Validate the proposal and commit the complete planning snapshot. Any uncommitted
+   edit under that change blocks adoption, so Shipper never silently implements an
+   older snapshot while planning work remains in progress.
 3. Add `- [ ] deliver <change>` to `queue.md`, manually or with `queue add`.
 4. Run the queue. Shipper resolves the source once and records
    `source_branch` and `source_commit` in the markdown task.

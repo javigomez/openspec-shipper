@@ -44,12 +44,13 @@ That's it. Shipper takes it from queued to merged.
 
 - `git`
 - [`gh`](https://cli.github.com/) (GitHub CLI), authenticated
-- One of: OpenCode, Codex CLI, or Claude Code
-- npm, pnpm, or bun
+- One of: OpenCode, Codex CLI, or Claude Code subscription
 
 ## Contributing
 
-Issues, PRs, and forks are all welcome — this is a young project and the roadmap is wide open. If you build something on top of it or bend it into a shape that works better for your workflow, we'd love to hear about it.
+I am Javi Gómez, a solo developer in love with OpenSpec. I created this package to save me from doing non-valuable tasks, and being able to focus on creating changes and specs instead. I decided to share it with you all because I want you to save a lot of time like I did.
+
+Issues, PRs, and forks are all welcome — this is a young project and the roadmap is wide open. If you build something on top of it or bend it into a shape that works better for your workflow, I'd love to hear about it.
 
 ## Full documentation
 

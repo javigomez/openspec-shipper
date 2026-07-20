@@ -68,7 +68,7 @@ export async function runCli(argv: string[]): Promise<void> {
     console.log("  git add <installed files you want to track>");
     console.log("  git commit -m \"chore: install openspec shipper\"");
     console.log("  openspec-shipper doctor");
-    console.log("  openspec-shipper queue add <change-name>");
+    console.log("  openspec-shipper queue add <change-name> [--depends-on <change>] [--source-branch <branch>] [--archive-after <change>]");
     console.log("  openspec-shipper queue dry-run");
     console.log("  openspec-shipper queue run");
     process.exitCode = 0;

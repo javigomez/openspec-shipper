@@ -66,6 +66,32 @@ describe("CLI parser", () => {
     }
   });
 
+  test("passes explicit source and archive ordering flags to queue add", async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "shipper-cli-"));
+    const queuePath = join(projectDir, ".openspec-shipper/queue.md");
+    try {
+      await runCli([
+        "queue",
+        "add",
+        "add-name-greeting",
+        "--source-branch",
+        "spec/add-name-greeting",
+        "--archive-after",
+        "add-spanish-greeting",
+        "--project",
+        projectDir,
+        "--queue",
+        queuePath,
+      ]);
+
+      await expect(readFile(queuePath, "utf8")).resolves.toContain(
+        "source_branch: spec/add-name-greeting; archive_after: add-spanish-greeting",
+      );
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   test("initializes Claude Code with non-interactive provider options", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "shipper-cli-"));
     try {

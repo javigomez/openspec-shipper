@@ -4,7 +4,7 @@ Goal of this page: lose the fear of `[!]`. A blocked task is not a failure — i
 
 ## What it looks like
 
-![A blocked task in the queue, with the fix hint below it](/blocked-queue.png)
+![A blocked task in the queue, with the fix hint below it](../images/blocked-queue.png)
 
 ```md
 - [!] deliver add-name-greeting <!-- phase: push; reason: ...; log: runs/... -->

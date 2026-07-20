@@ -6,7 +6,7 @@ Goal of this page: adopt the few habits that turn Shipper from "a tool I run" in
 
 Running OpenSpec by hand, parallel work means *you* juggling: switch branch, implement, run checks, push, open PR, switch back, remember where you were. Every switch costs focus.
 
-![Before: you multitask across every branch. After: you write specs and review PRs while Shipper does the rest.](/before-vs-after.svg)
+![Before: you multitask across every branch. After: you write specs and review PRs while Shipper does the rest.](../images/before-vs-after.svg)
 
 With Shipper the parallelism moves out of your head and into worktrees. You hold two roles only:
 

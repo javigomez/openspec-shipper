@@ -1,4 +1,4 @@
-**Idiomas:** [English](README.md) | Español | [Català](README.ca.md) | [简体中文](README.zh.md)
+**Idiomas:** [English](https://github.com/javigomez/openspec-shipper/blob/main/README.md) | Español | [Català](https://github.com/javigomez/openspec-shipper/blob/main/README.ca.md) | [简体中文](https://github.com/javigomez/openspec-shipper/blob/main/README.zh.md)
 
 # openspec-shipper
 

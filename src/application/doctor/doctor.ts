@@ -281,7 +281,7 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
   const provider = config?.executor.provider ?? "opencode";
   if (provider === "codex-cli") {
     const checks: DoctorCheck[] = [
-      warning("codex provider", "Codex CLI provider is experimental; validate it in a demo repo before relying on it"),
+      ok("codex provider", "Codex CLI provider is supported"),
     ];
     for (const file of REQUIRED_CODEX_ASSETS) {
       checks.push((await fileExists(join(projectDir, file)))
@@ -293,7 +293,7 @@ async function checkProviderAssets(projectDir: string, config: ShipperConfig | u
 
   if (provider === "claude-code") {
     const checks: DoctorCheck[] = [
-      warning("claude-code provider", "Claude Code provider is experimental; validate it in a demo repo before relying on it"),
+      ok("claude-code provider", "Claude Code provider is supported"),
     ];
     for (const file of REQUIRED_CLAUDE_ASSETS) {
       const requiredLocal = file.endsWith("settings.json");

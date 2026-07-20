@@ -7,6 +7,7 @@ const env = {
   npm_config_cache: npmCache,
   NPM_CONFIG_CACHE: npmCache,
 };
+const releaseCurrentVersion = process.argv[2] === "current";
 
 function run(command, args, options = {}) {
   console.log(`\n$ ${[command, ...args].join(" ")}`);
@@ -58,7 +59,9 @@ ensureNpmLogin();
 run("npm", ["run", "typecheck"]);
 run("bun", ["test"]);
 run("npm", ["run", "prepack"]);
-run("npm", ["version", "patch"]);
+if (!releaseCurrentVersion) {
+  run("npm", ["version", "patch"]);
+}
 run("npm", ["pack", "--dry-run"]);
 run("npm", ["publish", "--access", "public"]);
 

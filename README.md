@@ -1,8 +1,8 @@
 # openspec-shipper
 
 `openspec-shipper` is a small CLI that runs an OpenSpec delivery queue through
-AI executors. OpenCode is the stable v1 provider; Codex CLI and Claude Code are
-experimental providers that share the same queue and delivery contract.
+AI executors. OpenCode, Codex CLI, and Claude Code are supported providers that
+share the same queue and delivery contract.
 
 The package is npm-first and repo-local by default:
 
@@ -410,7 +410,7 @@ cleanup succeeds as a no-op.
 
 ### OpenCode
 
-OpenCode is the stable v1 provider. It keeps the provider command filenames
+OpenCode keeps the provider command filenames
 for the phases that still need an agent. Git/GitHub housekeeping phases are
 native runner logic and do not call OpenCode:
 
@@ -427,7 +427,7 @@ With config enabled, it also adds:
 
 ### Codex CLI
 
-Codex CLI is experimental. It does not install `.opencode` assets; it installs
+Codex CLI does not install `.opencode` assets; it installs
 phase prompts under `.openspec-shipper/codex/`:
 
 ```bash
@@ -455,7 +455,7 @@ codex exec -C <projectDir> --sandbox workspace-write -c 'approval_policy="never"
 
 ### Claude Code
 
-Claude Code support is experimental. It runs `claude -p` non-interactively for
+Claude Code runs `claude -p` non-interactively for
 the intelligent `implement` and `archive` phases, while Shipper continues to own
 worktrees, branch refresh, push, pull requests, archive publication, and
 cleanup.
@@ -561,7 +561,7 @@ For local tarball testing before publish:
 npm run build
 npm pack
 cd /Users/javigomez/Documents/projects/openspec-demo
-npm install -D /path/to/openspec-shipper-0.2.0.tgz
+npm install -D /path/to/openspec-shipper-1.0.0.tgz
 npx openspec-shipper doctor
 npx openspec-shipper queue dry-run
 ```
@@ -578,8 +578,12 @@ npm_config_cache=/private/tmp/openspec-shipper-npm-cache npm pack --dry-run
 ```
 
 Then test the generated tarball in `openspec-demo`. Publish only after the
-manual OpenCode demo works:
+manual provider demos work:
 
 ```bash
-npm publish --access public
+npm run release-current
 ```
+
+`release-current` publishes the exact version declared in `package.json`; for
+the stable release that is `openspec-shipper@1.0.0`. Later maintenance releases
+can continue using `npm run release-patch`.

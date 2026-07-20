@@ -1,6 +1,6 @@
 {
   "name": "openspec-shipper",
-  "version": "0.2.1",
+  "version": "1.0.0",
   "description": "Ship OpenSpec changes through an agent-backed queue.",
   "license": "MIT",
   "bin": {
@@ -28,6 +28,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
+    "release-current": "node scripts/release-patch.mjs current",
     "release-patch": "node scripts/release-patch.mjs",
     "test": "bun test",
     "test:coverage": "bun test --coverage",

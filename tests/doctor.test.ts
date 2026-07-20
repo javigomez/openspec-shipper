@@ -65,7 +65,7 @@ describe("doctor", () => {
       }),
     });
 
-    expect(checks.some((check) => check.name === "codex provider" && check.severity === "warning")).toBe(true);
+    expect(checks.some((check) => check.name === "codex provider" && check.ok && check.message.includes("supported"))).toBe(true);
     expect(checks.some((check) => check.name === ".openspec-shipper/codex/prompts/implement.md" && check.ok && check.message.includes("packaged default"))).toBe(true);
     expect(checks.some((check) => check.name === ".opencode/commands/openspec-apply-worktree.md")).toBe(false);
   });
@@ -156,7 +156,7 @@ describe("doctor", () => {
       }),
     });
 
-    expect(checks.some((check) => check.name === "claude-code provider" && check.severity === "warning")).toBe(true);
+    expect(checks.some((check) => check.name === "claude-code provider" && check.ok && check.message.includes("supported"))).toBe(true);
     expect(checks.some((check) => check.name === "/usr/bin/true" && check.message === "Claude Code is authenticated")).toBe(true);
     expect(checks.some((check) => check.name === "claude sandbox" && check.ok)).toBe(true);
     expect(checks.some((check) => check.name === "claude CLI contract" && check.ok)).toBe(true);

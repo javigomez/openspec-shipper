@@ -24,7 +24,7 @@ export const CLAUDE_RESULT_SCHEMA = JSON.stringify({
 
 export const claudeCodeProvider: ExecutorProvider = {
   id: "claude-code",
-  displayName: "Claude Code (experimental)",
+  displayName: "Claude Code",
   defaultBin: "claude",
   activeProcessNames: ["claude"],
   buildCommand(input: BuildCommandInput) {

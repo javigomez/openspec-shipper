@@ -116,7 +116,7 @@ describe("executor providers", () => {
     expect(archive.env?.OPENCODE_CONFIG_DIR).toBe(join(import.meta.dir, "..", "templates/providers/opencode/assets"));
   });
 
-  test("Codex CLI provider builds an experimental exec command from installed prompts", async () => {
+  test("Codex CLI provider builds an exec command from installed prompts", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "shipper-codex-provider-"));
     await installCodexTemplates({ rootDir: join(import.meta.dir, ".."), projectDir });
     const task = parseQueue("- [ ] deliver add-name-greeting\n").tasks[0]!;

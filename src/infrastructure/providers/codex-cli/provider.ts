@@ -6,7 +6,7 @@ import { resolveProviderAsset } from "../../templates/provider-assets.js";
 
 export const codexCliProvider: ExecutorProvider = {
   id: "codex-cli",
-  displayName: "Codex CLI (experimental)",
+  displayName: "Codex CLI",
   defaultBin: "codex",
   activeProcessNames: ["codex"],
   buildCommand(input: BuildCommandInput) {

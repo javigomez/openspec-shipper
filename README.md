@@ -218,6 +218,7 @@ Locally changed files are reported as `drifted` instead of overwritten; use
 npx openspec-shipper queue add add-name-greeting
 npx openspec-shipper queue add openspec/changes/add-spanish-greeting
 npx openspec-shipper queue add add-shouting-greeting --depends-on add-spanish-greeting
+npx openspec-shipper queue add add-shouting-greeting --source-branch spec/add-shouting-greeting --archive-after add-name-greeting,add-spanish-greeting
 ```
 
 Queue format:
@@ -228,7 +229,9 @@ Queue format:
 ```
 
 Editing `queue.md` directly is a first-class workflow. `queue add` is only a
-convenience command.
+convenience command. `--source-branch` resolves an otherwise ambiguous planning
+source; `--archive-after` declares the archive ordering directly. It accepts a
+comma-separated change list.
 
 ### Human Handoff
 

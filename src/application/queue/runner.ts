@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createWriteStream, existsSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { access, appendFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
@@ -2763,12 +2763,25 @@ export function ensureChangeArtifacts(worktreeDir: string, changeName: string): 
     }
   }
 
-  const specs = spawnSync("find", [join(changeDir, "specs"), "-name", "spec.md", "-print"], {
-    encoding: "utf8",
-  });
-  if (specs.status !== 0 || specs.stdout.trim().length === 0) {
+  if (!containsDeltaSpec(join(changeDir, "specs"))) {
     throw new Error(`No OpenSpec delta spec found for ${changeName}.`);
   }
+}
+
+function containsDeltaSpec(directory: string): boolean {
+  try {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name === "spec.md") {
+        return true;
+      }
+      if (entry.isDirectory() && containsDeltaSpec(join(directory, entry.name))) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function projectRootFromWorktree(worktreeDir: string): string {

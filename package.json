@@ -26,6 +26,9 @@
     "target:update": "bun run index.ts update",
     "target:doctor": "bun run index.ts doctor",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "docs:dev": "vitepress docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run",
     "release-current": "node scripts/release-patch.mjs current",
@@ -36,6 +39,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitepress": "^1.6.4"
   }
 }

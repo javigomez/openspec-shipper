@@ -277,6 +277,11 @@ change's `tasks.md`. It accepts `- [ ]`, `* [ ]`, `+ [ ]`, or numbered
 with no checkboxes blocks immediately because the queue cannot infer what work
 remains.
 
+`design.md` is optional for simple OpenSpec changes. Shipper reads and preserves
+it when present, but implementation, push, archive, and archive reconciliation
+do not require it. The configured OpenSpec validation command remains the
+authority for the selected schema.
+
 Each successful `implement` invocation must also leave observable repository
 progress: a new commit, a changed `tasks.md`, or a changed worktree diff. If the
 provider reports success without any of those outcomes, Shipper blocks the task

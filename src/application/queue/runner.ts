@@ -2688,9 +2688,9 @@ async function deleteLocalBranchAfterCleanup(input: CleanupWorkspaceInput, archi
   }
 }
 
-function ensureChangeArtifacts(worktreeDir: string, changeName: string): void {
+export function ensureChangeArtifacts(worktreeDir: string, changeName: string): void {
   const changeDir = join(worktreeDir, "openspec", "changes", changeName);
-  for (const relativePath of ["proposal.md", "design.md", "tasks.md"]) {
+  for (const relativePath of ["proposal.md", "tasks.md"]) {
     const path = join(changeDir, relativePath);
     if (!fileExistsSync(path)) {
       throw new Error(`Required change artifact is missing: ${relative(projectRootFromWorktree(worktreeDir), path)}.`);
@@ -2976,7 +2976,6 @@ async function detectArchivedChangeOnDisk(projectDir: string, changeName: string
   return Boolean(
     archivePath &&
       (await pathExists(join(archivePath, "proposal.md"))) &&
-      (await pathExists(join(archivePath, "design.md"))) &&
       (await pathExists(join(archivePath, "tasks.md"))),
   );
 }

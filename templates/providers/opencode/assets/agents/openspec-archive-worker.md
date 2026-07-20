@@ -75,11 +75,13 @@ blocker:
 Select exactly one archive candidate. A valid candidate has:
 
 - `proposal.md`
-- `design.md`
 - `tasks.md`
 - at least one `specs/**/spec.md`
 - every task checkbox complete in the integration snapshot
 - a passing `OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 openspec validate <change-name>`
+
+`design.md` is optional. Preserve and use it when present, but do not reject an
+otherwise valid simple change when it is absent.
 
 If no merged change is archive-ready, report that and stop. Do not run checks,
 commit, or push.

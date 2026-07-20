@@ -67,7 +67,6 @@ worktree first and inspect the exact change there:
 ```bash
 cd worktrees/<change-name>
 test -f openspec/changes/<change-name>/proposal.md
-test -f openspec/changes/<change-name>/design.md
 test -f openspec/changes/<change-name>/tasks.md
 find openspec/changes/<change-name>/specs -name spec.md -print
 OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> validate <change-name>
@@ -85,11 +84,13 @@ Select exactly one ready change.
 A ready change has:
 
 - `worktrees/<change-name>/openspec/changes/<change-name>/proposal.md`
-- `worktrees/<change-name>/openspec/changes/<change-name>/design.md`
 - `worktrees/<change-name>/openspec/changes/<change-name>/tasks.md`
 - at least one `worktrees/<change-name>/openspec/changes/<change-name>/specs/**/spec.md`
 - a passing configured OpenSpec validation command for `<change-name>`
 - at least one unchecked task in `tasks.md`
+
+`design.md` is optional. Read and follow it when present, but do not block a
+simple OpenSpec change because it has no design artifact.
 - an already prepared `worktrees/<change-name>` worktree
 
 The prepared delivery worktree is the authoritative implementation snapshot.
@@ -122,7 +123,7 @@ OPENSPEC_SHIPPER_BLOCKED: prepared worktree missing for <change-name>
 Once inside the selected worktree:
 
 1. Run `git status --short`.
-2. Read the change proposal, design, delta specs, and tasks.
+2. Read the change proposal, delta specs, tasks, and `design.md` when present.
 3. Implement the next small unchecked task.
 4. Mark a task complete only after the work and relevant validation are done.
    Keep task items as markdown checkboxes. OpenSpec Shipper accepts `- [ ]`,

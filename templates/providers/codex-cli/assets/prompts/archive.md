@@ -50,7 +50,8 @@ complete and exit successfully. Do not emit the blocker line.
 
 For an active change:
 
-1. Verify proposal, design, tasks, and at least one `specs/**/spec.md` exist.
+1. Verify proposal, tasks, and at least one `specs/**/spec.md` exist. Read and
+   preserve `design.md` when present, but do not require it.
 2. Verify every task checkbox is complete in this integration snapshot.
 3. Run the configured OpenSpec validation command from
    `.openspec-shipper/config.json` (`checks.openspec`). The default npm profile

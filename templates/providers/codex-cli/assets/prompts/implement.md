@@ -35,7 +35,6 @@ cd worktrees/{{CHANGE_NAME}}
 git branch --show-current
 git status --short
 test -f openspec/changes/{{CHANGE_NAME}}/proposal.md
-test -f openspec/changes/{{CHANGE_NAME}}/design.md
 test -f openspec/changes/{{CHANGE_NAME}}/tasks.md
 find openspec/changes/{{CHANGE_NAME}}/specs -name spec.md -print
 OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 <configured openspec command> validate {{CHANGE_NAME}}
@@ -53,7 +52,8 @@ OPENSPEC_SHIPPER_BLOCKED: prepared worktree missing for {{CHANGE_NAME}}
 Inside `worktrees/{{CHANGE_NAME}}`:
 
 1. Run `git status --short`.
-2. Read proposal, design, delta specs, and tasks.
+2. Read proposal, delta specs, tasks, and `design.md` when present. `design.md`
+   is optional for simple OpenSpec changes and its absence is not a blocker.
 3. Implement the next small unchecked task.
 4. Mark a task complete only after the work and relevant validation are done.
    Keep task items as markdown checkboxes. OpenSpec Shipper accepts `- [ ]`,

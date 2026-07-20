@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeF
 import { join } from "node:path";
 import { hostname, tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { cleanupWorkspace, defaultConfig, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, type Executor, type RunnerConfig } from "../src/runner";
+import { cleanupWorkspace, defaultConfig, ensureChangeArtifacts, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
@@ -619,6 +619,43 @@ describe("runner", () => {
     expect(pushed).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: waiting_for_merge");
+  });
+
+  test("accepts a valid change without optional design.md before push", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-artifacts-"));
+    const worktreeDir = join(rootDir, "worktrees", "add-name-greeting");
+    const changeDir = join(worktreeDir, "openspec/changes/add-name-greeting");
+    await mkdir(join(changeDir, "specs/hello-cli"), { recursive: true });
+    await writeFile(join(changeDir, "proposal.md"), "# Proposal\n");
+    await writeFile(join(changeDir, "tasks.md"), "- [x] Implement greeting\n");
+    await writeFile(join(changeDir, "specs/hello-cli/spec.md"), "## ADDED Requirements\n");
+
+    expect(() => ensureChangeArtifacts(worktreeDir, "add-name-greeting")).not.toThrow();
+  });
+
+  test("still rejects a change missing a required proposal", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-artifacts-"));
+    const worktreeDir = join(rootDir, "worktrees", "add-name-greeting");
+    const changeDir = join(worktreeDir, "openspec/changes/add-name-greeting");
+    await mkdir(join(changeDir, "specs/hello-cli"), { recursive: true });
+    await writeFile(join(changeDir, "tasks.md"), "- [x] Implement greeting\n");
+    await writeFile(join(changeDir, "specs/hello-cli/spec.md"), "## ADDED Requirements\n");
+
+    expect(() => ensureChangeArtifacts(worktreeDir, "add-name-greeting")).toThrow("proposal.md");
+  });
+
+  test("recognizes an archived change without optional design.md", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+    const archiveDir = join(harness.rootDir, "openspec/changes/archive/2026-07-20-add-name-greeting");
+    await mkdir(archiveDir, { recursive: true });
+    await writeFile(join(archiveDir, "proposal.md"), "# Proposal\n");
+    await writeFile(join(archiveDir, "tasks.md"), "- [x] Implement greeting\n");
+
+    const exitCode = await runQueue("status", harness.config);
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
   });
 
   test("blocks implement preflight when tasks.md has no checkboxes", async () => {

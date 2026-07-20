@@ -38,6 +38,26 @@ const config = {
 };
 
 describe("executor providers", () => {
+  test("packaged provider instructions treat design.md as optional", async () => {
+    const rootDir = join(import.meta.dir, "..");
+    const paths = [
+      "templates/providers/opencode/assets/agents/openspec-apply-worker.md",
+      "templates/providers/opencode/assets/agents/openspec-archive-worker.md",
+      "templates/providers/codex-cli/assets/prompts/implement.md",
+      "templates/providers/codex-cli/assets/prompts/archive.md",
+      "templates/providers/claude-code/assets/prompts/implement.md",
+      "templates/providers/claude-code/assets/prompts/archive.md",
+    ];
+
+    for (const path of paths) {
+      const instructions = await readFile(join(rootDir, path), "utf8");
+      expect(instructions.toLowerCase()).toContain("design.md");
+      expect(instructions.toLowerCase()).toMatch(/optional|do not require|not a blocker/);
+      expect(instructions).not.toMatch(/test -f .*design\.md/);
+      expect(instructions).not.toContain("Verify proposal, design");
+    }
+  });
+
   test("OpenCode provider builds the current apply command", () => {
     const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
 

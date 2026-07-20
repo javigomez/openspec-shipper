@@ -71,6 +71,11 @@ prepare_worktree -> implement -> refresh_branch -> push -> waiting_for_merge
 command. If it is recreated without phase metadata, Shipper infers the most
 advanced valid phase instead of blindly starting over.
 
+`design.md` is optional for simple OpenSpec changes. Shipper reads and preserves
+it when present but does not require it during implementation, push, archive,
+or reconciliation. The configured OpenSpec validation command remains the
+authority for the selected schema.
+
 When independent changes touch the same `### Requirement:`, Shipper adds
 `archive_after` automatically. Their implementation can remain concurrent while
 canonical-spec publication is serialized.

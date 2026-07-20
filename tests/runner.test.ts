@@ -683,24 +683,58 @@ describe("runner", () => {
     expect(queue).toContain("![implement blocked](https://img.shields.io/badge/implement-blocked-red)");
   });
 
-  test("blocks a successful implement invocation that made no observable progress", async () => {
+  test("retries one successful implement invocation without observable progress before blocking", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
     await createImplementWorktree(harness.rootDir, "add-name-greeting");
 
-    const exitCode = await runQueue("next", {
+    const firstExitCode = await runQueue("next", {
       ...harness.config,
       localClaimDetector: async () => true,
       tasksCompleteDetector: async () => false,
       executor: async () => ({ exitCode: 0, output: "completed\n" }),
     });
 
-    expect(exitCode).toBe(1);
+    expect(firstExitCode).toBe(0);
+    const retryQueue = await readFile(harness.queuePath, "utf8");
+    expect(retryQueue).toContain("implement_no_progress_attempts: 1");
+    expect(retryQueue).toContain("- [ ] deliver add-name-greeting");
+
+    const secondExitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => ({ exitCode: 0, output: "completed\n" }),
+    });
+
+    expect(secondExitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("Implement completed without observable progress");
     const logs = await readdir(join(harness.config.stateDir, "runs"));
     const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
     expect(log).toContain("Implement progress check failed");
+  });
+
+  test("clears a no-progress retry counter once implement makes progress", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver add-name-greeting <!-- phase: implement; implement_no_progress_attempts: 1 -->\n",
+    );
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        await writeFile(join(worktreeDir, "implementation.txt"), "progress\n");
+        return { exitCode: 0, output: "completed\n" };
+      },
+      reconcileWorktreeDependencies: async () => "dependencies ready\n",
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).not.toContain("implement_no_progress_attempts");
   });
 
   test("accepts implement progress made through a worktree diff", async () => {

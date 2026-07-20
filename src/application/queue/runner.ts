@@ -214,6 +214,7 @@ const reportedArchiveOrderings = new Set<string>();
 const DEFAULT_STATS_INTERVAL_MS = 120_000;
 const DEFAULT_STATS_TIMEOUT_MS = 10_000;
 const DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE = 2;
+const MAX_CONSECUTIVE_IMPLEMENT_NO_PROGRESS_ATTEMPTS = 2;
 const KILL_GRACE_MS = 10_000;
 const SIGINT_DUPLICATE_GRACE_MS = 1_500;
 const ROOT_DIR = fileURLToPath(new URL("../../..", import.meta.url));
@@ -1009,8 +1010,24 @@ async function executeTask(
         implementProgressAfter &&
         !hasObservableImplementProgress(implementProgressBefore, implementProgressAfter)
       ) {
+        const attempts = Number(task.metadata.implement_no_progress_attempts ?? "0") + 1;
         const reason = "Implement completed without observable progress: no commits, task updates, or worktree changes were produced.";
         await appendFile(logPath, `\n## Implement progress check failed\n\n${reason}\n`);
+        if (attempts < MAX_CONSECUTIVE_IMPLEMENT_NO_PROGRESS_ATTEMPTS) {
+          const retryTask: QueueTask = {
+            ...task,
+            metadata: { ...task.metadata, implement_no_progress_attempts: String(attempts) },
+          };
+          const retryContent = advanceDeliverTaskToPhase(lines, retryTask, "implement", {
+            timestamp: (config.now?.() ?? new Date()).toISOString(),
+            logPath: relativeLogPath,
+            checkedAt: activity.checkedAt,
+            startedAt,
+          });
+          await writeFile(config.queuePath, retryContent);
+          console.warn(`[${new Date().toISOString()}] no observable implement progress; retrying once before blocking: ${task.rawCommand}`);
+          return 0;
+        }
         const nextContent = markTask(lines, task, "blocked", {
           timestamp: (config.now?.() ?? new Date()).toISOString(),
           reason,
@@ -1044,7 +1061,15 @@ async function executeTask(
       }
     }
 
-    const nextContent = advanceDeliverTask(lines, task, {
+    const completedTask = task.metadata.implement_no_progress_attempts
+      ? {
+          ...task,
+          metadata: Object.fromEntries(
+            Object.entries(task.metadata).filter(([key]) => key !== "implement_no_progress_attempts"),
+          ),
+        }
+      : task;
+    const nextContent = advanceDeliverTask(lines, completedTask, {
       timestamp: (config.now?.() ?? new Date()).toISOString(),
       logPath: relativeLogPath,
       checkedAt: activity.checkedAt,

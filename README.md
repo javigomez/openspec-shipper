@@ -289,9 +289,10 @@ authority for the selected schema.
 
 Each successful `implement` invocation must also leave observable repository
 progress: a new commit, a changed `tasks.md`, or a changed worktree diff. If the
-provider reports success without any of those outcomes, Shipper blocks the task
-immediately instead of spending tokens in an implement loop. No run counter is
-stored; the check is derived fresh from the worktree before and after every call.
+provider reports success without any of those outcomes, Shipper retries once.
+Two consecutive no-progress results block the task instead of spending tokens in
+an implement loop. The temporary retry counter is stored in the task metadata
+and disappears as soon as progress is observed.
 
 ```mermaid
 sequenceDiagram

@@ -553,6 +553,7 @@ npx openspec-shipper queue dry-run
 Run these before publishing:
 
 ```bash
+npm run typecheck
 bun test
 npm run build
 npm_config_cache=/private/tmp/openspec-shipper-npm-cache npm pack --dry-run

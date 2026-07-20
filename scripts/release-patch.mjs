@@ -55,6 +55,7 @@ function ensureNpmLogin() {
 
 ensureCleanGitTree();
 ensureNpmLogin();
+run("npm", ["run", "typecheck"]);
 run("bun", ["test"]);
 run("npm", ["run", "prepack"]);
 run("npm", ["version", "patch"]);

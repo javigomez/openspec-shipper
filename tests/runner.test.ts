@@ -1567,7 +1567,6 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      gitStatusDetector: async () => [" M package.json", "?? .opencode/"],
       executor: async () => {
         called = true;
         return { exitCode: 0, output: "done" };
@@ -1663,7 +1662,6 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      gitStatusDetector: async () => ["?? .openspec-shipper/shipper.lock"],
       executor: async () => {
         executorCalled = true;
         return { exitCode: 0, output: "done" };
@@ -1688,7 +1686,6 @@ describe("runner", () => {
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      gitStatusDetector: async () => [" M package.json", "?? .opencode/"],
       executor: async () => {
         called = true;
         return { exitCode: 0, output: "done" };
@@ -2157,7 +2154,6 @@ async function createHarness(queueContent: string, options: { createCommandFiles
     maxBlockedTasks: 0,
     processDetector: async () => [],
     gitRemoteDetector: async () => "git@github.com:example/project.git",
-    gitStatusDetector: async () => [],
     activeChangeDetector: async () => true,
     pullRequestDetector: async () => undefined,
     worktreeDependenciesReadyDetector: async () => true,

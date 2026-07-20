@@ -153,6 +153,20 @@ describe("queue parser", () => {
     expect(next).toContain("custom: keep-me");
   });
 
+  test("preserves an explicitly empty archive_after override", () => {
+    const result = parseQueue(
+      "- [ ] deliver add-name-greeting <!-- archive_after: -->\n",
+    );
+    const task = result.tasks[0]!;
+
+    expect(task.archiveAfterDeclared).toBe(true);
+    expect(task.archiveAfter).toEqual([]);
+
+    const next = markTaskChecking(result.lines, task, { timestamp: "2026-07-20T10:00:00.000Z" });
+    expect(next).toContain("archive_after:");
+    expect(parseQueue(next).tasks[0]!.archiveAfterDeclared).toBe(true);
+  });
+
   test("archive_after waits only when the dependent task reaches archive", () => {
     const result = parseQueue([
       "- [ ] deliver change-a <!-- phase: waiting_for_merge -->",

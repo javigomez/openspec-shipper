@@ -77,8 +77,14 @@ or reconciliation. The configured OpenSpec validation command remains the
 authority for the selected schema.
 
 When independent changes touch the same `### Requirement:`, Shipper adds
-`archive_after` automatically. Their implementation can remain concurrent while
-canonical-spec publication is serialized.
+an ephemeral archive ordering automatically. Their implementation can remain
+concurrent while canonical-spec publication is serialized. Inferred ordering is
+recomputed on every reconciliation, shown as inferred in status output, logged
+under `.openspec-shipper/runs/archive-ordering.log`, and never written to
+`queue.md`.
+
+An explicit `archive_after` is authoritative. Use `archive_after: change-a` to
+declare ordering or an empty `archive_after:` to disable inference for that task.
 
 ## Run
 

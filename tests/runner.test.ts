@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { hostname, tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { cleanupWorkspace, defaultConfig, ensureChangeArtifacts, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, type Executor, type RunnerConfig } from "../src/runner";
-import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT } from "../src/queue";
+import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT, parseQueue } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
 import { claudeSettingsContent, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
@@ -813,20 +813,90 @@ describe("runner", () => {
   });
 
   test("infers archive ordering when independent changes touch the same requirement", async () => {
-    const harness = await createHarness(
-      "- [ ] deliver change-a\n- [ ] deliver change-b\n",
-    );
+    const queueContent = [
+      "- [!] deliver change-a <!-- phase: archive -->",
+      "- [ ] deliver change-b <!-- phase: archive -->",
+      "",
+    ].join("\n");
+    const harness = await createHarness(queueContent);
     for (const change of ["change-a", "change-b"]) {
       const specsDir = join(harness.rootDir, "worktrees", change, "openspec", "changes", change, "specs", "hello-cli");
       await mkdir(specsDir, { recursive: true });
       await writeFile(join(specsDir, "spec.md"), "## MODIFIED Requirements\n\n### Requirement: Greeting output\n");
     }
 
-    const exitCode = await runQueue("status", harness.config);
+    let executorCalled = false;
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      maxBlockedTasks: 100,
+      activeChangeDetector: async () => true,
+      localClaimDetector: async () => true,
+      localClaimPublishedDetector: async () => true,
+      tasksCompleteDetector: async () => true,
+      executor: async () => {
+        executorCalled = true;
+        return { exitCode: 0, output: "unexpected\n" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(executorCalled).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toBe(queueContent);
+    const consoleLines = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => call.join(" "));
+    expect(consoleLines.some((line) => line.includes('waits for change-a (inferred: both modify requirement "Greeting output")'))).toBe(true);
+    const audit = await readFile(join(harness.config.stateDir, "runs/archive-ordering.log"), "utf8");
+    expect(audit).toContain('Inferred archive ordering: change-b waits for change-a (requirement "Greeting output")');
+
+    const changeBSpec = join(harness.rootDir, "worktrees/change-b/openspec/changes/change-b/specs/hello-cli/spec.md");
+    await writeFile(changeBSpec, "## MODIFIED Requirements\n\n### Requirement: Spanish greeting output\n");
+    const nextExitCode = await runQueue("dry-run", {
+      ...harness.config,
+      maxBlockedTasks: 100,
+      activeChangeDetector: async () => true,
+      localClaimDetector: async () => true,
+      localClaimPublishedDetector: async () => true,
+      tasksCompleteDetector: async () => true,
+    });
+
+    expect(nextExitCode).toBe(0);
+    const updatedConsoleLines = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => call.join(" "));
+    expect(updatedConsoleLines.some((line) => line.includes("Next task: deliver change-b"))).toBe(true);
+    expect(await readFile(harness.queuePath, "utf8")).toBe(queueContent);
+  });
+
+  test("an explicit empty archive_after disables inferred ordering", async () => {
+    const queueContent = [
+      "- [!] deliver change-a <!-- phase: archive -->",
+      "- [ ] deliver change-b <!-- phase: archive; archive_after: -->",
+      "",
+    ].join("\n");
+    const harness = await createHarness(queueContent);
+    for (const change of ["change-a", "change-b"]) {
+      const specsDir = join(harness.rootDir, "worktrees", change, "openspec", "changes", change, "specs", "hello-cli");
+      await mkdir(specsDir, { recursive: true });
+      await writeFile(join(specsDir, "spec.md"), "## MODIFIED Requirements\n\n### Requirement: Greeting output\n");
+    }
+
+    const exitCode = await runQueue("dry-run", {
+      ...harness.config,
+      maxBlockedTasks: 100,
+      activeChangeDetector: async () => true,
+      localClaimDetector: async () => true,
+      localClaimPublishedDetector: async () => true,
+      tasksCompleteDetector: async () => true,
+    });
 
     expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("deliver change-b <!-- archive_after: change-a;");
+    expect(queue).toBe(queueContent);
+    expect(parseQueue(queue).tasks[1]!.archiveAfterDeclared).toBe(true);
+    const consoleLines = (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => call.join(" "));
+    expect(consoleLines.some((line) => line.includes("Next task: deliver change-b"))).toBe(true);
+    expect(await access(join(harness.config.stateDir, "runs/archive-ordering.log")).then(() => true).catch(() => false)).toBe(false);
   });
 
   test("blocks deliver tasks waiting for merge", async () => {

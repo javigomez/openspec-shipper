@@ -21,6 +21,9 @@ export type QueueTask = {
   phase?: DeliverPhase;
   dependsOn: string[];
   archiveAfter: string[];
+  archiveAfterDeclared: boolean;
+  inferredArchiveAfter: string[];
+  inferredArchiveReasons: Record<string, string[]>;
   sourceBranch?: string;
   sourceCommit?: string;
   sourceWorktree?: string;
@@ -376,6 +379,9 @@ type ParsedTaskMetadata = Pick<
   | "phase"
   | "dependsOn"
   | "archiveAfter"
+  | "archiveAfterDeclared"
+  | "inferredArchiveAfter"
+  | "inferredArchiveReasons"
   | "sourceBranch"
   | "sourceCommit"
   | "sourceWorktree"
@@ -392,7 +398,14 @@ type ParsedTaskMetadata = Pick<
 
 function parseTaskMetadata(value: string): ParsedTaskMetadata {
   const match = value.match(COMMENT_PATTERN);
-  const metadata: ParsedTaskMetadata = { dependsOn: [], archiveAfter: [], metadata: {} };
+  const metadata: ParsedTaskMetadata = {
+    dependsOn: [],
+    archiveAfter: [],
+    archiveAfterDeclared: false,
+    inferredArchiveAfter: [],
+    inferredArchiveReasons: {},
+    metadata: {},
+  };
   if (!match) {
     return metadata;
   }
@@ -401,7 +414,19 @@ function parseTaskMetadata(value: string): ParsedTaskMetadata {
     const [rawKey, ...rawValueParts] = part.split(":");
     const key = rawKey?.trim();
     const rawValue = rawValueParts.join(":").trim();
-    if (!key || !rawValue) {
+    if (!key) {
+      continue;
+    }
+
+    if (key === "archive_after") {
+      metadata.archiveAfterDeclared = true;
+      metadata.archiveAfter = rawValue
+        .split(",")
+        .map((dependency) => normalizeChangeName(dependency))
+        .filter((dependency): dependency is string => Boolean(dependency));
+    }
+
+    if (!rawValue) {
       continue;
     }
 
@@ -413,13 +438,6 @@ function parseTaskMetadata(value: string): ParsedTaskMetadata {
 
     if (key === "depends_on") {
       metadata.dependsOn = rawValue
-        .split(",")
-        .map((dependency) => normalizeChangeName(dependency))
-        .filter((dependency): dependency is string => Boolean(dependency));
-    }
-
-    if (key === "archive_after") {
-      metadata.archiveAfter = rawValue
         .split(",")
         .map((dependency) => normalizeChangeName(dependency))
         .filter((dependency): dependency is string => Boolean(dependency));
@@ -452,7 +470,7 @@ function archiveDependenciesAreDone(task: QueueTask, tasks: QueueTask[]): boolea
     return true;
   }
 
-  return task.archiveAfter.every((dependency) =>
+  return [...task.archiveAfter, ...task.inferredArchiveAfter].every((dependency) =>
     tasks.some((candidate) =>
       candidate.change === dependency &&
       (candidate.status === "done" || ["cleanup_worktree"].includes(deliverPhase(candidate)))
@@ -507,7 +525,7 @@ function persistentMetadataParts(task: QueueTask): string[] {
   ]);
   const parts = [
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
-    task.archiveAfter.length > 0 ? `archive_after: ${task.archiveAfter.join(",")}` : undefined,
+    task.archiveAfterDeclared ? `archive_after: ${task.archiveAfter.join(",")}` : undefined,
     task.sourceBranch ? `source_branch: ${task.sourceBranch}` : undefined,
     task.sourceCommit ? `source_commit: ${task.sourceCommit}` : undefined,
     task.sourceWorktree ? `source_worktree: ${task.sourceWorktree}` : undefined,

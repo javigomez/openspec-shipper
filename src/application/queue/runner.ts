@@ -17,7 +17,6 @@ import {
   markTaskRunning,
   parseQueue,
   removeRetryHintsForUnblockedTasks,
-  rewritePendingTask,
   taskSlug,
   type DeliverPhase,
   type QueueTask,
@@ -210,6 +209,8 @@ const DEFAULT_BUSY_DELAY_MS = 60_000;
 const DEFAULT_TASK_TIMEOUT_MS = 90 * 60_000;
 const DEFAULT_HEARTBEAT_MS = 60_000;
 const LOCK_STALE_AFTER_MS = 10 * 60_000;
+const requirementKeysCache = new Map<string, Set<string>>();
+const reportedArchiveOrderings = new Set<string>();
 const DEFAULT_STATS_INTERVAL_MS = 120_000;
 const DEFAULT_STATS_TIMEOUT_MS = 10_000;
 const DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE = 2;
@@ -1170,7 +1171,7 @@ async function reconcileQueue(
   queue: Awaited<ReturnType<typeof loadQueue>>,
 ): Promise<Awaited<ReturnType<typeof loadQueue>>> {
   const originalContent = queue.lines.join("\n");
-  let content = await inferArchiveDependencies(config, removeRetryHintsForUnblockedTasks(originalContent));
+  let content = removeRetryHintsForUnblockedTasks(originalContent);
   let changed = content !== originalContent;
   let cursor = 0;
 
@@ -1232,66 +1233,131 @@ async function reconcileQueue(
   }
 
   if (!changed) {
-    return queue;
+    return await applyInferredArchiveDependencies(config, queue);
   }
 
   await writeFile(config.queuePath, content);
-  return await loadQueue(config.queuePath);
+  return await applyInferredArchiveDependencies(config, await loadQueue(config.queuePath));
 }
 
-async function inferArchiveDependencies(config: RunnerConfig, content: string): Promise<string> {
-  let current = parseQueue(content);
+async function applyInferredArchiveDependencies(
+  config: RunnerConfig,
+  queue: Awaited<ReturnType<typeof loadQueue>>,
+): Promise<Awaited<ReturnType<typeof loadQueue>>> {
   const requirements = new Map<string, Set<string>>();
-  for (const task of current.tasks) {
+  for (const task of queue.tasks) {
     if (!task.change) {
       continue;
     }
     requirements.set(task.change, await requirementKeysForTask(config, task));
   }
 
-  for (let index = 0; index < current.tasks.length; index += 1) {
-    const task = current.tasks[index];
-    if (!task?.change || task.status === "done") {
+  const tasks: QueueTask[] = [];
+  for (let index = 0; index < queue.tasks.length; index += 1) {
+    const task = queue.tasks[index]!;
+    if (!task.change || task.status === "done" || task.archiveAfterDeclared) {
+      tasks.push({ ...task, inferredArchiveAfter: [], inferredArchiveReasons: {} });
       continue;
     }
     const own = requirements.get(task.change) ?? new Set<string>();
     if (own.size === 0) {
+      tasks.push({ ...task, inferredArchiveAfter: [], inferredArchiveReasons: {} });
       continue;
     }
-    const inferred = new Set(task.archiveAfter);
-    for (const previous of current.tasks.slice(0, index)) {
-      if (!previous.change || task.dependsOn.includes(previous.change)) {
+    const inferred = new Set<string>();
+    const inferredReasons: Record<string, string[]> = {};
+    for (const previous of queue.tasks.slice(0, index)) {
+      if (
+        !previous.change ||
+        previous.status === "done" ||
+        deliverPhase(previous) === "cleanup_worktree" ||
+        task.dependsOn.includes(previous.change)
+      ) {
         continue;
       }
       const previousRequirements = requirements.get(previous.change) ?? new Set<string>();
-      if ([...own].some((key) => previousRequirements.has(key))) {
+      const shared = [...own].filter((key) => previousRequirements.has(key));
+      if (shared.length > 0) {
         inferred.add(previous.change);
+        inferredReasons[previous.change] = shared.map(displayRequirementKey);
       }
     }
-    if (inferred.size === task.archiveAfter.length) {
-      continue;
+    const inferredArchiveAfter = [...inferred];
+    if (inferredArchiveAfter.length > 0) {
+      await reportInferredArchiveOrdering(config, task.change, inferredArchiveAfter, inferredReasons);
     }
-    const inferredTask = { ...task, archiveAfter: [...inferred] };
-    content = rewritePendingTask(current.lines, inferredTask);
-    console.warn(`Inferred archive_after for ${task.change}: ${inferredTask.archiveAfter.join(", ")} (shared OpenSpec requirements).`);
-    current = parseQueue(content);
+    tasks.push({ ...task, inferredArchiveAfter, inferredArchiveReasons: inferredReasons });
   }
-  return content;
+  return { ...queue, tasks };
 }
 
 async function requirementKeysForTask(config: RunnerConfig, task: QueueTask): Promise<Set<string>> {
   const changeName = task.change!;
   const worktreeSpecs = join(config.projectDir, "worktrees", changeName, "openspec", "changes", changeName, "specs");
   if (await pathExists(worktreeSpecs)) {
-    return await requirementKeysFromDirectory(worktreeSpecs);
+    const worktreeDir = join(config.projectDir, "worktrees", changeName);
+    const cacheKey = cleanWorktreeRequirementCacheKey(worktreeDir, worktreeSpecs, changeName);
+    if (cacheKey && requirementKeysCache.has(cacheKey)) {
+      return new Set(requirementKeysCache.get(cacheKey));
+    }
+    const keys = await requirementKeysFromDirectory(worktreeSpecs);
+    if (cacheKey) {
+      requirementKeysCache.set(cacheKey, new Set(keys));
+    }
+    return keys;
   }
 
   try {
-    const source = (config.sourceResolver ?? resolveDeliverySource)(config.projectDir, task, configuredBaseBranch(config));
-    return requirementKeysFromGit(config.projectDir, source.commit, `openspec/changes/${changeName}/specs`);
+    const commit = task.sourceCommit
+      ?? (config.sourceResolver ?? resolveDeliverySource)(config.projectDir, task, configuredBaseBranch(config)).commit;
+    const cacheKey = `${config.projectDir}\0${changeName}\0${commit}`;
+    const cached = requirementKeysCache.get(cacheKey);
+    if (cached) {
+      return new Set(cached);
+    }
+    const keys = requirementKeysFromGit(config.projectDir, commit, `openspec/changes/${changeName}/specs`);
+    requirementKeysCache.set(cacheKey, new Set(keys));
+    return keys;
   } catch {
     return new Set();
   }
+}
+
+function cleanWorktreeRequirementCacheKey(worktreeDir: string, specsDir: string, changeName: string): string | undefined {
+  const head = spawnSync("git", ["-C", worktreeDir, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", worktreeDir, "status", "--porcelain", "--", relative(worktreeDir, specsDir)], { encoding: "utf8" });
+  if (head.status !== 0 || status.status !== 0 || status.stdout.trim()) {
+    return undefined;
+  }
+  return `${worktreeDir}\0${changeName}\0${head.stdout.trim()}`;
+}
+
+async function reportInferredArchiveOrdering(
+  config: RunnerConfig,
+  changeName: string,
+  dependencies: string[],
+  reasons: Record<string, string[]>,
+): Promise<void> {
+  const details = dependencies.map((dependency) => {
+    const requirements = reasons[dependency] ?? [];
+    return `${dependency} (${requirements.map((requirement) => `requirement \"${requirement}\"`).join(", ")})`;
+  }).join("; ");
+  const message = `Inferred archive ordering: ${changeName} waits for ${details}.`;
+  const reportKey = `${config.projectDir}\0${message}`;
+  if (reportedArchiveOrderings.has(reportKey)) {
+    return;
+  }
+  reportedArchiveOrderings.add(reportKey);
+  console.warn(message);
+  const runsDir = join(config.stateDir, "runs");
+  await mkdir(runsDir, { recursive: true });
+  const timestamp = (config.now?.() ?? new Date()).toISOString();
+  await appendFile(join(runsDir, "archive-ordering.log"), `[${timestamp}] ${message}\n`);
+}
+
+function displayRequirementKey(key: string): string {
+  const requirement = key.slice(key.indexOf(":") + 1).trim();
+  return requirement ? `${requirement[0]?.toUpperCase()}${requirement.slice(1)}` : key;
 }
 
 async function requirementKeysFromDirectory(specsDir: string): Promise<Set<string>> {
@@ -3158,8 +3224,19 @@ function waitingReason(task: QueueTask): string {
     return "waits for its PR to merge";
   }
 
-  if (["archive", "publish_archive", "waiting_for_archive_merge", "cleanup_worktree"].includes(deliverPhase(task)) && task.archiveAfter.length > 0) {
-    return `waits to archive after ${task.archiveAfter.join(", ")}`;
+  if (["archive", "publish_archive", "waiting_for_archive_merge", "cleanup_worktree"].includes(deliverPhase(task))) {
+    if (task.archiveAfter.length > 0) {
+      return `waits to archive after ${task.archiveAfter.join(", ")} (declared in queue.md)`;
+    }
+    if (task.inferredArchiveAfter.length > 0) {
+      return task.inferredArchiveAfter.map((dependency) => {
+        const requirements = task.inferredArchiveReasons[dependency] ?? [];
+        const reason = requirements.length > 0
+          ? `both modify ${requirements.map((requirement) => `requirement \"${requirement}\"`).join(", ")}`
+          : "shared OpenSpec requirements";
+        return `waits for ${dependency} (inferred: ${reason})`;
+      }).join("; ");
+    }
   }
 
   return `waits for ${task.dependsOn.join(", ")}`;

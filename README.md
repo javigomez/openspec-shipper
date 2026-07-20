@@ -384,9 +384,16 @@ result and recalculates archive from the new base, up to `archive.maxAttempts`.
 In `pull-request` mode it opens a separate archive PR and waits for its merge.
 
 Independent changes may implement concurrently but touch the same canonical
-requirement. Shipper infers `archive_after` from matching `### Requirement:`
-headers and serializes only their archive phases. You can also write that
-metadata explicitly in `queue.md`.
+requirement. Shipper infers archive ordering from matching `### Requirement:`
+headers and applies it in memory only to their archive phases. The inference is
+recomputed from repository evidence on every reconciliation and is never written
+to `queue.md`; if the overlap disappears, the ordering disappears with it.
+
+An explicit `archive_after` in `queue.md` is complete human authority for that
+task. List dependencies to declare an order, or write `archive_after:` with an
+empty value to disable inference after reviewing a false positive. Status output
+labels inferred waits and their shared requirements. Decisions are also appended
+to `.openspec-shipper/runs/archive-ordering.log` for later diagnosis.
 
 The `cleanup_worktree` phase is OpenSpec Shipper
 housekeeping: it removes a clean local `worktrees/<change-name>` worktree and

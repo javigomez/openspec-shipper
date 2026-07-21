@@ -21,6 +21,14 @@ Ja fas servir [OpenSpec](https://github.com/Fission-AI/OpenSpec) per escriure pr
 
 El teu checkout principal no es modifica. Tot passa en worktrees dedicats, així que pots continuar planificant el canvi següent mentre Shipper lliura l'actual.
 
+## Construït amb Codex i GPT-5.6
+
+He construït `openspec-shipper` amb [Codex](https://github.com/openai/codex) com a company d'enginyeria. GPT-5.6 m'ha ajudat a raonar sobre l'arquitectura, qüestionar decisions de disseny, investigar errors, revisar casos límit i convertir un problema personal de flux de treball en una eina que altres desenvolupadors poden fer servir.
+
+Codex m'ha ajudat a convertir aquestes decisions en codi TypeScript, tests, integracions amb proveïdors, empaquetatge npm, documentació i repositoris de demostració. Ha participat en tot el cicle de desenvolupament: planificació, implementació, depuració, proves, refactorització i preparació de releases.
+
+Codex també és una peça central del producte. Shipper pot lliurar cada canvi d'OpenSpec de la cua a Codex CLI dins d'un worktree aïllat, mentre que el runner s'encarrega dels passos mecànics de Git i GitHub. El projecte s'ha construït amb Codex i ara ajuda altres desenvolupadors a fer-lo servir de manera més efectiva: dedicant tokens a implementar feina valuosa en lloc de gastar-los en coordinació repetitiva.
+
 ## Mira-ho en acció (1 minut)
 
 Fes un cop d'ull a **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)**: un repositori petit preparat amb canvis d'OpenSpec llestos per lliurar. Clona'l i segueix els passos del README per veure el flux complet, de principi a fi, en aproximadament un minut.

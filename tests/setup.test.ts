@@ -14,12 +14,10 @@ describe("target setup", () => {
       profile: "node-npm",
     });
 
-    expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-apply-worktree.md"))).toBe(true);
-    expect(result.some((file) => file.target.endsWith(".opencode/commands/openspec-archive-merged.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/workflow.md"))).toBe(true);
+    expect(result.some((file) => file.target.endsWith(".openspec-shipper/codex/prompts/implement.md"))).toBe(true);
     expect(result.some((file) => file.target.endsWith(".github/workflows/open-pr-on-branch-push.yml"))).toBe(false);
-    expect(await readFile(join(harness.projectDir, ".opencode/agents/openspec-archive-worker.md"), "utf8")).toContain(
-      "Do not clean local worktrees or branches",
-    );
+    expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.profile).toBe("node-npm");
     expect(shipperConfig.safety).toEqual({ enablePush: true, enableArchive: true });
@@ -28,7 +26,8 @@ describe("target setup", () => {
     expect(shipperConfig.delivery).toEqual({ refreshPolicy: "auto" });
     expect(shipperConfig.archive).toEqual({ publishMode: "direct", maxAttempts: 3 });
     expect(shipperConfig.github.autoOpenPr).toBe(false);
-    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=opencode");
+    expect(shipperConfig.executor.provider).toBe("codex-cli");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
     const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");
     expect(installedReadme).toContain("Required After Init");
     expect(installedReadme).toContain("git commit -m \"chore: install openspec shipper\"");

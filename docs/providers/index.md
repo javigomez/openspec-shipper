@@ -8,6 +8,27 @@ For guidance on *which* model to run on each provider (and why cheap
 implementation models pair well with expensive planning models), see
 [Pick the right model for each job](../guide/choosing-models.md).
 
+## Codex CLI
+
+```bash
+npx openspec-shipper init --provider codex-cli
+```
+
+Prompts and workflow overrides live under `.openspec-shipper/codex/`. The
+default configuration uses `gpt-5.6-luna` with extra-high (`xhigh`) reasoning effort.
+
+`init` uses Codex CLI as its default provider. Choose another provider explicitly
+with `--provider opencode` or `--provider claude-code`.
+
+Model selection:
+
+```json
+{ "executor": { "provider": "codex-cli", "codex": { "model": "gpt-5.6-luna", "reasoningEffort": "xhigh" } } }
+```
+
+Override per run with `OPENSPEC_SHIPPER_CODEX_MODEL` and
+`OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT`.
+
 ## OpenCode
 
 ```bash
@@ -24,24 +45,6 @@ Model selection:
 ```
 
 Override per run with `OPENSPEC_SHIPPER_OPENCODE_MODEL`.
-
-## Codex CLI
-
-```bash
-npx openspec-shipper init --provider codex-cli
-```
-
-Prompts and workflow overrides live under `.openspec-shipper/codex/`. The
-The default configuration uses `gpt-5.6-luna` with extra-high (`xhigh`) reasoning effort.
-
-Model selection:
-
-```json
-{ "executor": { "provider": "codex-cli", "codex": { "model": "gpt-5.6-luna", "reasoningEffort": "xhigh" } } }
-```
-
-Override per run with `OPENSPEC_SHIPPER_CODEX_MODEL` and
-`OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT`.
 
 ## Claude Code
 

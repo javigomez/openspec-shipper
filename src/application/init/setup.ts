@@ -98,7 +98,7 @@ export async function installClaudeTemplates(config: SetupConfig): Promise<Insta
 export async function installShipperKit(config: SetupConfig): Promise<InstalledFile[]> {
   const profile = config.profile ?? "node-npm";
   const existingConfig = await readShipperConfig(config.projectDir);
-  const selectedProvider = config.provider ?? existingConfig?.executor.provider ?? "opencode";
+  const selectedProvider = config.provider ?? existingConfig?.executor.provider ?? "codex-cli";
   const installed = [
     ...(await installProviderTemplates(selectedProvider, config)),
     ...(await installTemplateTree(config, join(config.rootDir, TARGET_TEMPLATE_DIR), config.projectDir)),
@@ -430,7 +430,7 @@ function firstLine(value: string): string | undefined {
   return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
 }
 
-function defaultEnvExample(provider: ExecutorProviderId = "opencode"): string {
+function defaultEnvExample(provider: ExecutorProviderId = "codex-cli"): string {
   return [
     `OPENSPEC_SHIPPER_PROVIDER=${provider}`,
     "OPENSPEC_SHIPPER_OPENCODE_BIN=opencode",

@@ -18,7 +18,7 @@ npm install -D openspec-shipper
 npx openspec-shipper init
 ```
 
-`init` asks which AI executor you use, which package manager, and a few options. It installs everything under `.openspec-shipper/` (plus provider assets) — it never touches your app's code or your root `README.md`.
+`init` asks which AI executor you use, which package manager, and a few options. Codex CLI is the default provider; you can choose OpenCode or Claude Code during the prompts or with `--provider`. It installs everything under `.openspec-shipper/` (plus provider assets) — it never touches your app's code or your root `README.md`.
 
 Commit what it installed, so the queue can see it from the remote base branch:
 

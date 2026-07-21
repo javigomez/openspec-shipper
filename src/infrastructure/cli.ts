@@ -314,10 +314,10 @@ async function promptInitOptions(
     );
     const provider = parseProvider(
       answerOrDefault(
-        await rl.question(`Provider opencode|codex-cli|claude-code (${parsed.provider ?? providerFlag(flags.provider) ?? "opencode"}): `),
-        parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
+        await rl.question(`Provider opencode|codex-cli|claude-code (${parsed.provider ?? providerFlag(flags.provider) ?? "codex-cli"}): `),
+        parsed.provider ?? providerFlag(flags.provider) ?? "codex-cli",
       ),
-      parsed.provider ?? providerFlag(flags.provider) ?? "opencode",
+      parsed.provider ?? providerFlag(flags.provider) ?? "codex-cli",
     );
     const providerBin = provider === "claude-code"
       ? answerOrDefault(await rl.question(`Claude Code binary (${parsed.providerBin ?? "claude"}): `), parsed.providerBin ?? "claude")

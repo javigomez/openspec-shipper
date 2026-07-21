@@ -94,8 +94,8 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
       },
       codex: {
         bin: "codex",
-        model: "gpt-5.5",
-        reasoningEffort: "low",
+        model: "gpt-5.6-luna",
+        reasoningEffort: "xhigh",
       },
       claude: {
         bin: "claude",

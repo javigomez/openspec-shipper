@@ -32,12 +32,12 @@ npx openspec-shipper init --provider codex-cli
 ```
 
 Prompts and workflow overrides live under `.openspec-shipper/codex/`. The
-default configuration uses `gpt-5.5` with low reasoning effort.
+The default configuration uses `gpt-5.6-luna` with extra-high (`xhigh`) reasoning effort.
 
 Model selection:
 
 ```json
-{ "executor": { "provider": "codex-cli", "codex": { "model": "gpt-5.5", "reasoningEffort": "low" } } }
+{ "executor": { "provider": "codex-cli", "codex": { "model": "gpt-5.6-luna", "reasoningEffort": "xhigh" } } }
 ```
 
 Override per run with `OPENSPEC_SHIPPER_CODEX_MODEL` and

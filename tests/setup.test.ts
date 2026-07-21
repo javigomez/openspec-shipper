@@ -94,7 +94,14 @@ describe("target setup", () => {
     expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.executor.provider).toBe("codex-cli");
-    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
+    expect(shipperConfig.executor.codex).toMatchObject({
+      model: "gpt-5.6-luna",
+      reasoningEffort: "xhigh",
+    });
+    const envExample = await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8");
+    expect(envExample).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
+    expect(envExample).toContain("OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.6-luna");
+    expect(envExample).toContain("OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=xhigh");
   });
 
   test("installs Claude Code assets without modifying the target .claude directory", async () => {

@@ -59,7 +59,7 @@ Each provider accepts a model (and, where supported, an effort level) in the
   "executor": {
     "provider": "opencode",
     "opencode": { "model": "opencode-go/deepseek-v4-pro" },
-    "codex": { "model": "gpt-5.5", "reasoningEffort": "low" },
+    "codex": { "model": "gpt-5.6-luna", "reasoningEffort": "xhigh" },
     "claude": { "model": "sonnet", "effort": "low" }
   }
 }

@@ -45,8 +45,8 @@ OpenCode is the easiest place to experiment with cheap implementation models, si
   "executor": {
     "provider": "codex-cli",
     "codex": {
-      "model": "gpt-5.5",
-      "reasoningEffort": "low"
+      "model": "gpt-5.6-luna",
+      "reasoningEffort": "xhigh"
     }
   }
 }
@@ -55,12 +55,12 @@ OpenCode is the easiest place to experiment with cheap implementation models, si
 Or per run:
 
 ```bash
-OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.5 \
-OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=low \
+OPENSPEC_SHIPPER_CODEX_MODEL=gpt-5.6-luna \
+OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=xhigh \
 npx openspec-shipper queue run
 ```
 
-`reasoningEffort` is the cheap lever here: `low` is usually plenty for well-specified tasks.
+`reasoningEffort` controls how deeply Codex reasons. The default is `xhigh` for maximum reliability on implementation tasks; use `low`, `medium`, or `high` when speed or cost matters more.
 
 ### Claude Code
 

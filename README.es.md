@@ -21,14 +21,6 @@ Ya usas [OpenSpec](https://github.com/Fission-AI/OpenSpec) para escribir propues
 
 Tu checkout principal no se modifica. Todo ocurre en worktrees dedicados, así que puedes seguir planificando el siguiente cambio mientras Shipper entrega el actual.
 
-## Construido con Codex y GPT-5.6
-
-He construido `openspec-shipper` con [Codex](https://github.com/openai/codex) como compañero de ingeniería. GPT-5.6 me ayudó a razonar sobre la arquitectura, cuestionar decisiones de diseño, investigar fallos, revisar casos límite y convertir un problema personal de flujo de trabajo en una herramienta que otros desarrolladores pueden usar.
-
-Codex me ayudó a convertir esas decisiones en código TypeScript, tests, integraciones con proveedores, empaquetado npm, documentación y repositorios de demostración. Participó en todo el ciclo de desarrollo: planificación, implementación, depuración, pruebas, refactorización y preparación de releases.
-
-Codex también es una pieza central del producto. Shipper puede entregar cada cambio de OpenSpec de la cola a Codex CLI dentro de un worktree aislado, mientras el runner se ocupa de los pasos mecánicos de Git y GitHub. El proyecto se ha construido con Codex y ahora ayuda a otros desarrolladores a usarlo de forma más efectiva: dedicando tokens a implementar trabajo valioso en lugar de gastarlos en coordinación repetitiva.
-
 ## Míralo en acción (1 minuto)
 
 Echa un vistazo a **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)**: un repositorio pequeño preparado con cambios de OpenSpec listos para entregar. Clónalo y sigue los pasos de su README para ver el flujo completo, de principio a fin, en aproximadamente un minuto.
@@ -69,3 +61,12 @@ Los issues, las PRs y los forks son bienvenidos. Es un proyecto joven y la hoja 
 La referencia de comandos, las opciones de configuración, el funcionamiento interno de la cola, la configuración de los proveedores y todo lo demás está en el sitio de documentación:
 
 **https://javigomez.github.io/openspec-shipper/**
+
+
+## Construido con Codex y GPT-5.6
+
+He construido `openspec-shipper` con [Codex](https://github.com/openai/codex) como compañero de ingeniería. GPT-5.6 me ayudó a razonar sobre la arquitectura, cuestionar decisiones de diseño, investigar fallos, revisar casos límite y convertir un problema personal de flujo de trabajo en una herramienta que otros desarrolladores pueden usar.
+
+Codex me ayudó a convertir esas decisiones en código TypeScript, tests, integraciones con proveedores, empaquetado npm, documentación y repositorios de demostración. Participó en todo el ciclo de desarrollo: planificación, implementación, depuración, pruebas, refactorización y preparación de releases.
+
+Codex también es una pieza central del producto. Shipper puede entregar cada cambio de OpenSpec de la cola a Codex CLI dentro de un worktree aislado, mientras el runner se ocupa de los pasos mecánicos de Git y GitHub. El proyecto se ha construido con Codex y ahora ayuda a otros desarrolladores a usarlo de forma más efectiva: dedicando tokens a implementar trabajo valioso en lugar de gastarlos en tareas redundantes.

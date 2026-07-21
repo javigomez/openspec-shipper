@@ -21,14 +21,6 @@ You already use [OpenSpec](https://github.com/Fission-AI/OpenSpec) to write chan
 
 Your working checkout is never touched. Everything happens in dedicated worktrees, so you can keep planning your next change while Shipper delivers the current one.
 
-## Built with Codex and GPT-5.6
-
-I built `openspec-shipper` with [Codex](https://github.com/openai/codex) as an active engineering partner. GPT-5.6 helped me reason through the architecture, challenge design decisions, investigate failures, review edge cases, and turn a personal workflow problem into a product that other developers can use.
-
-Codex helped turn those decisions into TypeScript code, tests, provider integrations, npm packaging, documentation, and demo repositories. It was involved across the full development lifecycle: planning, implementation, debugging, testing, refactoring, and release preparation.
-
-Codex is also central to the product itself. Shipper can hand each queued OpenSpec change to Codex CLI inside an isolated worktree, while the runner takes care of the mechanical Git and GitHub steps. The project was built with Codex, and now helps other developers use Codex more effectively: spending tokens on meaningful implementation work instead of repetitive coordination.
-
 ## See it in action (1 minute)
 
 Check out **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** — a tiny repo pre-loaded with OpenSpec changes ready to be shipped. Clone it and follow the steps in its README to watch the whole flow end to end in about a minute.
@@ -69,3 +61,11 @@ Issues, PRs, and forks are all welcome — this is a young project and the roadm
 Command reference, configuration options, queue internals, provider setup, and everything else lives in the documentation site:
 
 **https://javigomez.github.io/openspec-shipper/**
+
+## Built with Codex and GPT-5.6
+
+I built `openspec-shipper` with [Codex](https://github.com/openai/codex) as an active engineering partner. GPT-5.6 helped me reason through the architecture, challenge design decisions, investigate failures, review edge cases, and turn a personal workflow problem into a product that other developers can use.
+
+Codex helped turn those decisions into TypeScript code, tests, provider integrations, npm packaging, documentation, and demo repositories. It was involved across the full development lifecycle: planning, implementation, debugging, testing, refactoring, and release preparation.
+
+Codex is also central to the product itself. Shipper can hand each queued OpenSpec change to Codex CLI inside an isolated worktree, while the runner takes care of the mechanical Git and GitHub steps. The project was built with Codex, and now helps other developers use Codex more effectively: spending tokens on meaningful implementation work instead of repetitive coordination.

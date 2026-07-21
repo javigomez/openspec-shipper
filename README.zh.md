@@ -21,14 +21,6 @@
 
 你的主工作区不会被修改。所有操作都在独立的 worktree 中进行，因此 Shipper 在交付当前变更时，你仍然可以继续规划下一个变更。
 
-## 使用 Codex 和 GPT-5.6 构建
-
-我将 [Codex](https://github.com/openai/codex) 作为主动参与工程工作的伙伴，用它构建了 `openspec-shipper`。GPT-5.6 帮助我思考架构、质疑设计决策、调查故障、审查边界情况，并把一个个人工作流问题变成其他开发者也能使用的工具。
-
-Codex 帮助我把这些决策落地为 TypeScript 代码、测试、执行器集成、npm 打包、文档和演示仓库。它参与了完整的软件开发生命周期：规划、实现、调试、测试、重构和发布准备。
-
-Codex 也是产品本身的核心组成部分。Shipper 可以把队列中的每个 OpenSpec 变更交给隔离 worktree 中的 Codex CLI，同时由 runner 负责 Git 和 GitHub 的机械化步骤。这个项目用 Codex 构建，现在也帮助其他开发者更高效地使用 Codex：把 token 用在真正有价值的实现工作上，而不是重复的流程协调上。
-
 ## 一分钟看效果
 
 查看 **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)**：这是一个预置了待交付 OpenSpec 变更的小型仓库。克隆仓库并按照 README 操作，大约一分钟即可看到完整的端到端流程。
@@ -69,3 +61,11 @@ npx openspec-shipper queue run
 命令参考、配置选项、队列内部机制、执行器配置以及其他内容都可以在文档站点中找到：
 
 **https://javigomez.github.io/openspec-shipper/**
+
+## 使用 Codex 和 GPT-5.6 构建
+
+我将 [Codex](https://github.com/openai/codex) 作为主动参与工程工作的伙伴，用它构建了 `openspec-shipper`。GPT-5.6 帮助我思考架构、质疑设计决策、调查故障、审查边界情况，并把一个个人工作流问题变成其他开发者也能使用的工具。
+
+Codex 帮助我把这些决策落地为 TypeScript 代码、测试、执行器集成、npm 打包、文档和演示仓库。它参与了完整的软件开发生命周期：规划、实现、调试、测试、重构和发布准备。
+
+Codex 也是产品本身的核心组成部分。Shipper 可以把队列中的每个 OpenSpec 变更交给隔离 worktree 中的 Codex CLI，同时由 runner 负责 Git 和 GitHub 的机械化步骤。这个项目用 Codex 构建，现在也帮助其他开发者更高效地使用 Codex：把 token 用在真正有价值的实现工作上，而不是重复的流程协调上。

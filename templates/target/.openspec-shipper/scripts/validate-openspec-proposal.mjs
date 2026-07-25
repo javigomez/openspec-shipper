@@ -1,5 +1,10 @@
 import { spawnSync } from "node:child_process";
 
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log("Usage: npm run openspec:validate-proposal -- <change-name>");
+  process.exit(0);
+}
+
 const changeName = process.argv[2];
 
 if (!changeName) {

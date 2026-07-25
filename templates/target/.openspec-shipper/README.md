@@ -26,6 +26,10 @@ npx openspec-shipper doctor
 `init` installs dependencies by default. If it was run with `--no-install`, run
 the selected package manager before `doctor`.
 
+The installed proposal validator supports `--help` and `-h`; `doctor` uses that
+help path as a safe probe without inventing a change name. If you replace this
+validator with a project-specific wrapper, keep the same zero-exit help contract.
+
 ## Human Handoff
 
 Create and validate a change on main, an ordinary branch, or a worktree. Commit

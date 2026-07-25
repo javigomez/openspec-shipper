@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -36,6 +37,13 @@ describe("target setup", () => {
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/scripts/validate-openspec-proposal.mjs"), "utf8")).toContain("openspec:validate-proposal");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.md"), "utf8")).toBe("# OpenSpec Shipper Queue\n\n");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/queue.example.md"), "utf8")).toBe("# OpenSpec Changes to ship\n\n- [ ] deliver CHANGE_NAME\n");
+    const proposalHelp = spawnSync(
+      process.execPath,
+      [join(harness.projectDir, ".openspec-shipper/scripts/validate-openspec-proposal.mjs"), "--help"],
+      { cwd: harness.projectDir, encoding: "utf8" },
+    );
+    expect(proposalHelp.status).toBe(0);
+    expect(proposalHelp.stdout).toContain("Usage: npm run openspec:validate-proposal -- <change-name>");
     expect(await readdir(join(harness.projectDir, ".openspec-shipper/runs"))).toEqual([]);
     expect(await readdir(join(harness.projectDir, ".openspec-shipper/tmp"))).toEqual([]);
     expect(await readFile(join(harness.projectDir, ".gitignore"), "utf8")).toBe([

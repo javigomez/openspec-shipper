@@ -21,8 +21,9 @@ export default defineConfig({
           { text: "2. Master the queue", link: "/guide/queue" },
           { text: "3. Plan changes while Shipper ships", link: "/guide/plan-changes" },
           { text: "4. When the queue blocks", link: "/guide/blocked-queue" },
-          { text: "5. Pick the right model", link: "/guide/choosing-models" },
-          { text: "6. Ship like a team of two", link: "/guide/ship-like-a-team" },
+          { text: "5. Troubleshooting", link: "/guide/troubleshooting" },
+          { text: "6. Pick the right model", link: "/guide/choosing-models" },
+          { text: "7. Ship like a team of two", link: "/guide/ship-like-a-team" },
         ],
       },
       {

@@ -95,7 +95,7 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     evidence.hasLocalClaim &&
     evidence.tasksComplete &&
     !evidence.localClaimPublished &&
-    evidence.declaredPhase !== "push"
+    (phasePrecedesOrMatches(evidence.declaredPhase, "refresh_branch") || evidence.declaredPhase === "archive")
   ) {
     return transitionInference("refresh_branch", "local implementation is complete but not published");
   }

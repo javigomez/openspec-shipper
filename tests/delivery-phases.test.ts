@@ -37,6 +37,23 @@ describe("delivery phase definitions", () => {
     });
   });
 
+  test("does not move archive publication back to refresh while the delivery claim is unpublished", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: publish_archive -->\n").tasks[0]!;
+    const decision = reconcileDeliveryTask(task, {
+      ...evidence,
+      declaredPhase: "publish_archive",
+      hasLocalClaim: true,
+      tasksComplete: true,
+      localClaimPublished: false,
+    });
+
+    expect(decision).toEqual({
+      kind: "unchanged",
+      phase: "publish_archive",
+      decision: { kind: "ready", phase: "publish_archive" },
+    });
+  });
+
   test("prepare transitions to implementation when a workspace already exists", () => {
     const phase = phaseDefinition("prepare_worktree");
 

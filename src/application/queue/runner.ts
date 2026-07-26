@@ -86,6 +86,7 @@ export type RunnerConfig = {
   heartbeatMs: number;
   maxBlockedTasks: number;
   activeExecutorAllowance?: number;
+  signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   executor?: Executor;
   processDetector?: ProcessDetector;
   gitRemoteDetector?: GitRemoteDetector;
@@ -261,9 +262,13 @@ export function defaultConfig(): RunnerConfig {
   };
 }
 
-export async function runQueue(mode: RunnerMode, config: RunnerConfig): Promise<number> {
+export type RunQueueOptions = {
+  force?: boolean;
+};
+
+export async function runQueue(mode: RunnerMode, config: RunnerConfig, options: RunQueueOptions = {}): Promise<number> {
   if (mode === "stop") {
-    return await requestStop(config);
+    return await requestStop(config, options.force === true);
   }
 
   if (mode === "stats") {
@@ -391,7 +396,7 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
   let busyState: { reason: string; firstSeenAt: number; checks: number } | undefined;
 
   try {
-    console.log("Queue run started. Use `bun run queue:stop` to stop at the next safe checkpoint.");
+    console.log("Queue run started. Use `openspec-shipper queue stop` to stop at the next safe checkpoint, or `openspec-shipper queue stop --force` to interrupt immediately.");
     console.log("Press Ctrl-C only when you want to interrupt this runner immediately.");
     await clearStopRequest(config);
 
@@ -1967,8 +1972,43 @@ async function createRunLogPath(config: RunnerConfig, task: QueueTask, timestamp
   return join(runsDir, `${timestamp.replace(/[:.]/g, "-")}-${taskSlug(task)}.log`);
 }
 
-async function requestStop(config: RunnerConfig): Promise<number> {
+async function requestStop(config: RunnerConfig, force: boolean): Promise<number> {
   await mkdir(config.stateDir, { recursive: true });
+
+  if (force) {
+    const lockPath = join(config.stateDir, "shipper.lock");
+    const snapshot = await readLockSnapshot(lockPath);
+    const pid = snapshot?.lock.pid;
+    const lockHost = snapshot?.lock.hostname;
+    if (!snapshot || !Number.isSafeInteger(pid) || !pid) {
+      await writeFile(stopPath(config), stopRequestContent());
+      console.log(`Force stop requested, but no active runner lock was found: ${lockPath}`);
+      return 0;
+    }
+
+    if (lockHost && lockHost !== hostname()) {
+      console.error(`Cannot force-stop runner ${pid}: lock belongs to ${lockHost}.`);
+      return 1;
+    }
+
+    if (lockProcessState(pid) !== "alive") {
+      await writeFile(stopPath(config), stopRequestContent());
+      console.log(`Force stop requested, but runner PID ${pid} is no longer alive.`);
+      return 0;
+    }
+
+    await writeFile(stopPath(config), stopRequestContent());
+    try {
+      (config.signalProcess ?? ((processId, signal) => process.kill(processId, signal)))(pid, "SIGTERM");
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`Could not force-stop runner PID ${pid}: ${reason}`);
+      return 1;
+    }
+    console.log(`Force stop sent to runner PID ${pid}.`);
+    return 0;
+  }
+
   await writeFile(stopPath(config), stopRequestContent());
   console.log(`Stop requested: ${stopPath(config)}`);
   console.log("A running queue:run will exit before starting another executor task.");

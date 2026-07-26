@@ -20,6 +20,7 @@ openspec-shipper queue run
 openspec-shipper queue status
 openspec-shipper queue dry-run
 openspec-shipper queue stop
+openspec-shipper queue stop --force
 openspec-shipper queue stats
 ```
 
@@ -27,6 +28,8 @@ openspec-shipper queue stats
 - `run` continues across independent paths until no runnable work remains.
 - `dry-run` reconciles evidence and prints the next command without executing it.
 - `stop` requests a safe stop at the next queue checkpoint.
+- `stop --force` sends `SIGTERM` to the active runner and interrupts its current
+  phase; use it when a graceful stop is not progressing.
 
 `add`, `next`, `run`, `status`, `dry-run`, `stop`, and `stats` are also available
 as top-level aliases.

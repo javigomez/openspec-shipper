@@ -99,6 +99,7 @@ export type RunnerConfig = {
   mergedPullRequestDetector?: MergedPullRequestDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
   worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
+  deliveryBranchNeedsRefreshDetector?: DeliveryBranchNeedsRefreshDetector;
   reconcileWorktreeDependencies?: ReconcileWorktreeDependencies;
   claudeContractVerifier?: ClaudeContractVerifier;
   prepareWorkspace?: PrepareWorkspace;
@@ -161,6 +162,7 @@ type TaskCompletionStatus =
   | { kind: "missing" }
   | { kind: "no_checkboxes"; tasksPath: string };
 export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName: string) => Promise<boolean>;
+export type DeliveryBranchNeedsRefreshDetector = (projectDir: string, changeName: string, baseBranch: string) => Promise<boolean>;
 export type ReconcileWorktreeDependencies = (projectDir: string, changeName: string) => Promise<string>;
 export type ClaudeContractVerifier = (projectDir: string, claude: ClaudeCliOptions) => Promise<ClaudeContractResult>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
@@ -1466,6 +1468,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const mergedPullRequestDetector = config.mergedPullRequestDetector ?? detectMergedPullRequest;
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
   const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
+  const deliveryBranchNeedsRefreshDetector = config.deliveryBranchNeedsRefreshDetector ?? detectDeliveryBranchNeedsRefresh;
   const declaredPhase = deliverPhase(task);
 
   const [detectedActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete, worktreeDependenciesReady] = await Promise.all([
@@ -1476,6 +1479,9 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     tasksCompleteDetector(config.projectDir, changeName),
     worktreeDependenciesReadyDetector(config.projectDir, changeName),
   ]);
+  const deliveryBranchNeedsRefresh = hasLocalClaim && phasePrecedesOrMatchesEvidence(declaredPhase, "refresh_branch")
+    ? await deliveryBranchNeedsRefreshDetector(config.projectDir, changeName, configuredBaseBranch(config))
+    : false;
   let hasResolvableSource = false;
   if (!hasLocalClaim && phasePrecedesForEvidence(declaredPhase, "implement")) {
     try {
@@ -1518,6 +1524,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     cleanupComplete: hasArchivedChange && !hasLocalClaim,
     hasLocalClaim,
     worktreeDependenciesReady,
+    deliveryBranchNeedsRefresh,
     localClaimPublished,
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
@@ -1619,6 +1626,10 @@ function branchProtectionRequiresCurrentBase(projectDir: string, baseBranch: str
 
 function phasePrecedesForEvidence(left: DeliverPhase, right: DeliverPhase): boolean {
   return deliveryPhaseRank(left) < deliveryPhaseRank(right);
+}
+
+function phasePrecedesOrMatchesEvidence(left: DeliverPhase, right: DeliverPhase): boolean {
+  return deliveryPhaseRank(left) <= deliveryPhaseRank(right);
 }
 
 function deliveryPhaseRank(phase: DeliverPhase): number {
@@ -1742,6 +1753,9 @@ async function executeNativeTask(
     await writeFile(logPath, output);
     const timestamp = (config.now?.() ?? new Date()).toISOString();
     const phase = deliverPhase(effectiveTask);
+    const resumeImplementation = phase === "refresh_branch" && effectiveTask.change
+      ? !(await (config.tasksCompleteDetector ?? detectTasksComplete)(config.projectDir, effectiveTask.change))
+      : false;
     const publicationUrl = phase === "publish_archive" ? extractPullRequestUrl(output) : undefined;
     const nextContent =
       effectiveTask.action === "deliver" && phase === "push"
@@ -1769,12 +1783,19 @@ async function executeNativeTask(
                 checkedAt: activity.checkedAt,
                 startedAt,
               })
-        : advanceDeliverTask(lines, effectiveTask, {
-            timestamp,
-            logPath: relativeLogPath,
-            checkedAt: activity.checkedAt,
-            startedAt,
-          });
+            : effectiveTask.action === "deliver" && phase === "refresh_branch" && resumeImplementation
+              ? advanceDeliverTaskToPhase(lines, effectiveTask, "implement", {
+                  timestamp,
+                  logPath: relativeLogPath,
+                  checkedAt: activity.checkedAt,
+                  startedAt,
+                })
+            : advanceDeliverTask(lines, effectiveTask, {
+                timestamp,
+                logPath: relativeLogPath,
+                checkedAt: activity.checkedAt,
+                startedAt,
+              });
     await writeFile(config.queuePath, nextContent);
     console.log(`[${new Date().toISOString()}] completed: ${task.rawCommand}`);
     return 0;
@@ -2300,6 +2321,47 @@ export async function detectGitStatus(projectDir: string): Promise<string[]> {
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter(Boolean);
+}
+
+/**
+ * Detects the only stale-worktree case that can be repaired without model
+ * judgment: a clean delivery worktree whose branch does not contain the
+ * latest remote base. Dirty worktrees are left for the implementation worker
+ * and merge conflicts are handled by the existing native refresh phase.
+ */
+export async function detectDeliveryBranchNeedsRefresh(
+  projectDir: string,
+  changeName: string,
+  baseBranch = "main",
+): Promise<boolean> {
+  const worktreeDir = join(projectDir, "worktrees", changeName);
+  if (!(await pathExists(worktreeDir))) {
+    return false;
+  }
+
+  const status = spawnSync("git", ["-C", worktreeDir, "status", "--short", "--untracked-files=all"], {
+    env: childEnvForCwd(worktreeDir),
+    encoding: "utf8",
+  });
+  if (status.status !== 0 || filterLocalStateStatus(status.stdout.split(/\r?\n/).filter(Boolean)).length > 0) {
+    return false;
+  }
+
+  const fetch = spawnSync("git", ["-C", projectDir, "fetch", "--quiet", "origin", baseBranch], {
+    env: childEnvForCwd(projectDir),
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  if (fetch.status !== 0) {
+    return false;
+  }
+
+  const base = spawnSync(
+    "git",
+    ["-C", worktreeDir, "merge-base", "--is-ancestor", `origin/${baseBranch}`, "HEAD"],
+    { env: childEnvForCwd(worktreeDir), encoding: "utf8" },
+  );
+  return base.status === 1;
 }
 
 export async function refreshDeliveryBranch(projectDir: string, changeName: string, baseBranch = "main"): Promise<string> {

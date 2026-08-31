@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeF
 import { join } from "node:path";
 import { hostname, tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { cleanupWorkspace, defaultConfig, ensureChangeArtifacts, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, type Executor, type RunnerConfig } from "../src/runner";
+import { cleanupWorkspace, defaultConfig, detectDeliveryBranchNeedsRefresh, ensureChangeArtifacts, prepareWorkspace, reconcileWorktreeDependencies, runQueue, spawnExecutor, type Executor, type RunnerConfig } from "../src/runner";
 import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT, parseQueue } from "../src/queue";
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
@@ -435,6 +435,64 @@ describe("runner", () => {
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: implement");
     expect(queue).not.toContain("[!]");
+  });
+
+  test("refreshes a stale clean worktree before invoking implement", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    let refreshed = false;
+    let implemented = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      deliveryBranchNeedsRefreshDetector: async () => true,
+      refreshDeliveryBranch: async () => {
+        refreshed = true;
+        return "refreshed origin/main\n";
+      },
+      executor: async () => {
+        implemented = true;
+        return { exitCode: 0, output: "implemented\n" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(refreshed).toBe(true);
+    expect(implemented).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: implement");
+    expect(queue).not.toContain("phase: refresh_branch");
+  });
+
+  test("detects a stale clean delivery worktree but leaves dirty worktrees alone", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "shipper-refresh-detection-"));
+    const remoteDir = join(rootDir, "origin.git");
+    const projectDir = join(rootDir, "project");
+    const changeName = "add-name-greeting";
+    const worktreeDir = join(projectDir, "worktrees", changeName);
+
+    git(rootDir, ["init", "--bare", remoteDir]);
+    await mkdir(projectDir, { recursive: true });
+    git(projectDir, ["init", "-b", "main"]);
+    git(projectDir, ["config", "user.name", "Test User"]);
+    git(projectDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(projectDir, "README.md"), "initial\n");
+    git(projectDir, ["add", "README.md"]);
+    git(projectDir, ["commit", "-m", "chore: initial"]);
+    git(projectDir, ["remote", "add", "origin", remoteDir]);
+    git(projectDir, ["push", "-u", "origin", "main"]);
+    git(projectDir, ["worktree", "add", "-b", `feat/${changeName}`, worktreeDir, "main"]);
+
+    await writeFile(join(projectDir, "README.md"), "updated\n");
+    git(projectDir, ["add", "README.md"]);
+    git(projectDir, ["commit", "-m", "chore: update base"]);
+    git(projectDir, ["push"]);
+
+    expect(await detectDeliveryBranchNeedsRefresh(projectDir, changeName)).toBe(true);
+
+    await writeFile(join(worktreeDir, "local-progress.txt"), "in progress\n");
+    expect(await detectDeliveryBranchNeedsRefresh(projectDir, changeName)).toBe(false);
   });
 
   test("writes log links relative to the queue file", async () => {

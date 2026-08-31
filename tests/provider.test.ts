@@ -198,6 +198,20 @@ describe("executor providers", () => {
     expect(codexCliProvider.detectFailureSignal(output)).toBe("Worker reported a blocker: dirty root main checkout");
   });
 
+  test("Codex CLI provider ignores blockers from earlier assistant turns", () => {
+    const output = [
+      "user",
+      "Run the phase.",
+      "codex",
+      "The first attempt could not continue.",
+      "OPENSPEC_SHIPPER_BLOCKED: stale worktree state",
+      "codex",
+      "The worktree is now ready and the implementation progress was committed.",
+    ].join("\n");
+
+    expect(codexCliProvider.detectFailureSignal(output)).toBeUndefined();
+  });
+
   test("Claude Code provider builds a sandboxed non-interactive command with prompt on stdin", async () => {
     const projectDir = await mkdtemp(join(tmpdir(), "shipper-claude-provider-"));
     await installClaudeTemplates({ rootDir: join(import.meta.dir, ".."), projectDir });

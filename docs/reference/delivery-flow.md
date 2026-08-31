@@ -23,8 +23,10 @@ to prevent silent token-consuming loops.
 ### `refresh_branch`
 
 Integrates the current `origin/<baseBranch>` into the delivery branch before it
-is published. The configured refresh policy also handles open PRs that conflict
-or fall behind a protected base.
+is published. If an existing delivery worktree is clean but falls behind the
+current base while implementation is still incomplete, Shipper refreshes it
+before invoking the implementation worker. The configured refresh policy also
+handles open PRs that conflict or fall behind a protected base.
 
 ### `push`
 

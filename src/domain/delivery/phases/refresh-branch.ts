@@ -7,7 +7,7 @@ export const refreshBranchPhase: DeliveryPhaseDefinition = {
       return transition("prepare_worktree", "no delivery worktree exists");
     }
 
-    if (!evidence.tasksComplete) {
+    if (!evidence.deliveryBranchNeedsRefresh && !evidence.tasksComplete) {
       return transition("implement", "implementation tasks are not complete");
     }
 

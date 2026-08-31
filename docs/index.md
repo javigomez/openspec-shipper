@@ -18,8 +18,9 @@ This documentation is organized as a learning path. Follow it in order the first
 2. **[Master the queue](./guide/queue.md)** — the queue is a Markdown file you own; learn to add, order, and control work.
 3. **[Plan changes while Shipper ships](./guide/plan-changes.md)** — write new OpenSpec changes on main, a branch, or a worktree, and feed them to the queue.
 4. **[When the queue blocks](./guide/blocked-queue.md)** — blocks are normal and expected; most fixes are one character.
-5. **[Pick the right model for each job](./guide/choosing-models.md)** — plan with powerful models, implement with cheaper ones.
-6. **[Ship like a team of two](./guide/ship-like-a-team.md)** — work habits that make you and Shipper a productive pair.
+5. **[Troubleshooting](./guide/troubleshooting.md)** — update the package, recover a stuck run, and get back to work.
+6. **[Pick the right model for each job](./guide/choosing-models.md)** — plan with powerful models, implement with cheaper ones.
+7. **[Ship like a team of two](./guide/ship-like-a-team.md)** — work habits that make you and Shipper a productive pair.
 
 Want to see it working before installing anything? Clone the **[one-minute demo repo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** and follow its README.
 

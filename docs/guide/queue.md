@@ -56,6 +56,7 @@ npx openspec-shipper queue next      # execute at most one phase, then stop
 npx openspec-shipper queue status    # what's where
 npx openspec-shipper queue dry-run   # show what would happen, spend nothing
 npx openspec-shipper queue stop      # request a safe stop at the next checkpoint
+npx openspec-shipper queue stop --force  # interrupt the active runner immediately
 npx openspec-shipper queue stats     # token/usage stats
 ```
 

@@ -2087,6 +2087,31 @@ describe("runner", () => {
     expect(stop).toContain("Stop queue:run at the next safe checkpoint");
   });
 
+  test("force stop signals an active queue runner", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+    const lockPath = join(harness.config.stateDir, "shipper.lock");
+    await mkdir(harness.config.stateDir, { recursive: true });
+    await writeFile(lockPath, JSON.stringify({
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: "2026-06-17T12:00:00.000Z",
+      heartbeatAt: "2026-06-17T12:00:00.000Z",
+      task: "queue:run",
+    }));
+    let signaled: { pid: number; signal: NodeJS.Signals } | undefined;
+
+    const exitCode = await runQueue("stop", {
+      ...harness.config,
+      signalProcess: (pid, signal) => {
+        signaled = { pid, signal };
+      },
+    }, { force: true });
+
+    expect(exitCode).toBe(0);
+    expect(signaled).toEqual({ pid: process.pid, signal: "SIGTERM" });
+    await expect(readFile(join(harness.config.stateDir, "stop"), "utf8")).resolves.toContain("Stop queue:run");
+  });
+
   test("run mode exits while waiting when stop is requested", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
     const sleeps: number[] = [];

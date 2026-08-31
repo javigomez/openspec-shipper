@@ -88,13 +88,13 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  const mode = parseMode([normalized.command, ...normalized.args]);
-  if (!mode) {
+  const parsedMode = parseMode([normalized.command, ...normalized.args]);
+  if (!parsedMode.mode) {
     process.exitCode = 2;
     return;
   }
 
-  const exitCode = await runQueue(mode, defaultConfig());
+  const exitCode = await runQueue(parsedMode.mode, defaultConfig(), { force: parsedMode.force });
   process.exitCode = exitCode;
 }
 
@@ -122,15 +122,21 @@ function isCliEntrypoint(): boolean {
   }
 }
 
-function parseMode(argv: string[]): RunnerMode | undefined {
+function parseMode(argv: string[]): { mode?: RunnerMode; force: boolean } {
   const rawMode = argv[0] ?? "next";
-  if (QUEUE_MODES.has(rawMode)) {
-    return rawMode as RunnerMode;
+  const force = argv.slice(1).includes("--force");
+  const unknownArgs = argv.slice(1).filter((arg) => arg !== "--force");
+  if (QUEUE_MODES.has(rawMode) && unknownArgs.length === 0) {
+    if (force && rawMode !== "stop") {
+      console.error("The --force option is only valid with queue stop.");
+      return { force };
+    }
+    return { mode: rawMode as RunnerMode, force };
   }
 
-  console.error(`Unknown mode: ${rawMode}`);
+  console.error(unknownArgs.length > 0 ? `Unknown queue option: ${unknownArgs[0]}` : `Unknown mode: ${rawMode}`);
   console.error("Usage: openspec-shipper [init|update|doctor|queue <add|next|run|status|dry-run|stop|stats>]");
-  return undefined;
+  return { force };
 }
 
 function parseTargetOptions(argv: string[]): {

@@ -39,4 +39,6 @@ When the fix isn't obvious:
 
 ## What's next
 
+If a run looks stuck rather than explicitly blocked, or a newly published package does not seem to be installed, see [Troubleshooting](./troubleshooting.md).
+
 Now that running the queue holds no surprises, make it cheaper: [Pick the right model for each job](./choosing-models.md).

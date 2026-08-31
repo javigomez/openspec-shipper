@@ -65,7 +65,23 @@ if (!releaseCurrentVersion) {
 run("npm", ["pack", "--dry-run"]);
 run("npm", ["publish", "--access", "public"]);
 
-const version = capture("npm", ["view", "openspec-shipper", "version"]);
-if (version.status === 0) {
-  console.log(`\nPublished openspec-shipper@${version.stdout.trim()}`);
+const localVersion = capture("node", ["-p", "require('./package.json').version"]);
+if (localVersion.status !== 0) {
+  console.error("Release verification failed: could not read the local package version.");
+  process.exit(localVersion.status ?? 1);
 }
+
+const expectedVersion = localVersion.stdout.trim();
+const publishedVersion = capture("npm", [
+  "view",
+  `openspec-shipper@${expectedVersion}`,
+  "version",
+  "--prefer-online",
+]);
+const registryVersion = publishedVersion.stdout.trim();
+if (publishedVersion.status !== 0 || registryVersion !== expectedVersion) {
+  console.error(`Release verification failed: expected openspec-shipper@${expectedVersion}, registry returned ${registryVersion || "no version"}.`);
+  process.exit(publishedVersion.status ?? 1);
+}
+
+console.log(`\nPublished openspec-shipper@${registryVersion}`);

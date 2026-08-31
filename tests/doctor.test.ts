@@ -85,6 +85,8 @@ describe("doctor", () => {
   test("executes configured OpenSpec command probes", async () => {
     const projectDir = await createGitRepo();
     await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await mkdir(join(projectDir, "openspec/changes/sample-change"), { recursive: true });
+    await writeFile(join(projectDir, "openspec/changes/sample-change/proposal.md"), "# Sample change\n");
     const openspecProbe = join(projectDir, ".openspec-shipper/probe-openspec.mjs");
     const validateProbe = join(projectDir, ".openspec-shipper/probe-validate.mjs");
     await writeFile(openspecProbe, [
@@ -94,7 +96,7 @@ describe("doctor", () => {
     ].join("\n"));
     await writeFile(validateProbe, [
       "import { writeFileSync } from 'node:fs';",
-      "if (!process.argv.includes('--help')) process.exit(1);",
+      "if (process.argv[2] !== 'sample-change') process.exit(1);",
       "writeFileSync('.openspec-shipper/validate-probed', 'yes');",
     ].join("\n"));
     await writeFile(join(projectDir, "package.json"), JSON.stringify({

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { readShipperConfig, type ClaudeSandboxMode, type ShipperConfig } from "../../domain/config/shipper-config.js";
@@ -100,7 +100,7 @@ export async function runDoctor(projectDir: string, options: DoctorOptions = {})
 
   if (config) {
     checks.push(checkDeliveryConfig(config));
-    checks.push(...checkRequiredConfiguredCommands(projectDir, config));
+    checks.push(...await checkRequiredConfiguredCommands(projectDir, config));
   }
 
   checks.push(
@@ -148,7 +148,8 @@ function checkPackageScripts(packageJson: { scripts?: Record<string, string> }):
   ];
 }
 
-function checkRequiredConfiguredCommands(projectDir: string, config: ShipperConfig): DoctorCheck[] {
+async function checkRequiredConfiguredCommands(projectDir: string, config: ShipperConfig): Promise<DoctorCheck[]> {
+  const proposalProbe = await findProposalProbe(projectDir);
   return [
     checkConfiguredCommand(
       "checks.openspec",
@@ -161,7 +162,7 @@ function checkRequiredConfiguredCommands(projectDir: string, config: ShipperConf
     checkConfiguredCommand(
       "checks.validateProposal",
       config.checks.validateProposal,
-      "--help",
+      proposalProbe,
       projectDir,
       "Configured proposal validation command works",
       "Proposal validation is required by the installed OpenSpec workflow",
@@ -169,10 +170,24 @@ function checkRequiredConfiguredCommands(projectDir: string, config: ShipperConf
   ];
 }
 
+async function findProposalProbe(projectDir: string): Promise<string | undefined> {
+  const changesDir = join(projectDir, "openspec", "changes");
+  const entries = await readdir(changesDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries
+    .filter((candidate) => candidate.isDirectory() && candidate.name !== "archive")
+    .sort((left, right) => left.name.localeCompare(right.name))) {
+    if (await access(join(changesDir, entry.name, "proposal.md")).then(() => true).catch(() => false)) {
+      return entry.name;
+    }
+  }
+
+  return undefined;
+}
+
 function checkConfiguredCommand(
   name: string,
   command: string | undefined,
-  probeArg: string,
+  probeArg: string | undefined,
   cwd: string,
   successMessage: string,
   missingMessage: string,
@@ -180,6 +195,10 @@ function checkConfiguredCommand(
   const trimmed = command?.trim();
   if (!trimmed) {
     return error(name, `${missingMessage}; configure ${name} in .openspec-shipper/config.json`);
+  }
+
+  if (!probeArg) {
+    return warning(name, `${name} is configured, but no active OpenSpec change is available for a validation probe`);
   }
 
   const probe = `${trimmed} ${shellQuote(probeArg)}`;

@@ -300,11 +300,21 @@ async function promptInitOptions(
   const rl = createInterface({ input, output });
   try {
     const defaultProjectDir = parsed.projectDir ?? flags.projectDir ?? process.cwd();
+    const explain = (description: string) => {
+      console.log(`\n${description}`);
+    };
+
+    console.log("OpenSpec Shipper setup");
+    console.log("The choices below are recommendations, not permanent decisions. You can change them later in .openspec-shipper/config.json or by running init/update with the relevant options.");
+    console.log("When in doubt, press Enter to keep the default shown in parentheses.");
+
+    explain("Project directory is the repository where Shipper installs its files and runs the queue. Leave the default to use the current directory.");
     const projectDir = answerOrDefault(
       await rl.question(`Project directory (${defaultProjectDir}): `),
       defaultProjectDir,
     );
     const detectedPackageManager = await detectPackageManager(projectDir);
+    explain("The package manager is used to install dependencies in fresh worktrees. The default is detected from the repository lockfile; keep it unless this project intentionally uses another package manager.");
     const packageManager = parsePackageManager(
       answerOrDefault(
         await rl.question(`Package manager npm|pnpm|bun (${detectedPackageManager}): `),
@@ -312,6 +322,7 @@ async function promptInitOptions(
       ),
       detectedPackageManager,
     );
+    explain("The provider is the AI executor that implements changes and reconciles OpenSpec archives. Codex CLI is the default; OpenCode and Claude Code are alternatives with different local setup and model options.");
     const provider = parseProvider(
       answerOrDefault(
         await rl.question(`Provider opencode|codex-cli|claude-code (${parsed.provider ?? providerFlag(flags.provider) ?? "codex-cli"}): `),
@@ -319,21 +330,30 @@ async function promptInitOptions(
       ),
       parsed.provider ?? providerFlag(flags.provider) ?? "codex-cli",
     );
-    const providerBin = provider === "claude-code"
-      ? answerOrDefault(await rl.question(`Claude Code binary (${parsed.providerBin ?? "claude"}): `), parsed.providerBin ?? "claude")
-      : parsed.providerBin;
-    const model = provider === "claude-code"
-      ? answerOrDefault(await rl.question(`Claude model (${parsed.model ?? "sonnet"}): `), parsed.model ?? "sonnet")
-      : parsed.model;
-    const effort = provider === "claude-code"
-      ? parseClaudeEffort(answerOrDefault(await rl.question(`Claude effort low|medium|high (${parsed.effort ?? "low"}): `), parsed.effort ?? "low"), parsed.effort ?? "low")
-      : parsed.effort;
-    const claudeSandbox = provider === "claude-code"
-      ? parseClaudeSandbox(answerOrDefault(
+    let providerBin = parsed.providerBin;
+    let model = parsed.model;
+    let effort = parsed.effort;
+    let claudeSandbox = parsed.claudeSandbox;
+    if (provider === "claude-code") {
+      explain("This is the command Shipper will invoke for Claude Code. Keep `claude` unless the CLI is installed under another name or at a custom path.");
+      providerBin = answerOrDefault(await rl.question(`Claude Code binary (${parsed.providerBin ?? "claude"}): `), parsed.providerBin ?? "claude");
+      explain("This model performs the implementation and archive work. Keep the provider default unless you have a deliberate model choice for this project.");
+      model = answerOrDefault(await rl.question(`Claude model (${parsed.model ?? "sonnet"}): `), parsed.model ?? "sonnet");
+      explain("Higher effort can help with difficult changes but uses more time and tokens. Lower effort is faster and cheaper; keep the default if you are unsure.");
+      effort = parseClaudeEffort(
+        answerOrDefault(await rl.question(`Claude effort low|medium|high (${parsed.effort ?? "low"}): `), parsed.effort ?? "low"),
+        parsed.effort ?? "low",
+      );
+      explain("Strict sandbox is the safest default. Permissive or off relaxes Claude's restrictions when the CLI cannot operate under strict sandboxing, but gives the executor more access to the machine. Keep strict if you are unsure.");
+      claudeSandbox = parseClaudeSandbox(
+        answerOrDefault(
           await rl.question(`Claude sandbox strict|permissive|off (${parsed.claudeSandbox ?? "strict"}): `),
           parsed.claudeSandbox ?? "strict",
-        ), parsed.claudeSandbox ?? "strict")
-      : parsed.claudeSandbox;
+        ),
+        parsed.claudeSandbox ?? "strict",
+      );
+    }
+    explain("Archive publication controls how the final OpenSpec archive reaches the base branch. `direct` commits and pushes it directly, which is fastest but requires push permission and an unprotected branch. `pull-request` publishes the archive through another PR, which suits protected branches but adds a review and merge step. If you are unsure, keep the default and let `doctor` identify GitHub policy conflicts.");
     const archivePublishMode = parseArchivePublishMode(
       answerOrDefault(
         await rl.question(`Archive publication direct|pull-request (${parsed.archivePublishMode ?? "direct"}): `),
@@ -341,6 +361,7 @@ async function promptInitOptions(
       ),
       parsed.archivePublishMode ?? "direct",
     );
+    explain("Delivery refresh controls when Shipper refreshes delivery branches from the remote base branch. `auto` refreshes when needed, `always` is more conservative, `conflicts-only` reduces work, and `never` can leave branches stale. Keep `auto` unless you have a specific branch policy.");
     const refreshPolicy = parseRefreshPolicy(
       answerOrDefault(
         await rl.question(`Delivery refresh auto|always|conflicts-only|never (${parsed.refreshPolicy ?? "auto"}): `),
@@ -348,6 +369,7 @@ async function promptInitOptions(
       ),
       parsed.refreshPolicy ?? "auto",
     );
+    explain("Installing dependencies now lets doctor and the queue work immediately, including in fresh worktrees. Choose no for vendored dependencies, offline repositories, or when you prefer to install manually. Keep yes unless you know this project does not need it.");
     const installDependencies = parseYesNo(
       answerOrDefault(await rl.question(`Install dependencies now? yes|no (${parsed.noInstall ? "no" : "yes"}): `), parsed.noInstall ? "no" : "yes"),
       !parsed.noInstall,

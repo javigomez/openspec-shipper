@@ -93,9 +93,17 @@ npx openspec-shipper queue dry-run
 npx openspec-shipper queue run
 ```
 
-Waiting for a human and actual errors both use `[!]`. The task comment contains
-the reason and the badge links to the complete run log. After fixing or merging,
-change `[!]` to `[ ]` and run the queue again; Shipper reconciles before retrying.
+Waiting for a human and actual errors both use `[!]`. Before blocking an
+actionable worker or native failure, Shipper gives the configured provider one
+scoped recovery attempt in the current delivery workspace. It then retries the
+same deterministic phase; the agent cannot advance the task itself. Provider,
+authentication, permission, configuration, missing-workspace, and human-merge
+failures block immediately.
+
+The task comment contains the reason and the badge links to the complete run
+log. Recovery attempts are recorded per phase in `queue.md`, so restarting
+cannot create an infinite retry loop. After fixing or merging, change `[!]` to
+`[ ]` and run the queue again; Shipper reconciles before retrying.
 
 ## Local State
 

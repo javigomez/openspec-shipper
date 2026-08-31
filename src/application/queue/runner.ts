@@ -1,9 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createWriteStream, existsSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { access, appendFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
-import { delimiter, dirname, join, relative } from "node:path";
+import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   advanceDeliverTask,
@@ -26,6 +26,7 @@ import { phaseDefinition } from "../../domain/delivery/phases/index.js";
 import type { DeliveryEvidence } from "../../domain/delivery/phase.js";
 import { shouldRefreshDeliveryBranch } from "../../domain/delivery/refresh-policy.js";
 import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
+import type { DeliveryFailure } from "../../domain/recovery/recovery.js";
 import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import {
   DEFAULT_QUEUE_PATH,
@@ -34,7 +35,7 @@ import {
   readShipperConfigSync,
 } from "../../domain/config/shipper-config.js";
 import { providerById } from "../../infrastructure/providers/registry.js";
-import { openCodeCommandName, openCodeCommandPath, openCodeConfigDir } from "../../infrastructure/providers/opencode/provider.js";
+import { openCodeCommandName, openCodeCommandPath } from "../../infrastructure/providers/opencode/provider.js";
 import { codexPromptPath, codexWorkflowPath } from "../../infrastructure/providers/codex-cli/provider.js";
 import {
   type ClaudeCliOptions,
@@ -42,7 +43,6 @@ import {
   claudePromptPath,
   claudeSettingsPath,
   claudeWorkflowPath,
-  buildClaudeCliArgs,
   verifyClaudeCliContract,
 } from "../../infrastructure/providers/claude-code/provider.js";
 import { discoverProjectDirSync } from "../../infrastructure/filesystem/project-root.js";
@@ -51,6 +51,7 @@ import {
   sourceHasNewerChangeCommit,
   type DeliverySource,
 } from "../../infrastructure/git/delivery-source.js";
+import { attemptAssistedRecovery } from "../recovery/assisted-recovery.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
 
@@ -109,7 +110,6 @@ export type RunnerConfig = {
   finalizeArchive?: FinalizeArchive;
   sourceResolver?: SourceResolver;
   prepareArchiveWorkspace?: PrepareArchiveWorkspace;
-  repairNativeFailure?: RepairNativeFailure;
   sleep?: Sleep;
   now?: () => Date;
 };
@@ -198,12 +198,6 @@ export type FinalizeArchiveInput = {
 };
 export type FinalizeArchive = (input: FinalizeArchiveInput) => Promise<string>;
 export type PrepareArchiveWorkspace = (projectDir: string, baseBranch: string) => Promise<string>;
-export type RepairNativeFailure = (
-  config: RunnerConfig,
-  task: QueueTask,
-  reason: string,
-  logPath: string,
-) => Promise<{ repaired: boolean; output: string }>;
 export type Sleep = (ms: number) => Promise<void>;
 
 
@@ -1008,7 +1002,8 @@ async function executeTask(
     failureReason: error instanceof Error ? error.message : String(error),
   }));
 
-  const failureSignal = provider(config).detectFailureSignal(result.output);
+  const providerFailure = provider(config).classifyFailureSignal(result.output);
+  const failureSignal = providerFailure?.reason;
   if (result.exitCode === 0 && !failureSignal) {
     if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
       const implementProgressAfter = await captureImplementProgress(config, task);
@@ -1035,16 +1030,18 @@ async function executeTask(
           console.warn(`[${new Date().toISOString()}] no observable implement progress; retrying once before blocking: ${task.rawCommand}`);
           return 0;
         }
-        const nextContent = markTask(lines, task, "blocked", {
-          timestamp: (config.now?.() ?? new Date()).toISOString(),
+        return await recoverOrBlock(config, lines, task, {
+          source: "postcondition",
+          kind: "no_progress",
+          phase: "implement",
           reason,
-          logPath: relativeLogPath,
+          safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+        }, {
+          logPath,
+          relativeLogPath,
           checkedAt: activity.checkedAt,
           startedAt,
         });
-        await writeFile(config.queuePath, nextContent);
-        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
-        return 1;
       }
 
       try {
@@ -1055,16 +1052,18 @@ async function executeTask(
         const reason = error instanceof Error ? error.message : String(error);
         const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
         await appendFile(logPath, `\n## Native dependency reconciliation failed\n\n${logOutput}`);
-        const nextContent = markTask(lines, task, "blocked", {
-          timestamp: (config.now?.() ?? new Date()).toISOString(),
+        return await recoverOrBlock(config, lines, task, {
+          source: "native",
+          kind: "dependency_reconciliation",
+          phase: "implement",
           reason,
-          logPath: relativeLogPath,
+          safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+        }, {
+          logPath,
+          relativeLogPath,
           checkedAt: activity.checkedAt,
           startedAt,
         });
-        await writeFile(config.queuePath, nextContent);
-        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
-        return 1;
       }
     }
 
@@ -1107,32 +1106,39 @@ async function executeTask(
         const reason = error instanceof Error ? error.message : String(error);
         const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
         await appendFile(logPath, `\n## Native dependency recovery failed\n\n${logOutput}`);
-        const blockedContent = markTask(lines, task, "blocked", {
-          timestamp: (config.now?.() ?? new Date()).toISOString(),
+        return await recoverOrBlock(config, lines, task, {
+          source: "native",
+          kind: "dependency_reconciliation",
+          phase: "implement",
           reason,
-          logPath: relativeLogPath,
+          safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+        }, {
+          logPath,
+          relativeLogPath,
           checkedAt: activity.checkedAt,
           startedAt,
         });
-        await writeFile(config.queuePath, blockedContent);
-        console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
-        return 1;
       }
     }
   }
 
-  const reason =
-    failureSignal ?? result.failureReason ?? (result.exitCode === null ? result.output : `command exited with code ${result.exitCode}`);
-  const nextContent = markTask(lines, task, "blocked", {
-    timestamp: (config.now?.() ?? new Date()).toISOString(),
+  const reason = failureSignal
+    ?? result.failureReason
+    ?? (result.exitCode === null ? result.output : `command exited with code ${result.exitCode}`);
+  const kind = providerFailure?.kind ?? "unknown";
+  return await recoverOrBlock(config, lines, task, {
+    source: kind === "worker_blocker" ? "worker" : "provider",
+    kind,
+    phase: deliverPhase(task),
     reason,
-    logPath: relativeLogPath,
+    safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+    exitCode: result.exitCode,
+  }, {
+    logPath,
+    relativeLogPath,
     checkedAt: activity.checkedAt,
     startedAt,
   });
-  await writeFile(config.queuePath, nextContent);
-  console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
-  return 1;
 }
 
 type ImplementProgressSnapshot = {
@@ -1678,6 +1684,229 @@ async function blockTask(
   await writeFile(queuePath, nextContent);
 }
 
+type FailureHandlingActivity = {
+  logPath: string;
+  relativeLogPath: string;
+  checkedAt?: string;
+  startedAt: string;
+};
+
+async function recoverOrBlock(
+  config: RunnerConfig,
+  lines: string[],
+  task: QueueTask,
+  failure: DeliveryFailure,
+  activity: FailureHandlingActivity,
+): Promise<number> {
+  const phase = deliverPhase(task);
+  const attemptsForPhase = task.recoveryPhase === phase ? task.recoveryAttempts ?? 0 : 0;
+  const shipperConfig = readShipperConfigSync(config.projectDir) ?? defaultShipperConfig();
+  const cwd = recoveryWorkspace(config, task) ?? config.projectDir;
+  const humanCheckoutBefore = captureHumanCheckout(config.projectDir);
+  const protectedCheckoutsBefore = captureProtectedCheckouts(config.projectDir, cwd);
+  const result = await attemptAssistedRecovery({
+    task,
+    failure,
+    policy: shipperConfig.recovery,
+    attemptsForPhase,
+    cwd,
+    baseBranch: configuredBaseBranch(config),
+    logPath: activity.logPath,
+    invoke: async (prompt, recoveryCwd, logPath) => {
+      const currentProvider = provider(config);
+      const command = currentProvider.buildRecoveryCommand({
+        phase,
+        task,
+        cwd: recoveryCwd,
+        assetsDir: config.projectDir,
+        prompt,
+        config: configuredProviderRuntime(config),
+      });
+      const executor = config.executor ?? spawnExecutor;
+      const execution = await executor(command.command, command.args, {
+        cwd: command.cwd,
+        logPath,
+        timeoutMs: config.taskTimeoutMs,
+        heartbeatMs: config.heartbeatMs,
+        stdin: command.stdin,
+        env: command.env,
+      }).catch((error: unknown): ExecutorResult => ({
+        exitCode: null,
+        output: "",
+        failureReason: error instanceof Error ? error.message : String(error),
+      }));
+      const humanCheckoutAfter = captureHumanCheckout(config.projectDir);
+      if (humanCheckoutChanged(humanCheckoutBefore, humanCheckoutAfter)) {
+        return {
+          ...execution,
+          failureReason: "human checkout changed during assisted recovery",
+        };
+      }
+      const protectedCheckoutChange = changedProtectedCheckout(
+        protectedCheckoutsBefore,
+        captureProtectedCheckouts(config.projectDir, cwd),
+      );
+      if (protectedCheckoutChange) {
+        return {
+          ...execution,
+          failureReason: `protected checkout changed during assisted recovery: ${relative(normalizedCheckoutPath(config.projectDir), protectedCheckoutChange)}`,
+        };
+      }
+      const recoveryFailure = currentProvider.classifyFailureSignal(execution.output);
+      return {
+        ...execution,
+        failureReason: recoveryFailure?.reason ?? execution.failureReason,
+      };
+    },
+  });
+
+  if (result.kind === "repaired") {
+    const retryTask: QueueTask = {
+      ...task,
+      recoveryAttempts: attemptsForPhase + 1,
+      recoveryPhase: phase,
+      recoveryFailure: result.fingerprint,
+    };
+    await writeFile(config.queuePath, advanceDeliverTaskToPhase(lines, retryTask, phase, {
+      timestamp: (config.now?.() ?? new Date()).toISOString(),
+      logPath: activity.relativeLogPath,
+      checkedAt: activity.checkedAt,
+      startedAt: activity.startedAt,
+    }));
+    console.warn(`[${new Date().toISOString()}] assisted recovery completed; ${task.rawCommand} will be reconciled and retried`);
+    return 0;
+  }
+
+  const blockedTask: QueueTask = result.kind === "failed"
+    ? {
+        ...task,
+        recoveryAttempts: attemptsForPhase + 1,
+        recoveryPhase: phase,
+        recoveryFailure: result.fingerprint,
+      }
+    : task;
+  const reason = result.kind === "failed"
+    ? `${failure.reason}; assisted recovery failed: ${result.reason}`
+    : failure.reason;
+  const nextContent = markTask(lines, blockedTask, "blocked", {
+    timestamp: (config.now?.() ?? new Date()).toISOString(),
+    reason,
+    logPath: activity.relativeLogPath,
+    checkedAt: activity.checkedAt,
+    startedAt: activity.startedAt,
+  });
+  await writeFile(config.queuePath, nextContent);
+  console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+  return 1;
+}
+
+type HumanCheckoutSnapshot = {
+  head: string;
+  branch: string;
+  status: string[];
+};
+
+function captureHumanCheckout(projectDir: string): HumanCheckoutSnapshot | undefined {
+  const head = spawnSync("git", ["-C", projectDir, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const branch = spawnSync("git", ["-C", projectDir, "branch", "--show-current"], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", projectDir, "status", "--short", "--untracked-files=all"], { encoding: "utf8" });
+  if (head.status !== 0 || branch.status !== 0 || status.status !== 0) {
+    return undefined;
+  }
+  return {
+    head: head.stdout.trim(),
+    branch: branch.stdout.trim(),
+    status: filterLocalStateStatus(status.stdout.split(/\r?\n/).filter(Boolean)).sort(),
+  };
+}
+
+function humanCheckoutChanged(
+  before: HumanCheckoutSnapshot | undefined,
+  after: HumanCheckoutSnapshot | undefined,
+): boolean {
+  if (!before || !after) {
+    return false;
+  }
+  return before.head !== after.head
+    || before.branch !== after.branch
+    || JSON.stringify(before.status) !== JSON.stringify(after.status);
+}
+
+type ProtectedCheckoutSnapshot = HumanCheckoutSnapshot & {
+  path: string;
+};
+
+function captureProtectedCheckouts(
+  projectDir: string,
+  authorizedWorkspace: string,
+): ProtectedCheckoutSnapshot[] | undefined {
+  const listed = spawnSync("git", ["-C", projectDir, "worktree", "list", "--porcelain", "-z"], {
+    encoding: "utf8",
+  });
+  if (listed.status !== 0) {
+    return undefined;
+  }
+
+  const projectPath = normalizedCheckoutPath(projectDir);
+  const authorizedPath = normalizedCheckoutPath(authorizedWorkspace);
+  const paths = listed.stdout
+    .split("\0")
+    .filter((field) => field.startsWith("worktree "))
+    .map((field) => normalizedCheckoutPath(field.slice("worktree ".length)))
+    .filter((path) => path !== projectPath && path !== authorizedPath)
+    .sort();
+  const snapshots = paths.map((path) => {
+    const snapshot = captureHumanCheckout(path);
+    return snapshot ? { path, ...snapshot } : undefined;
+  });
+  return snapshots.every((snapshot): snapshot is ProtectedCheckoutSnapshot => Boolean(snapshot))
+    ? snapshots
+    : undefined;
+}
+
+function normalizedCheckoutPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function changedProtectedCheckout(
+  before: ProtectedCheckoutSnapshot[] | undefined,
+  after: ProtectedCheckoutSnapshot[] | undefined,
+): string | undefined {
+  if (!before || !after) {
+    return undefined;
+  }
+  const beforeByPath = new Map(before.map((snapshot) => [snapshot.path, snapshot]));
+  const afterByPath = new Map(after.map((snapshot) => [snapshot.path, snapshot]));
+  const paths = [...new Set([...beforeByPath.keys(), ...afterByPath.keys()])].sort();
+  return paths.find((path) => {
+    const left = beforeByPath.get(path);
+    const right = afterByPath.get(path);
+    return !left || !right
+      || left.head !== right.head
+      || left.branch !== right.branch
+      || JSON.stringify(left.status) !== JSON.stringify(right.status);
+  });
+}
+
+function recoveryWorkspace(config: RunnerConfig, task: QueueTask): string | undefined {
+  const phase = deliverPhase(task);
+  if (["archive", "publish_archive"].includes(phase)) {
+    const workspace = archiveIntegrationWorkspace(config.projectDir);
+    return existsSync(workspace) ? workspace : undefined;
+  }
+  if (!task.change) {
+    return undefined;
+  }
+  const worktree = task.deliveryWorktree
+    ? join(config.projectDir, task.deliveryWorktree)
+    : join(config.projectDir, "worktrees", task.change);
+  return existsSync(worktree) ? worktree : undefined;
+}
+
 function isNativeTask(task: QueueTask): boolean {
   const phase = task.action === "deliver" ? deliverPhase(task) : task.action;
   return isNativePhase(phase);
@@ -1823,28 +2052,19 @@ async function executeNativeTask(
         return 0;
       }
     }
-    const repairAttempts = Number(effectiveTask.metadata.repair_attempts ?? "0");
-    if (!(error instanceof NativeTaskError) && repairAttempts < 2) {
-      const repairer = config.repairNativeFailure ?? repairNativeFailure;
-      const repair = await repairer(config, effectiveTask, reason, logPath).catch((repairError: unknown) => ({
-        repaired: false,
-        output: repairError instanceof Error ? repairError.message : String(repairError),
-      }));
-      await appendFile(logPath, `\n## Native repair attempt\n\n${repair.output}\n`);
-      if (repair.repaired) {
-        const retryTask = {
-          ...effectiveTask,
-          metadata: { ...effectiveTask.metadata, repair_attempts: String(repairAttempts + 1) },
-        };
-        await writeFile(config.queuePath, advanceDeliverTaskToPhase(lines, retryTask, deliverPhase(retryTask), {
-          timestamp: (config.now?.() ?? new Date()).toISOString(),
-          logPath: relativeLogPath,
-          checkedAt: activity.checkedAt,
-          startedAt,
-        }));
-        console.log(`[${new Date().toISOString()}] native repair completed; ${task.rawCommand} will be reconciled and retried`);
-        return 0;
-      }
+    if (!(error instanceof NativeTaskError)) {
+      return await recoverOrBlock(config, lines, effectiveTask, {
+        source: "native",
+        kind: "native_operation",
+        phase: deliverPhase(effectiveTask),
+        reason,
+        safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, effectiveTask)),
+      }, {
+        logPath,
+        relativeLogPath,
+        checkedAt: activity.checkedAt,
+        startedAt,
+      });
     }
     const nextContent = markTask(lines, effectiveTask, "blocked", {
       timestamp: (config.now?.() ?? new Date()).toISOString(),
@@ -1918,73 +2138,6 @@ async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<str
     baseBranch: configuredBaseBranch(config),
     source,
   });
-}
-
-async function repairNativeFailure(
-  config: RunnerConfig,
-  task: QueueTask,
-  reason: string,
-  logPath: string,
-): Promise<{ repaired: boolean; output: string }> {
-  const phase = deliverPhase(task);
-  const changeName = task.change ?? "unknown-change";
-  const deliveryWorktree = task.deliveryWorktree
-    ? join(config.projectDir, task.deliveryWorktree)
-    : join(config.projectDir, "worktrees", changeName);
-  const cwd = ["refresh_branch", "push", "cleanup_worktree"].includes(phase) && existsSync(deliveryWorktree)
-    ? deliveryWorktree
-    : ["publish_archive"].includes(phase) && existsSync(archiveIntegrationWorkspace(config.projectDir))
-      ? archiveIntegrationWorkspace(config.projectDir)
-      : config.projectDir;
-  const prompt = [
-    "You are the internal OpenSpec Shipper repair agent.",
-    `A native ${phase} operation for ${changeName} failed: ${reason}`,
-    `Inspect the repository and repair the underlying Git or GitHub condition when it is safe and deterministic.`,
-    `The integration boundary is origin/${configuredBaseBranch(config)}.`,
-    "Do not edit, reset, stash, switch, commit, or clean the human checkout.",
-    "Only modify the current delivery/integration workspace and its branch.",
-    "Never force-push an implementation branch and never rewrite remote history.",
-    "Use git and gh directly. If a merge conflict needs semantic judgment, resolve it, run relevant checks, and commit the resolution.",
-    "If repair is unsafe or requires a human decision, finish with exactly: OPENSPEC_SHIPPER_BLOCKED: <short reason>",
-    "If repaired, explain the evidence that the native operation can now be retried.",
-  ].join("\n");
-  const currentProvider = provider(config);
-  let command: string;
-  let args: string[];
-  let stdin: string | undefined;
-  if (currentProvider.id === "codex-cli") {
-    command = config.codexBin ?? "codex";
-    args = ["exec", "-C", cwd, "--sandbox", "workspace-write", "-c", 'approval_policy="never"'];
-    if (config.codexModel) args.push("--model", config.codexModel);
-    if (config.codexReasoningEffort) args.push("-c", `model_reasoning_effort="${config.codexReasoningEffort}"`);
-    args.push(prompt);
-  } else if (currentProvider.id === "claude-code") {
-    command = config.claudeBin ?? "claude";
-    args = buildClaudeCliArgs(config.projectDir, configuredClaudeOptions(config));
-    stdin = prompt;
-  } else {
-    command = config.opencodeBin;
-    args = ["run"];
-    if (config.opencodePrintLogs) args.push("--print-logs");
-    if (config.opencodeLogLevel) args.push("--log-level", config.opencodeLogLevel);
-    if (config.opencodeModel) args.push("--model", config.opencodeModel);
-    args.push(prompt);
-  }
-
-  const executor = config.executor ?? spawnExecutor;
-  const result = await executor(command, args, {
-    cwd,
-    logPath,
-    timeoutMs: config.taskTimeoutMs,
-    heartbeatMs: config.heartbeatMs,
-    stdin,
-    env: currentProvider.id === "opencode" ? { OPENCODE_CONFIG_DIR: openCodeConfigDir(config.projectDir) } : undefined,
-  });
-  const failure = currentProvider.detectFailureSignal(result.output) ?? result.failureReason;
-  return {
-    repaired: result.exitCode === 0 && !failure,
-    output: failure ?? result.output ?? `repair exited with code ${result.exitCode}`,
-  };
 }
 
 async function createRunLogPath(config: RunnerConfig, task: QueueTask, timestamp: string) {
@@ -2129,24 +2282,28 @@ function buildConfiguredProviderCommand(config: RunnerConfig, task: QueueTask): 
     task,
     projectDir: executionDir,
     assetsDir: config.projectDir,
-    config: {
-      executor: {
-        provider: config.providerId ?? "opencode",
-        opencode: {
-          bin: config.opencodeBin,
-          model: config.opencodeModel,
-        },
-        codex: {
-          bin: config.codexBin ?? "codex",
-          model: config.codexModel,
-          reasoningEffort: config.codexReasoningEffort,
-        },
-        claude: configuredClaudeOptions(config),
-      },
-      opencodePrintLogs: config.opencodePrintLogs,
-      opencodeLogLevel: config.opencodeLogLevel,
-    },
+    config: configuredProviderRuntime(config),
   });
+}
+
+function configuredProviderRuntime(config: RunnerConfig) {
+  return {
+    executor: {
+      provider: config.providerId ?? "opencode",
+      opencode: {
+        bin: config.opencodeBin,
+        model: config.opencodeModel,
+      },
+      codex: {
+        bin: config.codexBin ?? "codex",
+        model: config.codexModel,
+        reasoningEffort: config.codexReasoningEffort,
+      },
+      claude: configuredClaudeOptions(config),
+    },
+    opencodePrintLogs: config.opencodePrintLogs,
+    opencodeLogLevel: config.opencodeLogLevel,
+  };
 }
 
 function configuredClaudeOptions(config: RunnerConfig): ClaudeCliOptions {

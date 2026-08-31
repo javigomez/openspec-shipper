@@ -88,6 +88,66 @@ describe("executor providers", () => {
     });
   });
 
+  test("providers build assisted recovery commands in the authorized workspace", () => {
+    const prompt = "Inspect the failed phase and repair it safely.";
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
+
+    const openCode = opencodeProvider.buildRecoveryCommand({
+      task,
+      phase: "implement",
+      cwd: "/repo/worktrees/add-name-greeting",
+      assetsDir: "/repo",
+      prompt,
+      config,
+    });
+    expect(openCode.command).toBe("opencode");
+    expect(openCode.args.at(-1)).toBe(prompt);
+    expect(openCode.cwd).toBe("/repo/worktrees/add-name-greeting");
+
+    const codex = codexCliProvider.buildRecoveryCommand({
+      task,
+      phase: "implement",
+      cwd: "/repo/worktrees/add-name-greeting",
+      assetsDir: "/repo",
+      prompt,
+      config: { ...config, executor: { ...config.executor, provider: "codex-cli" } },
+    });
+    expect(codex.command).toBe("codex");
+    expect(codex.args).toContain("/repo/worktrees/add-name-greeting");
+    expect(codex.args.at(-1)).toBe(prompt);
+
+    const claude = claudeCodeProvider.buildRecoveryCommand({
+      task,
+      phase: "implement",
+      cwd: "/repo/worktrees/add-name-greeting",
+      assetsDir: "/repo",
+      prompt,
+      config: { ...config, executor: { ...config.executor, provider: "claude-code" } },
+    });
+    expect(claude.command).toBe("claude");
+    expect(claude.cwd).toBe("/repo/worktrees/add-name-greeting");
+    expect(claude.stdin).toBe(prompt);
+  });
+
+  test("providers distinguish actionable worker blockers from terminal executor failures", () => {
+    expect(opencodeProvider.classifyFailureSignal("OPENSPEC_SHIPPER_BLOCKED: tests fail")).toEqual({
+      kind: "worker_blocker",
+      reason: "Worker reported a blocker: tests fail",
+    });
+    expect(opencodeProvider.classifyFailureSignal("The latest version of this model is only available hosted in China")).toEqual({
+      kind: "provider_unavailable",
+      reason: "OpenCode model is unavailable",
+    });
+    expect(codexCliProvider.classifyFailureSignal("ERROR: You've hit your usage limit")).toEqual({
+      kind: "provider_unavailable",
+      reason: "Codex CLI usage limit was reached",
+    });
+    expect(claudeCodeProvider.classifyFailureSignal("permission denied")).toEqual({
+      kind: "permission",
+      reason: "Claude Code reported a permission blocker",
+    });
+  });
+
   test("OpenCode provider builds archive command with the target change", () => {
     const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n").tasks[0]!;
 

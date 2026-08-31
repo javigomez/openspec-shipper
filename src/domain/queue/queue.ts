@@ -35,6 +35,9 @@ export type QueueTask = {
   archiveAttempts?: number;
   archiveBase?: string;
   archivePullRequestUrl?: string;
+  recoveryAttempts?: number;
+  recoveryPhase?: DeliverPhase;
+  recoveryFailure?: string;
   metadata: Record<string, string>;
   rawCommand: string;
 };
@@ -283,8 +286,9 @@ export function advanceDeliverTask(
   }
 
   const nextPhase = phase === "push" ? "waiting_for_merge" : DELIVER_PHASES[DELIVER_PHASES.indexOf(phase) + 1]!;
+  const nextTask = taskForPhaseMetadata(task, nextPhase);
   const detailParts = [
-    ...persistentMetadataParts(task),
+    ...persistentMetadataParts(nextTask),
     `phase: ${nextPhase}`,
     `advanced: ${details.timestamp}`,
     details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
@@ -305,8 +309,9 @@ export function advanceDeliverTaskToPhase(
   phase: DeliverPhase,
   details: { timestamp: string; logPath?: string; checkedAt?: string; startedAt?: string },
 ): string {
+  const nextTask = taskForPhaseMetadata(task, phase);
   const detailParts = [
-    ...persistentMetadataParts(task),
+    ...persistentMetadataParts(nextTask),
     `phase: ${phase}`,
     `advanced: ${details.timestamp}`,
     details.checkedAt ? `checked: ${details.checkedAt}` : undefined,
@@ -393,6 +398,9 @@ type ParsedTaskMetadata = Pick<
   | "archiveAttempts"
   | "archiveBase"
   | "archivePullRequestUrl"
+  | "recoveryAttempts"
+  | "recoveryPhase"
+  | "recoveryFailure"
   | "metadata"
 >;
 
@@ -454,6 +462,9 @@ function parseTaskMetadata(value: string): ParsedTaskMetadata {
     if (key === "archive_base") metadata.archiveBase = rawValue;
     if (key === "archive_pr_url") metadata.archivePullRequestUrl = rawValue;
     if (key === "archive_attempts" && /^\d+$/.test(rawValue)) metadata.archiveAttempts = Number(rawValue);
+    if (key === "recovery_attempts" && /^\d+$/.test(rawValue)) metadata.recoveryAttempts = Number(rawValue);
+    if (key === "recovery_phase" && phase) metadata.recoveryPhase = phase;
+    if (key === "recovery_failure" && /^[a-f0-9]{12}$/.test(rawValue)) metadata.recoveryFailure = rawValue;
   }
 
   return metadata;
@@ -522,6 +533,9 @@ function persistentMetadataParts(task: QueueTask): string[] {
     "archive_attempts",
     "archive_base",
     "archive_pr_url",
+    "recovery_attempts",
+    "recovery_phase",
+    "recovery_failure",
   ]);
   const parts = [
     task.dependsOn.length > 0 ? `depends_on: ${task.dependsOn.join(",")}` : undefined,
@@ -537,11 +551,27 @@ function persistentMetadataParts(task: QueueTask): string[] {
     task.archiveAttempts !== undefined ? `archive_attempts: ${task.archiveAttempts}` : undefined,
     task.archiveBase ? `archive_base: ${task.archiveBase}` : undefined,
     task.archivePullRequestUrl ? `archive_pr_url: ${task.archivePullRequestUrl}` : undefined,
+    task.recoveryAttempts !== undefined ? `recovery_attempts: ${task.recoveryAttempts}` : undefined,
+    task.recoveryPhase ? `recovery_phase: ${task.recoveryPhase}` : undefined,
+    task.recoveryFailure ? `recovery_failure: ${task.recoveryFailure}` : undefined,
     ...Object.entries(task.metadata)
       .filter(([key]) => !known.has(key) && !TRANSIENT_METADATA_KEYS.has(key))
+      .filter(([key]) => key !== "implement_no_progress_attempts" || deliverPhase(task) === "implement")
       .map(([key, value]) => `${key}: ${value}`),
   ].filter((part): part is string => Boolean(part));
   return parts;
+}
+
+function taskForPhaseMetadata(task: QueueTask, phase: DeliverPhase): QueueTask {
+  if (!task.recoveryPhase || task.recoveryPhase === phase) {
+    return task;
+  }
+  return {
+    ...task,
+    recoveryAttempts: undefined,
+    recoveryPhase: undefined,
+    recoveryFailure: undefined,
+  };
 }
 
 function normalizeDeliverPhase(value: string): DeliverPhase | undefined {

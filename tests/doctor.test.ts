@@ -82,6 +82,22 @@ describe("doctor", () => {
     expect(checks.some((check) => check.name === "script:lint:branch" && check.severity === "warning")).toBe(true);
   });
 
+  test("rejects an invalid assisted recovery attempt budget", async () => {
+    const projectDir = await createGitRepo();
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(join(projectDir, ".openspec-shipper/config.json"), `${JSON.stringify({
+      recovery: { enabled: true, maxAttemptsPerPhase: 0 },
+    })}\n`);
+
+    const checks = await runDoctor(projectDir);
+
+    expect(checks.some((check) =>
+      check.name === "delivery config"
+      && !check.ok
+      && check.message === "recovery.maxAttemptsPerPhase must be a positive integer",
+    )).toBe(true);
+  });
+
   test("executes configured OpenSpec command probes", async () => {
     const projectDir = await createGitRepo();
     await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });

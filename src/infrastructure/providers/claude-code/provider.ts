@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DeliverPhase } from "../../../domain/queue/queue.js";
-import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
+import type { BuildCommandInput, BuildRecoveryCommandInput, ExecutorProvider, ProviderFailureSignal } from "../../../domain/provider/provider.js";
 import type { ClaudeSandboxMode } from "../../../domain/config/shipper-config.js";
 import { resolveProviderAsset } from "../../templates/provider-assets.js";
 
@@ -38,33 +38,51 @@ export const claudeCodeProvider: ExecutorProvider = {
       stdin: buildClaudePrompt(input),
     };
   },
+  buildRecoveryCommand(input: BuildRecoveryCommandInput) {
+    return {
+      command: input.config.executor.claude.bin,
+      args: buildClaudeCliArgs(input.assetsDir, input.config.executor.claude),
+      cwd: input.cwd,
+      stdin: input.prompt,
+    };
+  },
+  classifyFailureSignal: classifyClaudeFailureSignal,
   detectFailureSignal(output: string): string | undefined {
-    const result = parseClaudeResult(output);
-    if (result?.structured_output?.status === "completed") {
-      return undefined;
-    }
-    if (result?.structured_output?.status === "blocked") {
-      const reason = result.structured_output.reason?.trim() || "Claude Code reported a blocker";
-      return `Worker reported a blocker: ${reason}`;
-    }
-    if (result?.is_error) {
-      return `Claude Code reported an error: ${result.result?.trim() || result.subtype || "unknown error"}`;
-    }
-
-    const assistantOutput = result?.result ?? output;
-    const blockedReason = finalBlockedReason(assistantOutput);
-    if (blockedReason && blockedReason !== "<short reason>") {
-      return `Worker reported a blocker: ${blockedReason}`;
-    }
-    if (/\b(permission denied|permission required|not logged in|max(?:imum)? turns|max budget)\b/i.test(finalOutputSection(assistantOutput))) {
-      return "Claude Code reported a blocker";
-    }
-    if (!result?.structured_output || result.structured_output.status !== "completed") {
-      return "Claude Code did not return the required structured completion result";
-    }
-    return undefined;
+    return classifyClaudeFailureSignal(output)?.reason;
   },
 };
+
+function classifyClaudeFailureSignal(output: string): ProviderFailureSignal | undefined {
+  const result = parseClaudeResult(output);
+  if (result?.structured_output?.status === "completed") {
+    return undefined;
+  }
+  if (result?.structured_output?.status === "blocked") {
+    const reason = result.structured_output.reason?.trim() || "Claude Code reported a blocker";
+    return { kind: "worker_blocker", reason: `Worker reported a blocker: ${reason}` };
+  }
+  const assistantOutput = result?.result ?? output;
+  if (/usage limit|rate limit|quota exceeded|max budget/i.test(assistantOutput)) {
+    return { kind: "provider_unavailable", reason: "Claude Code usage limit was reached" };
+  }
+  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(assistantOutput)) {
+    return { kind: "authentication", reason: "Claude Code authentication failed" };
+  }
+  if (/permission denied|permission required/i.test(assistantOutput)) {
+    return { kind: "permission", reason: "Claude Code reported a permission blocker" };
+  }
+  if (result?.is_error) {
+    return { kind: "provider_unavailable", reason: `Claude Code reported an error: ${result.result?.trim() || result.subtype || "unknown error"}` };
+  }
+  const blockedReason = finalBlockedReason(assistantOutput);
+  if (blockedReason && blockedReason !== "<short reason>") {
+    return { kind: "worker_blocker", reason: `Worker reported a blocker: ${blockedReason}` };
+  }
+  if (!result?.structured_output || result.structured_output.status !== "completed") {
+    return { kind: "configuration", reason: "Claude Code did not return the required structured completion result" };
+  }
+  return undefined;
+}
 
 export type ClaudeCliOptions = {
   bin: string;

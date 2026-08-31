@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeliverPhase } from "../../../domain/queue/queue.js";
-import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
+import type { BuildCommandInput, BuildRecoveryCommandInput, ExecutorProvider, ProviderFailureSignal } from "../../../domain/provider/provider.js";
 import { resolveProviderAsset } from "../../templates/provider-assets.js";
 
 export const codexCliProvider: ExecutorProvider = {
@@ -37,23 +37,54 @@ export const codexCliProvider: ExecutorProvider = {
       cwd: input.projectDir,
     };
   },
+  buildRecoveryCommand(input: BuildRecoveryCommandInput) {
+    return buildCodexCommand(input.cwd, input.prompt, input.config);
+  },
+  classifyFailureSignal: classifyCodexFailureSignal,
   detectFailureSignal(output: string): string | undefined {
-    const detectionOutput = codexAssistantOutput(output);
-    const blockedSignals = detectionOutput.matchAll(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/gim);
-    for (const blocked of blockedSignals) {
-      const reason = blocked[1]?.trim();
-      if (reason !== "<short reason>") {
-        return `Worker reported a blocker: ${reason}`;
-      }
-    }
-
-    if (/\b(permission requested|approval required|cannot continue without)\b/i.test(detectionOutput)) {
-      return "Codex CLI reported a blocker";
-    }
-
-    return undefined;
+    return classifyCodexFailureSignal(output)?.reason;
   },
 };
+
+function classifyCodexFailureSignal(output: string): ProviderFailureSignal | undefined {
+  const detectionOutput = codexAssistantOutput(output);
+  const blockedSignals = detectionOutput.matchAll(/^OPENSPEC_SHIPPER_BLOCKED:\s*(.+)$/gim);
+  for (const blocked of blockedSignals) {
+    const reason = blocked[1]?.trim();
+    if (reason !== "<short reason>") {
+      return { kind: "worker_blocker", reason: `Worker reported a blocker: ${reason}` };
+    }
+  }
+  if (/usage limit|rate limit|quota exceeded|insufficient credits/i.test(detectionOutput)) {
+    return { kind: "provider_unavailable", reason: "Codex CLI usage limit was reached" };
+  }
+  if (/model (?:is )?not (?:available|found)|unknown model/i.test(detectionOutput)) {
+    return { kind: "provider_unavailable", reason: "Codex model is unavailable" };
+  }
+  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(detectionOutput)) {
+    return { kind: "authentication", reason: "Codex CLI authentication failed" };
+  }
+  if (/\b(permission requested|approval required|permission denied|cannot continue without)\b/i.test(detectionOutput)) {
+    return { kind: "permission", reason: "Codex CLI reported a blocker" };
+  }
+  return undefined;
+}
+
+function buildCodexCommand(
+  cwd: string,
+  prompt: string,
+  config: BuildCommandInput["config"],
+) {
+  const args = ["exec", "-C", cwd, "--sandbox", "workspace-write", "-c", 'approval_policy="never"'];
+  if (config.executor.codex.model) {
+    args.push("--model", config.executor.codex.model);
+  }
+  if (config.executor.codex.reasoningEffort) {
+    args.push("-c", `model_reasoning_effort="${config.executor.codex.reasoningEffort}"`);
+  }
+  args.push(prompt);
+  return { command: config.executor.codex.bin, args, cwd };
+}
 
 function codexAssistantOutput(output: string): string {
   if (!/^codex$/m.test(output)) {

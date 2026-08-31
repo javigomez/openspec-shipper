@@ -1,4 +1,5 @@
 import type { DeliverPhase, QueueTask } from "../queue/queue.js";
+import type { DeliveryFailureKind } from "../recovery/recovery.js";
 export type ExecutorProviderId = "opencode" | "codex-cli" | "claude-code";
 
 export type ProviderCommand = {
@@ -15,6 +16,20 @@ export type BuildCommandInput = {
   projectDir: string;
   assetsDir?: string;
   config: ProviderRuntimeConfig;
+};
+
+export type BuildRecoveryCommandInput = {
+  phase: DeliverPhase;
+  task: QueueTask;
+  cwd: string;
+  assetsDir: string;
+  prompt: string;
+  config: ProviderRuntimeConfig;
+};
+
+export type ProviderFailureSignal = {
+  kind: DeliveryFailureKind;
+  reason: string;
 };
 
 export type ProviderRuntimeConfig = {
@@ -55,5 +70,7 @@ export type ExecutorProvider = {
   defaultBin: string;
   activeProcessNames: string[];
   buildCommand(input: BuildCommandInput): ProviderCommand;
+  buildRecoveryCommand(input: BuildRecoveryCommandInput): ProviderCommand;
+  classifyFailureSignal(output: string): ProviderFailureSignal | undefined;
   detectFailureSignal(output: string): string | undefined;
 };

@@ -24,6 +24,7 @@ describe("target setup", () => {
     expect(shipperConfig.worktree).toEqual({ install: true, installTimeoutMs: 600000 });
     expect(shipperConfig.version).toBe(2);
     expect(shipperConfig.delivery).toEqual({ refreshPolicy: "auto" });
+    expect(shipperConfig.recovery).toEqual({ enabled: true, maxAttemptsPerPhase: 1 });
     expect(shipperConfig.archive).toEqual({ publishMode: "direct", maxAttempts: 3 });
     expect(shipperConfig.github.autoOpenPr).toBe(false);
     expect(shipperConfig.executor.provider).toBe("codex-cli");

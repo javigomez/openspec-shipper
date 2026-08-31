@@ -31,6 +31,10 @@ From highest to lowest priority:
   "delivery": {
     "refreshPolicy": "auto"
   },
+  "recovery": {
+    "enabled": true,
+    "maxAttemptsPerPhase": 1
+  },
   "archive": {
     "publishMode": "direct",
     "maxAttempts": 3
@@ -43,6 +47,12 @@ From highest to lowest priority:
 ```
 
 `delivery.refreshPolicy` accepts `auto`, `always`, `conflicts-only`, or `never`.
+`recovery.enabled` controls the final assisted recovery attempt before an
+actionable failure is marked blocked. `recovery.maxAttemptsPerPhase` defaults
+to one and is persisted in the queue, so restarting the runner cannot create a
+retry loop. Provider, authentication, permission, configuration, missing
+workspace, and human-merge failures are never sent to assisted recovery.
+`doctor` rejects non-positive attempt budgets and non-boolean enablement.
 `archive.publishMode` accepts `direct` or `pull-request`.
 
 The `checks` object adapts Shipper to the target repository. Empty typecheck,

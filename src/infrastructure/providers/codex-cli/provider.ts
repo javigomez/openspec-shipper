@@ -60,7 +60,10 @@ function codexAssistantOutput(output: string): string {
     return output;
   }
 
-  return output.split(/^codex$/m).slice(1).join("\n");
+  // Codex may include multiple assistant turns in one captured transcript.
+  // Only the final turn is authoritative; an earlier retry blocker must not
+  // poison a later successful implementation.
+  return output.split(/^codex$/m).at(-1) ?? output;
 }
 
 function buildCodexPrompt(input: BuildCommandInput): string {

@@ -8,6 +8,8 @@ export type DeliveryEvidence = {
   cleanupComplete: boolean;
   hasLocalClaim: boolean;
   worktreeDependenciesReady: boolean;
+  /** The delivery worktree is clean and its branch does not contain the current base. */
+  deliveryBranchNeedsRefresh?: boolean;
   localClaimPublished: boolean;
   hasRemoteBranch: boolean;
   hasOpenPullRequest: boolean;

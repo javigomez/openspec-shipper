@@ -84,6 +84,36 @@ describe("delivery phase definitions", () => {
     expect(phase.postChecks(evidence).phase).toBe("refresh_branch");
   });
 
+  test("refreshes a clean stale delivery branch before continuing incomplete work", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
+    const decision = reconcileDeliveryTask(task, {
+      ...evidence,
+      declaredPhase: "implement",
+      hasLocalClaim: true,
+      deliveryBranchNeedsRefresh: true,
+    });
+
+    expect(decision).toEqual({
+      kind: "transition",
+      phase: "refresh_branch",
+      reason: "delivery branch is behind the current base and can be refreshed safely",
+      decision: {
+        kind: "transition",
+        phase: "refresh_branch",
+        reason: "delivery branch is behind the current base and can be refreshed safely",
+      },
+    });
+
+    const refresh = phaseDefinition("refresh_branch");
+    expect(refresh.preChecks({
+      ...evidence,
+      declaredPhase: "refresh_branch",
+      hasLocalClaim: true,
+      tasksComplete: false,
+      deliveryBranchNeedsRefresh: true,
+    })).toEqual({ kind: "ready", phase: "refresh_branch" });
+  });
+
   test("push blocks incomplete work and advances only from PR evidence", () => {
     const phase = phaseDefinition("push");
 

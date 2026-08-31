@@ -83,6 +83,17 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("waiting_for_archive_merge", "archive pull request is open");
   }
 
+  if (
+    evidence.hasLocalClaim &&
+    evidence.deliveryBranchNeedsRefresh &&
+    phasePrecedesOrMatches(evidence.declaredPhase, "implement")
+  ) {
+    return transitionInference(
+      "refresh_branch",
+      "delivery branch is behind the current base and can be refreshed safely",
+    );
+  }
+
   if (evidence.hasLocalClaim && !evidence.worktreeDependenciesReady && phasePrecedesOrMatches(evidence.declaredPhase, "implement")) {
     return transitionInference("prepare_worktree", "implementation workspace dependencies are not installed");
   }

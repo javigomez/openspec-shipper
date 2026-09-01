@@ -58,6 +58,10 @@ export type ShipperConfig = {
   delivery: {
     refreshPolicy: DeliveryRefreshPolicy;
   };
+  recovery: {
+    enabled: boolean;
+    maxAttemptsPerPhase: number;
+  };
   archive: {
     publishMode: ArchivePublishMode;
     maxAttempts: number;
@@ -127,6 +131,10 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
     },
     delivery: {
       refreshPolicy: "auto",
+    },
+    recovery: {
+      enabled: true,
+      maxAttemptsPerPhase: 1,
     },
     archive: {
       publishMode: "direct",
@@ -225,6 +233,10 @@ function migrateConfig(config: Partial<ShipperConfig>): ShipperConfig {
     delivery: {
       ...defaults.delivery,
       ...(config.delivery ?? {}),
+    },
+    recovery: {
+      ...defaults.recovery,
+      ...(config.recovery ?? {}),
     },
     archive: {
       ...defaults.archive,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   advanceDeliverTask,
+  advanceDeliverTaskToPhase,
   BLOCKED_TASK_RETRY_HINT,
   WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT,
   buildOpenCodeArgs,
@@ -19,6 +20,29 @@ import {
 } from "../src/queue";
 
 describe("queue parser", () => {
+  test("round-trips assisted recovery metadata", () => {
+    const parsed = parseQueue(
+      "- [ ] deliver add-name-greeting <!-- phase: implement; recovery_attempts: 1; recovery_phase: implement; recovery_failure: a1b2c3d4e5f6 -->\n",
+    ).tasks[0]!;
+
+    expect(parsed.recoveryAttempts).toBe(1);
+    expect(parsed.recoveryPhase).toBe("implement");
+    expect(parsed.recoveryFailure).toBe("a1b2c3d4e5f6");
+    const next = advanceDeliverTaskToPhase([parsed.rawCommand], parsed, "implement", {
+      timestamp: "2026-08-31T12:00:00.000Z",
+    });
+    expect(next).toContain("recovery_attempts: 1");
+    expect(next).toContain("recovery_phase: implement");
+    expect(next).toContain("recovery_failure: a1b2c3d4e5f6");
+
+    const advanced = advanceDeliverTaskToPhase([parsed.rawCommand], parsed, "refresh_branch", {
+      timestamp: "2026-08-31T12:00:01.000Z",
+    });
+    expect(advanced).not.toContain("recovery_attempts");
+    expect(advanced).not.toContain("recovery_phase");
+    expect(advanced).not.toContain("recovery_failure");
+  });
+
   test("reads pending, done, and blocked tasks", () => {
     const result = parseQueue(
       [

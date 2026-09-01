@@ -127,9 +127,15 @@ function checkDeliveryConfig(config: ShipperConfig): DoctorCheck {
   if (!Number.isInteger(config.archive.maxAttempts) || config.archive.maxAttempts < 1) {
     return error("delivery config", "archive.maxAttempts must be a positive integer");
   }
+  if (typeof config.recovery.enabled !== "boolean") {
+    return error("delivery config", "recovery.enabled must be a boolean");
+  }
+  if (!Number.isInteger(config.recovery.maxAttemptsPerPhase) || config.recovery.maxAttemptsPerPhase < 1) {
+    return error("delivery config", "recovery.maxAttemptsPerPhase must be a positive integer");
+  }
   return ok(
     "delivery config",
-    `refresh ${config.delivery.refreshPolicy}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s)`,
+    `refresh ${config.delivery.refreshPolicy}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s); assisted recovery ${config.recovery.enabled ? "enabled" : "disabled"} with ${config.recovery.maxAttemptsPerPhase} attempt(s) per phase`,
   );
 }
 

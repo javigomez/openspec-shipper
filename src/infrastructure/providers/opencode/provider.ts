@@ -1,5 +1,5 @@
 import { commandAcceptsChangeArgument, type DeliverPhase } from "../../../domain/queue/queue.js";
-import type { BuildCommandInput, ExecutorProvider } from "../../../domain/provider/provider.js";
+import type { BuildCommandInput, BuildRecoveryCommandInput, ExecutorProvider, ProviderFailureSignal } from "../../../domain/provider/provider.js";
 import { dirname, join } from "node:path";
 import { resolveProviderAsset, resolveProviderDirectory } from "../../templates/provider-assets.js";
 
@@ -36,6 +36,26 @@ export const opencodeProvider: ExecutorProvider = {
       env: { OPENCODE_CONFIG_DIR: openCodeConfigDir(input.assetsDir ?? input.projectDir, input.phase) },
     };
   },
+  buildRecoveryCommand(input: BuildRecoveryCommandInput) {
+    const args = ["run"];
+    if (input.config.opencodePrintLogs) {
+      args.push("--print-logs");
+    }
+    if (input.config.opencodeLogLevel) {
+      args.push("--log-level", input.config.opencodeLogLevel);
+    }
+    if (input.config.executor.opencode.model) {
+      args.push("--model", input.config.executor.opencode.model);
+    }
+    args.push(input.prompt);
+    return {
+      command: input.config.executor.opencode.bin,
+      args,
+      cwd: input.cwd,
+      env: { OPENCODE_CONFIG_DIR: openCodeConfigDir(input.assetsDir) },
+    };
+  },
+  classifyFailureSignal,
   detectFailureSignal,
 };
 
@@ -73,25 +93,41 @@ export function openCodeCommandName(phase: DeliverPhase): string {
 }
 
 export function detectFailureSignal(output: string): string | undefined {
+  return classifyFailureSignal(output)?.reason;
+}
+
+export function classifyFailureSignal(output: string): ProviderFailureSignal | undefined {
   const finalOutput = finalOutputSection(output);
   const blockedReason = finalBlockedReason(output);
   if (blockedReason) {
-    return `Worker reported a blocker: ${blockedReason}`;
+    return { kind: "worker_blocker", reason: `Worker reported a blocker: ${blockedReason}` };
   }
 
-  const patterns: Array<[RegExp, string]> = [
-    [/UnknownError/i, "OpenCode returned UnknownError"],
-    [/Unexpected server error/i, "OpenCode returned an unexpected server error"],
-    [/AI_APICallError/i, "OpenCode stream failed with AI_APICallError"],
-    [/not a recognized command or skill/i, "OpenCode did not recognize the command"],
-    [/command not found:\s*openspec/i, "OpenSpec CLI was not available"],
-    [/^OpenCode auto-rejected\b/im, "OpenCode auto-rejected a permission request"],
-    [/^#+\s*Blocked:/im, "Worker reported a blocker"],
-    [/\bnot push-ready\b/i, "Worker reported a blocker"],
-    [/\bnot eligible for push\b/i, "Worker reported a blocker"],
-    [/\bArchive blocked\b/i, "OpenSpec archive worker reported a blocker"],
-    [/\bnot archive-ready\b/i, "OpenSpec archive worker reported a blocker"],
-    [/\b(worker reported a blocker|task is blocked|cannot continue without)\b/i, "Worker reported a blocker"],
+  if (/only available hosted in China|model (?:is )?not (?:available|found)|unknown model/i.test(finalOutput)) {
+    return { kind: "provider_unavailable", reason: "OpenCode model is unavailable" };
+  }
+  if (/usage limit|rate limit|quota exceeded|insufficient credits/i.test(finalOutput)) {
+    return { kind: "provider_unavailable", reason: "OpenCode provider usage limit was reached" };
+  }
+  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(finalOutput)) {
+    return { kind: "authentication", reason: "OpenCode provider authentication failed" };
+  }
+  if (/auto-rejecting|permission requested|permission denied/i.test(finalOutput)) {
+    return { kind: "permission", reason: "OpenCode reported a permission blocker" };
+  }
+
+  const patterns: Array<[RegExp, ProviderFailureSignal]> = [
+    [/UnknownError/i, { kind: "provider_unavailable", reason: "OpenCode returned UnknownError" }],
+    [/Unexpected server error/i, { kind: "provider_unavailable", reason: "OpenCode returned an unexpected server error" }],
+    [/AI_APICallError/i, { kind: "provider_unavailable", reason: "OpenCode stream failed with AI_APICallError" }],
+    [/not a recognized command or skill/i, { kind: "configuration", reason: "OpenCode did not recognize the command" }],
+    [/command not found:\s*openspec/i, { kind: "configuration", reason: "OpenSpec CLI was not available" }],
+    [/^#+\s*Blocked:/im, { kind: "worker_blocker", reason: "Worker reported a blocker" }],
+    [/\bnot push-ready\b/i, { kind: "worker_blocker", reason: "Worker reported a blocker" }],
+    [/\bnot eligible for push\b/i, { kind: "worker_blocker", reason: "Worker reported a blocker" }],
+    [/\bArchive blocked\b/i, { kind: "worker_blocker", reason: "OpenSpec archive worker reported a blocker" }],
+    [/\bnot archive-ready\b/i, { kind: "worker_blocker", reason: "OpenSpec archive worker reported a blocker" }],
+    [/\b(worker reported a blocker|task is blocked|cannot continue without)\b/i, { kind: "worker_blocker", reason: "Worker reported a blocker" }],
   ];
 
   return patterns.find(([pattern]) => pattern.test(finalOutput))?.[1];

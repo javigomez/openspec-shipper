@@ -1,6 +1,8 @@
 # When the Queue Blocks
 
-Goal of this page: lose the fear of `[!]`. A blocked task is not a failure — it's Shipper handing control back to you instead of guessing or burning tokens.
+Goal of this page: lose the fear of `[!]`. A blocked task means Shipper has
+exhausted deterministic recovery and, when the failure was actionable inside a
+safe workspace, one final assisted recovery attempt.
 
 ## What it looks like
 
@@ -28,6 +30,11 @@ When the fix isn't obvious:
 2. Follow the `log` link next to it for the full execution output.
 3. Fix it yourself — or paste the reason and the log into your AI assistant and let it diagnose and solve the issue. The logs are written to be machine-readable for exactly this.
 4. Flip `[!]` to `[ ]` and run the queue again.
+
+The task log records `Assisted recovery attempt` and `Assisted recovery result`
+when that final attempt was eligible. Shipper never asks the model to repair a
+missing login, unavailable model, exhausted quota, missing workspace, disabled
+safety setting or pull request that still needs a human merge.
 
 ## Common causes worth knowing
 

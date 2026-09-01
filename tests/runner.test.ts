@@ -413,6 +413,34 @@ describe("runner", () => {
     expect(queue).toContain("phase: implement");
   });
 
+  test("offers assisted recovery when dependency reconciliation fails in a prepared worktree", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        if (calls === 1) {
+          await writeFile(join(worktreeDir, "implementation.txt"), "progress\n");
+        }
+        return { exitCode: 0, output: "done" };
+      },
+      reconcileWorktreeDependencies: async () => {
+        throw new Error("Dependency update failed after implementation");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(2);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("recovery_attempts: 1");
+    expect(queue).not.toContain("[!]");
+  });
+
   test("recovers a blocked implement when dependency inputs became stale", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
     let reconciled = false;
@@ -741,7 +769,7 @@ describe("runner", () => {
     expect(queue).toContain("![implement blocked](https://img.shields.io/badge/implement-blocked-red)");
   });
 
-  test("retries one successful implement invocation without observable progress before blocking", async () => {
+  test("retries no-progress implement, asks for assisted recovery, then blocks if progress is still absent", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
     await createImplementWorktree(harness.rootDir, "add-name-greeting");
 
@@ -764,13 +792,189 @@ describe("runner", () => {
       executor: async () => ({ exitCode: 0, output: "completed\n" }),
     });
 
-    expect(secondExitCode).toBe(1);
+    expect(secondExitCode).toBe(0);
+    const recoveredQueue = await readFile(harness.queuePath, "utf8");
+    expect(recoveredQueue).toContain("recovery_attempts: 1");
+
+    const thirdExitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => ({ exitCode: 0, output: "completed\n" }),
+    });
+
+    expect(thirdExitCode).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("Implement completed without observable progress");
     const logs = await readdir(join(harness.config.stateDir, "runs"));
     const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
     expect(log).toContain("Implement progress check failed");
+  });
+
+  test("asks the provider for one assisted recovery before blocking an actionable worker failure", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async (_command, args) => {
+        calls += 1;
+        if (calls === 1) {
+          return { exitCode: 0, output: "OPENSPEC_SHIPPER_BLOCKED: generated adapter tests fail\n" };
+        }
+        expect(args.join(" ")).toContain("internal OpenSpec Shipper recovery agent");
+        await writeFile(join(worktreeDir, "recovery.txt"), "repaired\n");
+        return { exitCode: 0, output: "Recovered the failing adapter tests.\n" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(2);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: implement");
+    expect(queue).toContain("recovery_attempts: 1");
+    expect(queue).toContain("recovery_phase: implement");
+    expect(queue).not.toContain("[!]");
+  });
+
+  test("blocks with both diagnostics when assisted recovery also fails", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        return calls === 1
+          ? { exitCode: 0, output: "OPENSPEC_SHIPPER_BLOCKED: generated adapter tests fail\n" }
+          : { exitCode: 0, output: "OPENSPEC_SHIPPER_BLOCKED: repair requires a product decision\n" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(calls).toBe(2);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("recovery_attempts: 1");
+    expect(queue).toContain("generated adapter tests fail");
+    const logs = await readdir(join(harness.config.stateDir, "runs"));
+    const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
+    expect(log).toContain("Assisted recovery attempt");
+    expect(log).toContain("repair requires a product decision");
+  });
+
+  test("rejects a recovery that modifies the human checkout", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    git(harness.rootDir, ["init", "-b", "main"]);
+    git(harness.rootDir, ["config", "user.name", "Test User"]);
+    git(harness.rootDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(harness.rootDir, "README.md"), "human checkout\n");
+    git(harness.rootDir, ["add", "README.md"]);
+    git(harness.rootDir, ["commit", "-m", "chore: initialize human checkout"]);
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        if (calls === 2) {
+          await writeFile(join(harness.rootDir, "unauthorized.txt"), "bad recovery\n");
+          return { exitCode: 0, output: "repaired\n" };
+        }
+        return { exitCode: 0, output: "OPENSPEC_SHIPPER_BLOCKED: tests fail\n" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("human checkout changed during assisted recovery");
+  });
+
+  test("rejects a recovery that modifies another linked worktree", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    git(harness.rootDir, ["init", "-b", "main"]);
+    git(harness.rootDir, ["config", "user.name", "Test User"]);
+    git(harness.rootDir, ["config", "user.email", "test@example.com"]);
+    await writeFile(join(harness.rootDir, "README.md"), "human checkout\n");
+    git(harness.rootDir, ["add", "README.md"]);
+    git(harness.rootDir, ["commit", "-m", "chore: initialize human checkout"]);
+    const protectedWorktree = join(harness.rootDir, "other-worktree");
+    git(harness.rootDir, ["worktree", "add", "-b", "feat/other-change", protectedWorktree]);
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        if (calls === 2) {
+          await writeFile(join(protectedWorktree, "unauthorized.txt"), "bad recovery\n");
+          return { exitCode: 0, output: "repaired\n" };
+        }
+        return { exitCode: 0, output: "OPENSPEC_SHIPPER_BLOCKED: tests fail\n" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("protected checkout changed during assisted recovery");
+    expect(queue).toContain("other-worktree");
+  });
+
+  test("does not invoke assisted recovery for terminal provider failures", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        return { exitCode: 1, output: "The latest version of this model is only available hosted in China\n" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(calls).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("OpenCode model is unavailable");
+    expect(queue).not.toContain("recovery_attempts");
+  });
+
+  test("does not repeat assisted recovery after its phase budget is exhausted", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver add-name-greeting <!-- phase: implement; recovery_attempts: 1; recovery_phase: implement; recovery_failure: a1b2c3d4e5f6 -->\n",
+    );
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        return { exitCode: 0, output: "OPENSPEC_SHIPPER_BLOCKED: tests still fail\n" };
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(calls).toBe(1);
   });
 
   test("clears a no-progress retry counter once implement makes progress", async () => {
@@ -1494,7 +1698,8 @@ describe("runner", () => {
 
   test("retries a native phase after the internal repair agent succeeds", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: refresh_branch -->\n");
-    let repairedReason = "";
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let recoveryPrompt = "";
 
     const exitCode = await runQueue("next", {
       ...harness.config,
@@ -1504,17 +1709,17 @@ describe("runner", () => {
       refreshDeliveryBranch: async () => {
         throw new Error("merge conflict with origin/main");
       },
-      repairNativeFailure: async (_config, _task, reason) => {
-        repairedReason = reason;
-        return { repaired: true, output: "resolved conflict and committed merge" };
+      executor: async (_command, args) => {
+        recoveryPrompt = args.at(-1) ?? "";
+        return { exitCode: 0, output: "resolved conflict and committed merge" };
       },
     });
 
     expect(exitCode).toBe(0);
-    expect(repairedReason).toContain("merge conflict");
+    expect(recoveryPrompt).toContain("merge conflict");
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: refresh_branch");
-    expect(queue).toContain("repair_attempts: 1");
+    expect(queue).toContain("recovery_attempts: 1");
     expect(queue).not.toContain("[!]");
   });
 
@@ -2407,7 +2612,6 @@ async function createHarness(queueContent: string, options: { createCommandFiles
       branch: "origin/main",
     }),
     prepareArchiveWorkspace: async (_projectDir, baseBranch) => `prepared archive workspace from origin/${baseBranch}\n`,
-    repairNativeFailure: async () => ({ repaired: false, output: "repair unavailable in test harness" }),
     refreshDeliveryBranch: async (_projectDir, changeName, baseBranch) => `refreshed ${changeName} from origin/${baseBranch}\n`,
     finalizeArchive: async (input) => `finalized archive for ${input.changeName} on ${input.baseBranch}\n`,
     now: () => new Date("2026-06-17T12:00:00.000Z"),

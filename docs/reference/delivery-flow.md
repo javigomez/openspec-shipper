@@ -61,3 +61,22 @@ advanced valid phase instead of trusting stale badges or blindly restarting.
 
 Archive ordering inferred from shared `### Requirement:` headings is ephemeral:
 it affects scheduling but is never persisted as human intent in `queue.md`.
+
+## Assisted recovery before blocking
+
+When a worker or native phase encounters an actionable failure inside an
+existing delivery workspace, Shipper gives the configured provider one final,
+scoped recovery attempt before writing `[!]`. The recovery agent receives the
+original reason and log, may repair only the current delivery or integration
+workspace, and cannot advance the delivery phase itself. Shipper leaves the
+same phase pending and retries its normal deterministic operation; only that
+operation can certify success.
+
+Shipper snapshots the human checkout and every other linked worktree around
+the recovery call. If the agent changes any protected checkout, the recovery is
+rejected and the task is blocked with that safety violation.
+
+The attempt budget is persisted per phase to survive restarts. Failures in the
+provider itself (model availability, usage limits, authentication, permissions
+or configuration), missing workspaces, safety gates and pull requests waiting
+for a human are blocked without another model call.

@@ -44,7 +44,9 @@ The checkbox tells you everything at a glance:
 
 - `[ ]` — Shipper may work on it.
 - `[x]` — delivered, merged, archived, cleaned up.
-- `[!]` — waiting for you. Read the comment on the task to see why (often just "merge the PR"). See [When the queue blocks](./blocked-queue.md).
+- `[!]` — waiting for you after deterministic and eligible assisted recovery
+  has been exhausted. Read the comment and log to see why (often just "merge
+  the PR"). See [When the queue blocks](./blocked-queue.md).
 
 Shipper maintains the metadata comments (phase, timestamps, PR links, log links). You only ever need to touch the checkbox and the human-intent fields above.
 

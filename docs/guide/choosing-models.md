@@ -13,6 +13,11 @@ So split your model budget:
 
 If a cheap model repeatedly fails a particular change, that's usually feedback about the spec — tasks too big, ambiguous acceptance criteria — more often than about the model.
 
+Shipper also uses the configured provider and model for the single assisted
+recovery attempt it may make before blocking an actionable failure. There is no
+separate recovery model: choose an implementation model capable of inspecting
+logs, editing the isolated worktree, and running focused checks.
+
 ## Configuring the model per provider
 
 You can set the model at `init` time, in `.openspec-shipper/config.json`, or override it per run with environment variables. Precedence is: CLI flags > `OPENSPEC_SHIPPER_*` env vars > `.openspec-shipper/.env` > `config.json` > defaults.

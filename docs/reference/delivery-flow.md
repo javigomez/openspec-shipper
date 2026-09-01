@@ -33,7 +33,10 @@ handles open PRs that conflict or fall behind a protected base.
 Validates the completed change, pushes the delivery branch, and creates or
 reuses its pull request through `gh`. When `github.autoMergePr` is enabled,
 Shipper then enables squash auto-merge on that PR. Existing PRs are handled too,
-so changing the setting after PR creation is safe.
+so changing the setting after PR creation is safe. If dependency manifests or
+lockfiles changed after implementation, Shipper first runs the configured native
+dependency update. A failed native update is offered to assisted recovery before
+the task is blocked.
 
 ### `waiting_for_merge`
 

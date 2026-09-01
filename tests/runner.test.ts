@@ -620,6 +620,74 @@ describe("runner", () => {
     expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
   });
 
+  test("repairs stale worktree dependencies natively before push", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    let dependenciesReady = false;
+    let reconciliations = 0;
+    let pushed = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
+      worktreeDependenciesReadyDetector: async () => dependenciesReady,
+      reconcileWorktreeDependencies: async () => {
+        reconciliations += 1;
+        dependenciesReady = true;
+        return "dependencies refreshed\n";
+      },
+      pushBranchAndOpenPullRequest: async () => {
+        pushed = true;
+        return "pushed https://github.com/example/project/pull/8\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(reconciliations).toBe(1);
+    expect(pushed).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_merge");
+    const logs = await readdir(join(harness.config.stateDir, "runs"));
+    const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
+    expect(log).toContain("Native dependency reconciliation before push");
+    expect(log).toContain("dependencies refreshed");
+  });
+
+  test("offers assisted recovery when native dependency repair before push fails", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let recoveryCalls = 0;
+    let pushed = false;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      ...implementedChangeEvidence("add-name-greeting"),
+      worktreeDependenciesReadyDetector: async () => false,
+      reconcileWorktreeDependencies: async () => {
+        throw new Error("npm install failed before push");
+      },
+      pushBranchAndOpenPullRequest: async () => {
+        pushed = true;
+        return "unexpected push\n";
+      },
+      executor: async () => {
+        recoveryCalls += 1;
+        return { exitCode: 0, output: "dependencies repaired by recovery agent" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(recoveryCalls).toBe(1);
+    expect(pushed).toBe(false);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: push");
+    expect(queue).toContain("recovery_attempts: 1");
+    expect(queue).not.toContain("[!]");
+    const logs = await readdir(join(harness.config.stateDir, "runs"));
+    const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
+    expect(log).toContain("Native dependency reconciliation before push failed");
+    expect(log).toContain("npm install failed before push");
+  });
+
   test("runs push to enable auto-merge when an implementation PR already exists", async () => {
     const pullRequestUrl = "https://github.com/example/project/pull/7";
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");

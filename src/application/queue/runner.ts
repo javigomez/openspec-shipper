@@ -937,7 +937,6 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
   }
 
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
-  const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
   if (!config.tasksCompleteDetector) {
     const status = await detectTaskCompletionStatus(config.projectDir, task.change);
     if (status.kind === "no_checkboxes") {
@@ -946,9 +945,6 @@ async function validateNativePush(config: RunnerConfig, task: QueueTask): Promis
   }
   if (!(await tasksCompleteDetector(config.projectDir, task.change))) {
     return `Implementation tasks are not complete for ${task.change}; cannot push or open a PR.`;
-  }
-  if (!(await worktreeDependenciesReadyDetector(config.projectDir, task.change))) {
-    return `Worktree dependencies are not installed for ${task.change}; return the task to prepare_worktree.`;
   }
   const branch = task.deliveryBranch ?? detectChangeBranch(config.projectDir, task.change);
   const canonicalSpecDiff = spawnSync(
@@ -1999,8 +1995,9 @@ async function executeNativeTask(
       }));
     }
 
+    const dependencyOutput = await reconcilePushDependencies(config, effectiveTask);
     const output = await runNativeTask(config, effectiveTask);
-    await writeFile(logPath, output);
+    await writeFile(logPath, `${dependencyOutput}${output}`);
     const timestamp = (config.now?.() ?? new Date()).toISOString();
     const phase = deliverPhase(effectiveTask);
     const resumeImplementation = phase === "refresh_branch" && effectiveTask.change
@@ -2051,8 +2048,24 @@ async function executeNativeTask(
     return 0;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    const logOutput = error instanceof NativeTaskError ? error.logOutput : `${reason}\n`;
+    const logOutput = error instanceof NativeTaskError || error instanceof DependencyReconciliationError
+      ? error.logOutput
+      : `${reason}\n`;
     await writeFile(logPath, logOutput);
+    if (error instanceof DependencyReconciliationError) {
+      return await recoverOrBlock(config, lines, effectiveTask, {
+        source: "native",
+        kind: "dependency_reconciliation",
+        phase: deliverPhase(effectiveTask),
+        reason,
+        safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, effectiveTask)),
+      }, {
+        logPath,
+        relativeLogPath,
+        checkedAt: activity.checkedAt,
+        startedAt,
+      });
+    }
     if (error instanceof ArchivePublishRaceError && deliverPhase(effectiveTask) === "publish_archive") {
       const attempts = (effectiveTask.archiveAttempts ?? 0) + 1;
       const maxAttempts = (readShipperConfigSync(config.projectDir) ?? defaultShipperConfig()).archive.maxAttempts;
@@ -2097,6 +2110,33 @@ async function executeNativeTask(
     await writeFile(config.queuePath, nextContent);
     console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
     return 1;
+  }
+}
+
+async function reconcilePushDependencies(config: RunnerConfig, task: QueueTask): Promise<string> {
+  if (deliverPhase(task) !== "push" || !task.change) {
+    return "";
+  }
+
+  const readinessDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
+  if (await readinessDetector(config.projectDir, task.change)) {
+    return "";
+  }
+
+  try {
+    const reconciler = config.reconcileWorktreeDependencies ?? reconcileWorktreeDependencies;
+    const output = await reconciler(config.projectDir, task.change);
+    if (!(await readinessDetector(config.projectDir, task.change))) {
+      throw new Error(`Worktree dependencies are still not installed for ${task.change} after native reconciliation.`);
+    }
+    return `## Native dependency reconciliation before push\n\n${output.trim()}\n\n`;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const detail = error instanceof NativeTaskError ? error.logOutput.trimEnd() : reason;
+    throw new DependencyReconciliationError(
+      reason,
+      `## Native dependency reconciliation before push failed\n\n${detail}\n`,
+    );
   }
 }
 
@@ -3108,6 +3148,13 @@ class NativeTaskError extends Error {
   constructor(message: string, readonly logOutput: string) {
     super(message);
     this.name = "NativeTaskError";
+  }
+}
+
+class DependencyReconciliationError extends Error {
+  constructor(message: string, readonly logOutput: string) {
+    super(message);
+    this.name = "DependencyReconciliationError";
   }
 }
 

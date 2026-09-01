@@ -14,6 +14,7 @@ export type DeliveryEvidence = {
   hasRemoteBranch: boolean;
   hasOpenPullRequest: boolean;
   pullRequestUrl?: string;
+  requiresPullRequestAutoMerge?: boolean;
   hasMergedPullRequest: boolean;
   tasksComplete: boolean;
   refreshRequired?: boolean;

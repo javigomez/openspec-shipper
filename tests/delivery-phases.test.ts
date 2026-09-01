@@ -125,6 +125,7 @@ describe("delivery phase definitions", () => {
     });
     expect(phase.preChecks({ ...evidence, hasLocalClaim: true, tasksComplete: true })).toEqual({ kind: "ready", phase: "push" });
     expect(phase.preChecks({ ...evidence, hasLocalClaim: true, tasksComplete: true, localClaimPublished: true, hasOpenPullRequest: true }).phase).toBe("waiting_for_merge");
+    expect(phase.preChecks({ ...evidence, hasLocalClaim: true, tasksComplete: true, localClaimPublished: true, hasOpenPullRequest: true, requiresPullRequestAutoMerge: true })).toEqual({ kind: "ready", phase: "push" });
     expect(phase.preChecks({ ...evidence, hasLocalClaim: true, tasksComplete: true, localClaimPublished: true, hasMergedPullRequest: true }).phase).toBe("archive");
     expect(phase.run(evidence)).toEqual({ kind: "execute", phase: "push" });
     expect(phase.postChecks(evidence)).toEqual({ kind: "blocked", phase: "push", reason: "push phase completed but no pull request exists" });
@@ -140,6 +141,25 @@ describe("delivery phase definitions", () => {
     expect(phase.postChecks(evidence).kind).toBe("blocked");
     expect(phase.preChecks({ ...evidence, hasMergedPullRequest: true }).phase).toBe("archive");
     expect(phase.postChecks({ ...evidence, hasMergedPullRequest: true }).phase).toBe("archive");
+  });
+
+  test("returns an existing waiting PR to push when auto-merge must be enabled", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: waiting_for_merge -->\n").tasks[0]!;
+
+    expect(reconcileDeliveryTask(task, {
+      ...evidence,
+      declaredPhase: "waiting_for_merge",
+      hasLocalClaim: true,
+      tasksComplete: true,
+      localClaimPublished: true,
+      hasRemoteBranch: true,
+      hasOpenPullRequest: true,
+      requiresPullRequestAutoMerge: true,
+    })).toMatchObject({
+      kind: "transition",
+      phase: "push",
+      reason: "open pull request still needs auto-merge enabled",
+    });
   });
 
   test("native completion phases expose their expected transitions", () => {

@@ -115,6 +115,7 @@ describe("CLI parser", () => {
       expect(process.exitCode).toBe(0);
       const config = JSON.parse(await readFile(join(projectDir, ".openspec-shipper/config.json"), "utf8"));
       expect(config.executor.provider).toBe("claude-code");
+      expect(config.github.autoMergePr).toBe(false);
       expect(config.executor.claude).toEqual({
         bin: "custom-claude",
         model: "opus",

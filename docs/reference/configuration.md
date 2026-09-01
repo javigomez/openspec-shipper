@@ -31,6 +31,11 @@ From highest to lowest priority:
   "delivery": {
     "refreshPolicy": "auto"
   },
+  "github": {
+    "autoOpenPr": false,
+    "autoMergePr": false,
+    "prChecks": false
+  },
   "recovery": {
     "enabled": true,
     "maxAttemptsPerPhase": 1
@@ -54,6 +59,21 @@ retry loop. Provider, authentication, permission, configuration, missing
 workspace, and human-merge failures are never sent to assisted recovery.
 `doctor` rejects non-positive attempt budgets and non-boolean enablement.
 `archive.publishMode` accepts `direct` or `pull-request`.
+
+`github.autoMergePr` defaults to `false`. When enabled, the `push` phase runs
+`gh pr merge <pr> --auto --squash` after creating or finding the implementation
+PR. The operation is idempotent: Shipper also applies it to PRs that already
+exist and skips the command when GitHub reports auto-merge is already enabled.
+You can override the file setting per machine with:
+
+```bash
+OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR=true
+```
+
+Auto-merge does not resolve conflicts. A `CONFLICTING` PR remains blocked for
+intervention. GitHub may merge immediately when a repository has no required
+checks or branch protection, so enable this only alongside appropriate
+protection for the base branch and a CI workflow.
 
 The `checks` object adapts Shipper to the target repository. Empty typecheck,
 lint, format, or unit commands are valid; Shipper does not assume every project

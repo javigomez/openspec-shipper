@@ -42,6 +42,7 @@ export async function runCli(argv: string[]): Promise<void> {
       claudeSandbox: options.claudeSandbox,
       archivePublishMode: options.archivePublishMode,
       refreshPolicy: options.refreshPolicy,
+      autoMergePr: options.autoMergePr,
       force: options.force,
       installDependencies: command !== "update" && !options.noInstall,
     });
@@ -150,6 +151,7 @@ function parseTargetOptions(argv: string[]): {
   claudeSandbox?: ClaudeSandboxMode;
   archivePublishMode?: ArchivePublishMode;
   refreshPolicy?: DeliveryRefreshPolicy;
+  autoMergePr?: boolean;
   force: boolean;
   yes: boolean;
   noInstall: boolean;
@@ -164,6 +166,7 @@ function parseTargetOptions(argv: string[]): {
   let claudeSandbox: ClaudeSandboxMode | undefined;
   let archivePublishMode: ArchivePublishMode | undefined;
   let refreshPolicy: DeliveryRefreshPolicy | undefined;
+  let autoMergePr: boolean | undefined;
   let force = false;
   let yes = false;
   let noInstall = false;
@@ -285,7 +288,7 @@ function parseTargetOptions(argv: string[]): {
     }
   }
 
-  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, archivePublishMode, refreshPolicy, force, yes, noInstall };
+  return { projectDir, profile, provider, providerBin, model, effort, permissionMode, claudeSandbox, archivePublishMode, refreshPolicy, autoMergePr, force, yes, noInstall };
 }
 
 function profileForPackageManager(packageManager: PackageManager): ShipperProfile {
@@ -375,6 +378,16 @@ async function promptInitOptions(
       ),
       parsed.refreshPolicy ?? "auto",
     );
+    const existingConfig = await readShipperConfig(projectDir);
+    const autoMergeDefault = parsed.autoMergePr ?? existingConfig?.github.autoMergePr ?? false;
+    explain("Auto-merge asks GitHub to squash-merge implementation pull requests after required checks and approvals pass. Without branch protection or required checks, GitHub may merge immediately. Keep no unless the base branch is protected and CI is configured.");
+    const autoMergePr = parseYesNo(
+      answerOrDefault(
+        await rl.question(`Enable auto-merge for implementation pull requests? yes|no (${autoMergeDefault ? "yes" : "no"}): `),
+        autoMergeDefault ? "yes" : "no",
+      ),
+      autoMergeDefault,
+    );
     explain("Installing dependencies now lets doctor and the queue work immediately, including in fresh worktrees. Choose no for vendored dependencies, offline repositories, or when you prefer to install manually. Keep yes unless you know this project does not need it.");
     const installDependencies = parseYesNo(
       answerOrDefault(await rl.question(`Install dependencies now? yes|no (${parsed.noInstall ? "no" : "yes"}): `), parsed.noInstall ? "no" : "yes"),
@@ -392,6 +405,7 @@ async function promptInitOptions(
       claudeSandbox,
       archivePublishMode,
       refreshPolicy,
+      autoMergePr,
       noInstall: !installDependencies,
     };
   } finally {

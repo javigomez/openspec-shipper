@@ -29,6 +29,7 @@ export type SetupConfig = {
   claudeSandbox?: ClaudeSandboxMode;
   archivePublishMode?: ArchivePublishMode;
   refreshPolicy?: DeliveryRefreshPolicy;
+  autoMergePr?: boolean;
   force?: boolean;
   installDependencies?: boolean;
   dependencyInstaller?: DependencyInstaller;
@@ -115,6 +116,7 @@ export async function installShipperKit(config: SetupConfig): Promise<InstalledF
   }
   shipperConfig.archive.publishMode = config.archivePublishMode ?? shipperConfig.archive.publishMode;
   shipperConfig.delivery.refreshPolicy = config.refreshPolicy ?? shipperConfig.delivery.refreshPolicy;
+  shipperConfig.github.autoMergePr = config.autoMergePr ?? shipperConfig.github.autoMergePr;
   const configContent = `${JSON.stringify(shipperConfig, null, 2)}\n`;
   installed.push(await installGeneratedFile(config, "generated:shipper-config", configPath, configContent));
   if (selectedProvider === "claude-code") {
@@ -444,6 +446,7 @@ function defaultEnvExample(provider: ExecutorProviderId = "codex-cli"): string {
     "OPENSPEC_SHIPPER_CLAUDE_PERMISSION_MODE=dontAsk",
     "OPENSPEC_SHIPPER_CLAUDE_MAX_TURNS=",
     "OPENSPEC_SHIPPER_CLAUDE_MAX_BUDGET_USD=",
+    "OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR=false",
     "OPENSPEC_SHIPPER_LOOP_DELAY_MS=5000",
     "OPENSPEC_SHIPPER_BUSY_DELAY_MS=60000",
     "OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR=2",

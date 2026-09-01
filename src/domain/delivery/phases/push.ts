@@ -19,6 +19,10 @@ export const pushPhase: DeliveryPhaseDefinition = {
       return transition("archive", "pull request is merged");
     }
 
+    if (evidence.hasOpenPullRequest && evidence.requiresPullRequestAutoMerge) {
+      return ready("push");
+    }
+
     if (evidence.hasOpenPullRequest) {
       return transition("waiting_for_merge", "open pull request exists");
     }

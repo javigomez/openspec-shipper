@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { installShipperKit } from "../src/setup";
+import { readShipperConfig } from "../src/domain/config/shipper-config";
 
 describe("target setup", () => {
   test("installs the OpenSpec Shipper kit into a target repository", async () => {
@@ -27,8 +28,10 @@ describe("target setup", () => {
     expect(shipperConfig.recovery).toEqual({ enabled: true, maxAttemptsPerPhase: 1 });
     expect(shipperConfig.archive).toEqual({ publishMode: "direct", maxAttempts: 3 });
     expect(shipperConfig.github.autoOpenPr).toBe(false);
+    expect(shipperConfig.github.autoMergePr).toBe(false);
     expect(shipperConfig.executor.provider).toBe("codex-cli");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR=false");
     const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");
     expect(installedReadme).toContain("Required After Init");
     expect(installedReadme).toContain("git commit -m \"chore: install openspec shipper\"");
@@ -150,6 +153,27 @@ describe("target setup", () => {
     expect(result.some((file) => file.target.includes(".opencode/"))).toBe(false);
     const shipperConfig = JSON.parse(await readFile(join(harness.projectDir, ".openspec-shipper/config.json"), "utf8"));
     expect(shipperConfig.executor.provider).toBe("codex-cli");
+  });
+
+  test("defaults and migrates auto-merge safely while preserving an explicit update choice", async () => {
+    const harness = await createHarness();
+    await mkdir(join(harness.projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(
+      join(harness.projectDir, ".openspec-shipper/config.json"),
+      `${JSON.stringify({ version: 2, github: { autoOpenPr: false, prChecks: false } })}\n`,
+    );
+
+    expect((await readShipperConfig(harness.projectDir))?.github.autoMergePr).toBe(false);
+
+    await installShipperKit({
+      rootDir: harness.rootDir,
+      projectDir: harness.projectDir,
+      autoMergePr: true,
+      force: true,
+    });
+    await installShipperKit({ rootDir: harness.rootDir, projectDir: harness.projectDir, force: true });
+
+    expect((await readShipperConfig(harness.projectDir))?.github.autoMergePr).toBe(true);
   });
 
   test("does not overwrite target files that drifted after installation", async () => {

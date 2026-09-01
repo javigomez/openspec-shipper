@@ -130,12 +130,15 @@ function checkDeliveryConfig(config: ShipperConfig): DoctorCheck {
   if (typeof config.recovery.enabled !== "boolean") {
     return error("delivery config", "recovery.enabled must be a boolean");
   }
+  if (typeof config.github.autoMergePr !== "boolean") {
+    return error("delivery config", "github.autoMergePr must be a boolean");
+  }
   if (!Number.isInteger(config.recovery.maxAttemptsPerPhase) || config.recovery.maxAttemptsPerPhase < 1) {
     return error("delivery config", "recovery.maxAttemptsPerPhase must be a positive integer");
   }
   return ok(
     "delivery config",
-    `refresh ${config.delivery.refreshPolicy}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s); assisted recovery ${config.recovery.enabled ? "enabled" : "disabled"} with ${config.recovery.maxAttemptsPerPhase} attempt(s) per phase`,
+    `refresh ${config.delivery.refreshPolicy}; implementation auto-merge ${config.github.autoMergePr ? "enabled" : "disabled"}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s); assisted recovery ${config.recovery.enabled ? "enabled" : "disabled"} with ${config.recovery.maxAttemptsPerPhase} attempt(s) per phase`,
   );
 }
 

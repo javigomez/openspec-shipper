@@ -119,6 +119,10 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("refresh_branch", "open pull request needs its delivery branch refreshed");
   }
 
+  if (evidence.hasOpenPullRequest && evidence.requiresPullRequestAutoMerge && phasePrecedesOrMatches(evidence.declaredPhase, "waiting_for_merge")) {
+    return transitionInference("push", "open pull request still needs auto-merge enabled");
+  }
+
   if (evidence.hasOpenPullRequest && phasePrecedes(evidence.declaredPhase, "waiting_for_merge")) {
     return transitionInference("waiting_for_merge", "open pull request exists");
   }

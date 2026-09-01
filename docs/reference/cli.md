@@ -9,7 +9,9 @@ openspec-shipper doctor [--deep]
 ```
 
 `init` is interactive in a terminal. Use `--yes` plus explicit options for
-automation.
+automation. Interactive init asks whether implementation PRs should use
+auto-merge; the default is `no`, and `--yes` keeps it disabled. `update`
+preserves the existing `github.autoMergePr` value when no new value is supplied.
 
 ## Queue commands
 

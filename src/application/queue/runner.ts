@@ -52,6 +52,12 @@ import {
   type DeliverySource,
 } from "../../infrastructure/git/delivery-source.js";
 import { attemptAssistedRecovery } from "../recovery/assisted-recovery.js";
+import {
+  enablePullRequestAutoMerge,
+  PullRequestAutoMergeError,
+  type EnablePullRequestAutoMerge,
+} from "../github/enable-pull-request-auto-merge.js";
+import { findOpenPullRequest, openPullRequest } from "../github/open-pull-request.js";
 
 export type RunnerMode = "next" | "run" | "status" | "dry-run" | "stop" | "stats";
 
@@ -87,6 +93,7 @@ export type RunnerConfig = {
   heartbeatMs: number;
   maxBlockedTasks: number;
   activeExecutorAllowance?: number;
+  githubAutoMergePr?: boolean;
   signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   executor?: Executor;
   processDetector?: ProcessDetector;
@@ -106,6 +113,7 @@ export type RunnerConfig = {
   prepareWorkspace?: PrepareWorkspace;
   refreshDeliveryBranch?: RefreshDeliveryBranch;
   pushBranchAndOpenPullRequest?: PushBranchAndOpenPullRequest;
+  enablePullRequestAutoMerge?: EnablePullRequestAutoMerge;
   cleanupWorkspace?: CleanupWorkspace;
   finalizeArchive?: FinalizeArchive;
   sourceResolver?: SourceResolver;
@@ -183,6 +191,8 @@ export type PushBranchInput = {
   branch: string;
   worktreeDir: string;
   baseBranch: string;
+  autoMergePr: boolean;
+  autoMergeEnabler?: EnablePullRequestAutoMerge;
 };
 export type CleanupWorkspace = (input: CleanupWorkspaceInput) => Promise<string>;
 export type CleanupWorkspaceInput = {
@@ -255,6 +265,7 @@ export function defaultConfig(): RunnerConfig {
     heartbeatMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_HEARTBEAT_MS, DEFAULT_HEARTBEAT_MS),
     maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS, 100),
     activeExecutorAllowance: parsePositiveInt(process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR, DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE),
+    githubAutoMergePr: optionalBooleanEnv("OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR") ?? shipperConfig?.github.autoMergePr ?? false,
   };
 }
 
@@ -1458,6 +1469,15 @@ function humanInterventionReason(phase: DeliverPhase, pullRequestUrl?: string): 
   return "Human intervention required";
 }
 
+function implementationMergeWaitingReason(config: RunnerConfig, pullRequestUrl?: string): string {
+  if (config.githubAutoMergePr) {
+    return pullRequestUrl
+      ? `PR has auto-merge enabled and waits for GitHub checks and approvals: ${pullRequestUrl}`
+      : "PR has auto-merge enabled and waits for GitHub checks and approvals";
+  }
+  return humanInterventionReason("waiting_for_merge", pullRequestUrl);
+}
+
 async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): Promise<DeliveryEvidence> {
   const changeName = task.change;
   if (!changeName) {
@@ -1535,6 +1555,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
     pullRequestUrl: openPullRequest,
+    requiresPullRequestAutoMerge: Boolean(openPullRequest) && config.githubAutoMergePr === true,
     hasMergedPullRequest: Boolean(mergedPullRequest),
     tasksComplete,
     refreshRequired,
@@ -1990,7 +2011,7 @@ async function executeNativeTask(
       effectiveTask.action === "deliver" && phase === "push"
         ? markTask(lines, { ...effectiveTask, phase: "waiting_for_merge", pullRequestUrl: extractPullRequestUrl(output) }, "blocked", {
             timestamp,
-            reason: humanInterventionReason("waiting_for_merge", extractPullRequestUrl(output)),
+            reason: implementationMergeWaitingReason(config, extractPullRequestUrl(output)),
             pullRequestUrl: extractPullRequestUrl(output),
             logPath: relativeLogPath,
             checkedAt: activity.checkedAt,
@@ -2055,7 +2076,7 @@ async function executeNativeTask(
     if (!(error instanceof NativeTaskError)) {
       return await recoverOrBlock(config, lines, effectiveTask, {
         source: "native",
-        kind: "native_operation",
+        kind: nativeFailureKind(error),
         phase: deliverPhase(effectiveTask),
         reason,
         safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, effectiveTask)),
@@ -2105,6 +2126,8 @@ async function runNativeTask(config: RunnerConfig, task: QueueTask): Promise<str
       branch,
       worktreeDir,
       baseBranch: configuredBaseBranch(config),
+      autoMergePr: config.githubAutoMergePr === true,
+      autoMergeEnabler: config.enablePullRequestAutoMerge,
     });
   }
 
@@ -2789,12 +2812,6 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
 
   messages.push(runGit(input.worktreeDir, ["push", "-u", "origin", effectiveBranch]).trim() || `Pushed ${effectiveBranch}.`);
 
-  const existingPr = await detectOpenPullRequest(input.projectDir, effectiveBranch);
-  if (existingPr) {
-    messages.push(`Pull request already exists: ${existingPr}`);
-    return `${messages.filter(Boolean).join("\n")}\n`;
-  }
-
   const title = runGit(input.worktreeDir, ["log", "-1", "--pretty=%s"]).trim() || `${commitTypeFromBranch(effectiveBranch)}: ${input.changeName}`;
   const body = [
     `OpenSpec change: ${input.changeName}`,
@@ -2802,23 +2819,19 @@ async function pushBranchAndOpenPullRequest(input: PushBranchInput): Promise<str
     "Created by OpenSpec Shipper after the implementation branch was pushed.",
     `Archive will run on ${input.baseBranch} after this PR is merged.`,
   ].join("\n");
-  const created = runGh(input.worktreeDir, [
-    "pr",
-    "create",
-    "--base",
-    input.baseBranch,
-    "--head",
-    effectiveBranch,
-    "--title",
+  const pullRequest = await openPullRequest({
+    projectDir: input.projectDir,
+    cwd: input.worktreeDir,
+    branch: effectiveBranch,
+    baseBranch: input.baseBranch,
     title,
-    "--body",
     body,
-  ]).trim();
-  messages.push(created || `Created pull request for ${effectiveBranch}.`);
+  });
+  messages.push(pullRequest.output);
 
-  const openedPr = await detectOpenPullRequest(input.projectDir, effectiveBranch);
-  if (!openedPr && !/^https:\/\/github\.com\//m.test(created)) {
-    throw new Error(`gh pr create completed but no open pull request was found for ${effectiveBranch}.`);
+  if (input.autoMergePr) {
+    const enable = input.autoMergeEnabler ?? enablePullRequestAutoMerge;
+    messages.push(await enable({ projectDir: input.projectDir, pullRequest: pullRequest.url }));
   }
 
   return `${messages.filter(Boolean).join("\n")}\n`;
@@ -3427,22 +3440,7 @@ export function detectChangeBranch(projectDir: string, changeName: string): stri
 }
 
 export async function detectOpenPullRequest(projectDir: string, branch: string): Promise<string | undefined> {
-  const result = spawnSync("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--limit", "1"], {
-    cwd: projectDir,
-    env: childEnvForCwd(projectDir),
-    encoding: "utf8",
-  });
-  if (result.status !== 0) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout) as Array<{ url?: unknown }>;
-    const url = parsed[0]?.url;
-    return typeof url === "string" && url.length > 0 ? url : undefined;
-  } catch {
-    return undefined;
-  }
+  return await findOpenPullRequest(projectDir, branch);
 }
 
 function extractPullRequestUrl(output: string): string | undefined {
@@ -3752,6 +3750,36 @@ function requiredEnv(name: string): string {
 function optionalEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value ? value : undefined;
+}
+
+function optionalBooleanEnv(name: string): boolean | undefined {
+  const value = optionalEnv(name)?.toLowerCase();
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "true" || value === "1" || value === "yes") {
+    return true;
+  }
+  if (value === "false" || value === "0" || value === "no") {
+    return false;
+  }
+  throw new Error(`${name} must be true or false.`);
+}
+
+function nativeFailureKind(error: unknown): DeliveryFailure["kind"] {
+  if (!(error instanceof PullRequestAutoMergeError)) {
+    return "native_operation";
+  }
+  switch (error.failure) {
+    case "permission":
+      return "permission";
+    case "conflict":
+      return "human_gate";
+    case "not_allowed":
+      return "configuration";
+    case "unknown":
+      return "native_operation";
+  }
 }
 
 function formatDuration(ms: number): string {

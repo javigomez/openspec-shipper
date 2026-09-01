@@ -37,6 +37,7 @@ export type ShipperConfig = {
   };
   github: {
     autoOpenPr: boolean;
+    autoMergePr: boolean;
     prChecks: boolean;
   };
   checks: {
@@ -111,6 +112,7 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
     },
     github: {
       autoOpenPr: false,
+      autoMergePr: false,
       prChecks: false,
     },
     checks: {

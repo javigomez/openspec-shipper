@@ -110,6 +110,23 @@ describe("runner", () => {
     }
   });
 
+  test("environment auto-merge setting overrides shipper config json", async () => {
+    const previousCwd = process.cwd();
+    const projectDir = await realpath(await mkdtemp(join(tmpdir(), "shipper-config-")));
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    const shipperConfig = defaultShipperConfig();
+    shipperConfig.github.autoMergePr = false;
+    await writeShipperConfig(projectDir, shipperConfig);
+    process.env.OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR = "true";
+    process.chdir(projectDir);
+    try {
+      expect(defaultConfig().githubAutoMergePr).toBe(true);
+    } finally {
+      delete process.env.OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR;
+      process.chdir(previousCwd);
+    }
+  });
+
   test("does not execute when the queue has a blocked task", async () => {
     const harness = await createHarness(
       "- [!] deliver add-name-greeting <!-- phase: push; blocked: earlier -->\n- [ ] deliver add-spanish-greeting <!-- phase: archive -->\n",
@@ -601,6 +618,33 @@ describe("runner", () => {
     expect(queue).toContain("[PR](https://github.com/example/project/pull/2)");
     expect(queue).toContain("![waiting_for_merge blocked](https://img.shields.io/badge/waiting_for_merge-blocked-red)");
     expect(queue).toContain(WAITING_FOR_MERGE_RETRY_HINT);
+  });
+
+  test("runs push to enable auto-merge when an implementation PR already exists", async () => {
+    const pullRequestUrl = "https://github.com/example/project/pull/7";
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    let receivedAutoMerge = false;
+    const enabler = async () => "enabled\n";
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      githubAutoMergePr: true,
+      enablePullRequestAutoMerge: enabler,
+      ...implementedChangeEvidence("add-name-greeting"),
+      remoteBranchDetector: async () => true,
+      pullRequestDetector: async () => pullRequestUrl,
+      mergedPullRequestDetector: async () => undefined,
+      pushBranchAndOpenPullRequest: async (input) => {
+        receivedAutoMerge = input.autoMergePr && input.autoMergeEnabler === enabler;
+        return `Pull request already exists: ${pullRequestUrl}\nEnabled squash auto-merge\n`;
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(receivedAutoMerge).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: waiting_for_merge");
+    expect(queue).toContain("auto-merge enabled and waits for GitHub checks and approvals");
   });
 
   test("advances a deliver task to archive publication after archive succeeds", async () => {

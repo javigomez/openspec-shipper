@@ -31,12 +31,17 @@ handles open PRs that conflict or fall behind a protected base.
 ### `push`
 
 Validates the completed change, pushes the delivery branch, and creates or
-reuses its pull request through `gh`.
+reuses its pull request through `gh`. When `github.autoMergePr` is enabled,
+Shipper then enables squash auto-merge on that PR. Existing PRs are handled too,
+so changing the setting after PR creation is safe.
 
 ### `waiting_for_merge`
 
-Hands control to the human. The queue includes the PR URL and resumes only after
-GitHub reports that it has been merged.
+The queue includes the PR URL and resumes only after GitHub reports that it has
+been merged. With auto-merge disabled, this hands control to a human. With
+auto-merge enabled, GitHub waits for required checks and approvals and merges
+the PR automatically. A conflicting PR still requires human intervention;
+auto-merge never resolves conflicts.
 
 ### `archive`
 

@@ -38,7 +38,7 @@ export const codexCliProvider: ExecutorProvider = {
     };
   },
   buildRecoveryCommand(input: BuildRecoveryCommandInput) {
-    return buildCodexCommand(input.cwd, input.prompt, input.config);
+    return buildCodexRecoveryCommand(input.assetsDir, input.prompt, input.config);
   },
   classifyFailureSignal: classifyCodexFailureSignal,
   detectFailureSignal(output: string): string | undefined {
@@ -70,12 +70,12 @@ function classifyCodexFailureSignal(output: string): ProviderFailureSignal | und
   return undefined;
 }
 
-function buildCodexCommand(
-  cwd: string,
+function buildCodexRecoveryCommand(
+  projectDir: string,
   prompt: string,
   config: BuildCommandInput["config"],
 ) {
-  const args = ["exec", "-C", cwd, "--sandbox", "workspace-write", "-c", 'approval_policy="never"'];
+  const args = ["exec", "-C", projectDir, "--sandbox", "danger-full-access", "-c", 'approval_policy="never"'];
   if (config.executor.codex.model) {
     args.push("--model", config.executor.codex.model);
   }
@@ -83,7 +83,7 @@ function buildCodexCommand(
     args.push("-c", `model_reasoning_effort="${config.executor.codex.reasoningEffort}"`);
   }
   args.push(prompt);
-  return { command: config.executor.codex.bin, args, cwd };
+  return { command: config.executor.codex.bin, args, cwd: projectDir };
 }
 
 function codexAssistantOutput(output: string): string {

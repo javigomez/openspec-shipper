@@ -72,19 +72,22 @@ it affects scheduling but is never persisted as human intent in `queue.md`.
 
 ## Assisted recovery before blocking
 
-When a worker or native phase encounters an actionable failure inside an
-existing delivery workspace, Shipper gives the configured provider one final,
-scoped recovery attempt before writing `[!]`. The recovery agent receives the
-original reason and log, may repair only the current delivery or integration
-workspace, and cannot advance the delivery phase itself. Shipper leaves the
-same phase pending and retries its normal deterministic operation; only that
-operation can certify success.
+When a worker or native phase encounters an actionable failure, Shipper gives
+the configured provider one final repository-wide recovery attempt before
+writing `[!]`. The recovery agent starts at the repository root with permission
+to inspect and repair Git metadata, worktrees, branches, refs, remotes and
+GitHub state. Its product-code target remains the current delivery or
+integration workspace, and it cannot advance the delivery phase itself.
+Shipper leaves the same phase pending and retries its normal deterministic
+operation; only that operation can certify success.
 
 Shipper snapshots the human checkout and every other linked worktree around
 the recovery call. If the agent changes any protected checkout, the recovery is
 rejected and the task is blocked with that safety violation.
 
-The attempt budget is persisted per phase to survive restarts. Failures in the
-provider itself (model availability, usage limits, authentication, permissions
-or configuration), missing workspaces, safety gates and pull requests waiting
-for a human are blocked without another model call.
+The attempt budget is persisted per phase to survive restarts. A missing or
+broken target worktree may be recreated by recovery when its state can be
+preserved safely. Failures in the provider itself (model availability, usage
+limits, authentication, permissions or configuration), missing repository
+roots, safety gates and pull requests waiting for a human are blocked without
+another model call.

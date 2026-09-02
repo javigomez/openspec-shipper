@@ -55,8 +55,11 @@ From highest to lowest priority:
 `recovery.enabled` controls the final assisted recovery attempt before an
 actionable failure is marked blocked. `recovery.maxAttemptsPerPhase` defaults
 to one and is persisted in the queue, so restarting the runner cannot create a
-retry loop. Provider, authentication, permission, configuration, missing
-workspace, and human-merge failures are never sent to assisted recovery.
+retry loop. Recovery runs from the repository root with the selected provider's
+non-interactive full-access mode so it can repair Git metadata and recreate a
+broken target worktree. Provider, authentication, permission, configuration,
+missing repository root, and human-merge failures are never sent to assisted
+recovery.
 `doctor` rejects non-positive attempt budgets and non-boolean enablement.
 `archive.publishMode` accepts `direct` or `pull-request`.
 

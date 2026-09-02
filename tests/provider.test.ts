@@ -6,6 +6,7 @@ import { parseQueue } from "../src/domain/queue/queue";
 import { codexCliProvider } from "../src/infrastructure/providers/codex-cli/provider";
 import {
   buildClaudeCliArgs,
+  buildClaudeRecoveryCliArgs,
   claudeCodeProvider,
   claudeSettingsContent,
   parseClaudeResult,
@@ -88,44 +89,53 @@ describe("executor providers", () => {
     });
   });
 
-  test("providers build assisted recovery commands in the authorized workspace", () => {
+  test("providers build assisted recovery commands in the repository root", () => {
     const prompt = "Inspect the failed phase and repair it safely.";
     const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: implement -->\n").tasks[0]!;
 
     const openCode = opencodeProvider.buildRecoveryCommand({
       task,
       phase: "implement",
-      cwd: "/repo/worktrees/add-name-greeting",
+      cwd: "/repo",
       assetsDir: "/repo",
       prompt,
       config,
     });
     expect(openCode.command).toBe("opencode");
     expect(openCode.args.at(-1)).toBe(prompt);
-    expect(openCode.cwd).toBe("/repo/worktrees/add-name-greeting");
+    expect(openCode.cwd).toBe("/repo");
+    expect(openCode.args).toContain("--auto");
 
     const codex = codexCliProvider.buildRecoveryCommand({
       task,
       phase: "implement",
-      cwd: "/repo/worktrees/add-name-greeting",
+      cwd: "/repo",
       assetsDir: "/repo",
       prompt,
       config: { ...config, executor: { ...config.executor, provider: "codex-cli" } },
     });
     expect(codex.command).toBe("codex");
-    expect(codex.args).toContain("/repo/worktrees/add-name-greeting");
+    expect(codex.cwd).toBe("/repo");
+    expect(codex.args).toContain("/repo");
+    expect(codex.args).toContain("danger-full-access");
+    expect(codex.args).not.toContain("workspace-write");
     expect(codex.args.at(-1)).toBe(prompt);
 
     const claude = claudeCodeProvider.buildRecoveryCommand({
       task,
       phase: "implement",
-      cwd: "/repo/worktrees/add-name-greeting",
+      cwd: "/repo",
       assetsDir: "/repo",
       prompt,
       config: { ...config, executor: { ...config.executor, provider: "claude-code" } },
     });
     expect(claude.command).toBe("claude");
-    expect(claude.cwd).toBe("/repo/worktrees/add-name-greeting");
+    expect(claude.cwd).toBe("/repo");
+    expect(claude.args).toContain("--dangerously-skip-permissions");
+    expect(claude.args).toContain("bypassPermissions");
+    expect(claude.args).toEqual(buildClaudeRecoveryCliArgs("/repo", config.executor.claude));
+    const recoverySettings = claude.args[claude.args.indexOf("--settings") + 1]!;
+    expect(JSON.parse(recoverySettings).sandbox).toEqual({ enabled: false });
     expect(claude.stdin).toBe(prompt);
   });
 

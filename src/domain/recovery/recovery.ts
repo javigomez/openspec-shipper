@@ -41,6 +41,8 @@ const RECOVERABLE_FAILURES = new Set<DeliveryFailureKind>([
   "postcondition",
   "no_progress",
   "dependency_reconciliation",
+  "missing_workspace",
+  "unknown",
 ]);
 
 export function recoveryDecision(

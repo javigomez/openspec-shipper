@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { verifyPublishedVersion } from "./release-verification.mjs";
 
 const npmCache = process.env.npm_config_cache ?? process.env.NPM_CONFIG_CACHE ?? "/private/tmp/openspec-shipper-npm-cache";
 const env = {
@@ -43,19 +44,31 @@ function ensureCleanGitTree() {
   }
 }
 
-function ensureNpmLogin() {
-  const whoami = capture("npm", ["whoami"]);
+function ensureNpmLogin(registry) {
+  const whoami = capture("npm", ["whoami", "--registry", registry]);
   if (whoami.status === 0) {
     console.log(`npm logged in as ${whoami.stdout.trim()}`);
     return;
   }
 
   console.log("npm login required.");
-  run("npm", ["login"]);
+  run("npm", ["login", "--registry", registry]);
+}
+
+function configuredNpmRegistry() {
+  const configured = capture("npm", ["config", "get", "registry"]);
+  const registry = configured.stdout?.trim() ?? "";
+  if (configured.status !== 0 || !registry) {
+    process.stderr.write(configured.stderr);
+    console.error("Release aborted: could not determine the configured npm registry.");
+    process.exit(configured.status ?? 1);
+  }
+  return registry;
 }
 
 ensureCleanGitTree();
-ensureNpmLogin();
+const npmRegistry = configuredNpmRegistry();
+ensureNpmLogin(npmRegistry);
 run("npm", ["run", "typecheck"]);
 run("bun", ["test"]);
 run("npm", ["run", "prepack"]);
@@ -63,7 +76,7 @@ if (!releaseCurrentVersion) {
   run("npm", ["version", "patch"]);
 }
 run("npm", ["pack", "--dry-run"]);
-run("npm", ["publish", "--access", "public"]);
+run("npm", ["publish", "--access", "public", "--registry", npmRegistry]);
 
 const localVersion = capture("node", ["-p", "require('./package.json').version"]);
 if (localVersion.status !== 0) {
@@ -72,16 +85,24 @@ if (localVersion.status !== 0) {
 }
 
 const expectedVersion = localVersion.stdout.trim();
-const publishedVersion = capture("npm", [
-  "view",
-  `openspec-shipper@${expectedVersion}`,
-  "version",
-  "--prefer-online",
-]);
-const registryVersion = publishedVersion.stdout.trim();
-if (publishedVersion.status !== 0 || registryVersion !== expectedVersion) {
-  console.error(`Release verification failed: expected openspec-shipper@${expectedVersion}, registry returned ${registryVersion || "no version"}.`);
-  process.exit(publishedVersion.status ?? 1);
+const verification = await verifyPublishedVersion({
+  capture,
+  packageName: "openspec-shipper",
+  expectedVersion,
+  registry: npmRegistry,
+  onRetry({ attempt, totalAttempts, delayMs, detail }) {
+    console.warn(
+      `Registry verification attempt ${attempt}/${totalAttempts} did not confirm openspec-shipper@${expectedVersion}: ${detail}. Retrying in ${delayMs / 1_000}s...`,
+    );
+  },
+});
+if (!verification.ok) {
+  console.error(`Release verification remained inconclusive after ${verification.attempts} attempts for openspec-shipper@${expectedVersion}.`);
+  console.error(`Last npm view result: ${verification.detail}.`);
+  console.error("Do not rerun release-patch: it would increment the package version again.");
+  console.error(`Check manually: npm view openspec-shipper@${expectedVersion} version --registry=${npmRegistry}`);
+  console.error("If the version is still absent after the registry settles, resume the same version with: npm run release-current");
+  process.exit(1);
 }
 
-console.log(`\nPublished openspec-shipper@${registryVersion}`);
+console.log(`\nPublished openspec-shipper@${verification.version} (verified after ${verification.attempts} attempt${verification.attempts === 1 ? "" : "s"})`);

@@ -1,8 +1,9 @@
 # When the Queue Blocks
 
 Goal of this page: lose the fear of `[!]`. A blocked task means Shipper has
-exhausted deterministic recovery and, when the failure was actionable inside a
-safe workspace, one final assisted recovery attempt.
+exhausted deterministic recovery and, when the failure was actionable from the
+repository root, one final assisted recovery attempt with repository-wide Git
+access.
 
 ## What it looks like
 
@@ -33,8 +34,10 @@ When the fix isn't obvious:
 
 The task log records `Assisted recovery attempt` and `Assisted recovery result`
 when that final attempt was eligible. Shipper never asks the model to repair a
-missing login, unavailable model, exhausted quota, missing workspace, disabled
-safety setting or pull request that still needs a human merge.
+missing login, unavailable model, exhausted quota, missing repository root,
+disabled safety setting or pull request that still needs a human merge. A
+missing target worktree itself is recoverable when its unique work can be
+preserved or it can be recreated safely.
 
 ## Common causes worth knowing
 

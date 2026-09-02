@@ -41,7 +41,7 @@ export const claudeCodeProvider: ExecutorProvider = {
   buildRecoveryCommand(input: BuildRecoveryCommandInput) {
     return {
       command: input.config.executor.claude.bin,
-      args: buildClaudeCliArgs(input.assetsDir, input.config.executor.claude),
+      args: buildClaudeRecoveryCliArgs(input.assetsDir, input.config.executor.claude),
       cwd: input.cwd,
       stdin: input.prompt,
     };
@@ -128,6 +128,19 @@ export function buildClaudeCliArgs(projectDir: string, claude: ClaudeCliOptions)
     args.push("--max-budget-usd", String(claude.maxBudgetUsd));
   }
   args.push("Execute the OpenSpec Shipper phase described in stdin.");
+  return args;
+}
+
+export function buildClaudeRecoveryCliArgs(projectDir: string, claude: ClaudeCliOptions): string[] {
+  const args = buildClaudeCliArgs(projectDir, {
+    ...claude,
+    permissionMode: "bypassPermissions",
+  });
+  const settingsIndex = args.indexOf("--settings");
+  if (settingsIndex >= 0) {
+    args[settingsIndex + 1] = claudeSettingsContent("off").trim();
+  }
+  args.splice(1, 0, "--dangerously-skip-permissions");
   return args;
 }
 

@@ -348,7 +348,7 @@ describe("runner", () => {
     expect(log).toContain("Installing worktree dependencies with:");
   });
 
-  test("blocks prepare and preserves install output when dependency installation fails", async () => {
+  test("offers recovery and preserves install output when dependency installation fails", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: prepare_worktree -->\n");
     await writeWorktreeTasks(harness.rootDir, "add-name-greeting", "- [ ] Implement");
     const shipperConfig = defaultShipperConfig();
@@ -361,11 +361,13 @@ describe("runner", () => {
       prepareWorkspace: undefined,
       localClaimDetector: async () => true,
       worktreeDependenciesReadyDetector: undefined,
+      executor: async () => ({ exitCode: 0, output: "repaired registry access" }),
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("Dependency install failed in worktree; see log");
+    expect(queue).toContain("recovery_attempts: 1");
+    expect(queue).not.toContain("[!]");
     const logs = await readdir(join(harness.config.stateDir, "runs"));
     const log = await readFile(join(harness.config.stateDir, "runs", logs[0]!), "utf8");
     expect(log).toContain("registry unavailable");
@@ -411,23 +413,29 @@ describe("runner", () => {
     await access(join(worktreeDir, "dependencies-refreshed"));
   });
 
-  test("blocks implement when native dependency reconciliation fails", async () => {
+  test("offers repository-wide recovery when dependency reconciliation fails without a worktree", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    let calls = 0;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
       localClaimDetector: async () => true,
       tasksCompleteDetector: async () => false,
-      executor: async () => ({ exitCode: 0, output: "done" }),
+      executor: async () => {
+        calls += 1;
+        return { exitCode: 0, output: "done" };
+      },
       reconcileWorktreeDependencies: async () => {
         throw new Error("Dependency update failed after implementation");
       },
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(2);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("Dependency update failed after implementation");
     expect(queue).toContain("phase: implement");
+    expect(queue).toContain("recovery_attempts: 1");
+    expect(queue).not.toContain("[!]");
   });
 
   test("offers assisted recovery when dependency reconciliation fails in a prepared worktree", async () => {
@@ -1727,18 +1735,25 @@ describe("runner", () => {
     expect(await readFile(logPath, "utf8")).toContain("still running");
   });
 
-  test("marks the first pending task blocked on non-zero exit", async () => {
+  test("offers recovery before blocking an unclassified non-zero exit", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
+    let calls = 0;
 
     const exitCode = await runQueue("next", {
       ...harness.config,
-      executor: async () => ({ exitCode: 1, output: "failed" }),
+      executor: async () => {
+        calls += 1;
+        return calls === 1
+          ? { exitCode: 1, output: "failed" }
+          : { exitCode: 0, output: "repaired archive state" };
+      },
     });
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(2);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("- [!] deliver add-name-greeting");
-    expect(queue).toContain("command exited with code 1");
+    expect(queue).not.toContain("[!]");
+    expect(queue).toContain("recovery_attempts: 1");
   });
 
   test("marks the first pending task blocked when output contains an error signal", async () => {
@@ -2389,7 +2404,7 @@ describe("runner", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(calls).toBe(2);
+    expect(calls).toBe(4);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("- [!] deliver add-spanish-greeting");
@@ -2410,12 +2425,12 @@ describe("runner", () => {
       cleanupWorkspace: async () => "cleaned\n",
       executor: async () => {
         calls += 1;
-        return calls === 1 ? { exitCode: 1, output: "failed" } : { exitCode: 0, output: "done" };
+        return calls <= 2 ? { exitCode: 1, output: "failed" } : { exitCode: 0, output: "done" };
       },
     });
 
     expect(exitCode).toBe(0);
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("- [!] deliver add-name-greeting");
     expect(queue).toContain("- [x] deliver add-spanish-greeting");

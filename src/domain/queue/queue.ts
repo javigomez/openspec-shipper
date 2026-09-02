@@ -67,6 +67,7 @@ const DELIVER_PHASES: DeliverPhase[] = [
 export const BLOCKED_TASK_RETRY_HINT = "  > Fixed? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 export const WAITING_FOR_MERGE_RETRY_HINT = "  > Merged PR? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
 export const WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT = "  > Merged archive PR? Change `[!]` to `[ ]` and run `openspec-shipper queue run` again.";
+const RETRY_HINT_PATTERN = /^  > (?:Fixed\?|Merged PR\?|Merged archive PR\?) Change `\[(?:!| )\]` to `\[ \]` and run `openspec-shipper queue run` again\.$/;
 
 export function parseQueue(content: string): QueueParseResult {
   const lines = content.split(/\r?\n/);
@@ -334,17 +335,12 @@ export function removeRetryHintsForUnblockedTasks(content: string): string {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     const task = line.match(TASK_PATTERN);
-    const nextLine = lines[index + 1];
-    if (
-      task &&
-      task[2] !== "!" &&
-      (nextLine === BLOCKED_TASK_RETRY_HINT ||
-        nextLine === WAITING_FOR_MERGE_RETRY_HINT ||
-        nextLine === WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT)
-    ) {
+    if (task && task[2] !== "!") {
       nextLines.push(line);
-      index += 1;
-      changed = true;
+      while (isRetryHint(lines[index + 1])) {
+        index += 1;
+        changed = true;
+      }
       continue;
     }
 
@@ -597,11 +593,7 @@ function replaceTaskLine(
   const nextLines = [...lines];
   nextLines[task.lineIndex] = nextLine;
 
-  if (
-    nextLines[task.lineIndex + 1] === BLOCKED_TASK_RETRY_HINT ||
-    nextLines[task.lineIndex + 1] === WAITING_FOR_MERGE_RETRY_HINT ||
-    nextLines[task.lineIndex + 1] === WAITING_FOR_ARCHIVE_MERGE_RETRY_HINT
-  ) {
+  while (isRetryHint(nextLines[task.lineIndex + 1])) {
     nextLines.splice(task.lineIndex + 1, 1);
   }
 
@@ -610,6 +602,10 @@ function replaceTaskLine(
   }
 
   return ensureTrailingNewline(nextLines.join("\n"));
+}
+
+function isRetryHint(line: string | undefined): boolean {
+  return Boolean(line && RETRY_HINT_PATTERN.test(line));
 }
 
 function formatVisualDecoration(visual: {

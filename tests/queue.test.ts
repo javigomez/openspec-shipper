@@ -268,6 +268,26 @@ describe("queue parser", () => {
     expect(next).toContain(BLOCKED_TASK_RETRY_HINT);
   });
 
+  test("replaces every stale retry hint instead of accumulating duplicates", () => {
+    const result = parseQueue([
+      "- [ ] deliver add-name-greeting <!-- phase: implement -->",
+      "  > Fixed? Change `[ ]` to `[ ]` and run `openspec-shipper queue run` again.",
+      BLOCKED_TASK_RETRY_HINT,
+      BLOCKED_TASK_RETRY_HINT,
+      "",
+    ].join("\n"));
+    const task = result.tasks[0]!;
+
+    const next = markTask(result.lines, task, "blocked", {
+      timestamp: "2026-09-02T12:00:00.000Z",
+      reason: "repair still required",
+    });
+
+    expect(next.match(/Fixed\?/g)).toHaveLength(1);
+    expect(next).toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(next).not.toContain("Change `[ ]` to `[ ]`");
+  });
+
   test("removes a stale retry hint when the human changes blocked to pending", () => {
     const content = [
       "- [ ] deliver add-name-greeting <!-- phase: archive; blocked: 2026-07-13T15:41:00.829Z; reason: fixed now --> ![archive blocked](https://img.shields.io/badge/archive-blocked-red)",
@@ -279,6 +299,23 @@ describe("queue parser", () => {
     const next = removeRetryHintsForUnblockedTasks(content);
 
     expect(next).not.toContain(BLOCKED_TASK_RETRY_HINT);
+    expect(next).toContain("- [ ] deliver add-name-greeting");
+    expect(next).toContain("- [ ] deliver add-spanish-greeting");
+  });
+
+  test("removes duplicate and manually rewritten retry hints from pending tasks", () => {
+    const content = [
+      "- [ ] deliver add-name-greeting <!-- phase: implement -->",
+      "  > Fixed? Change `[ ]` to `[ ]` and run `openspec-shipper queue run` again.",
+      BLOCKED_TASK_RETRY_HINT,
+      BLOCKED_TASK_RETRY_HINT,
+      "- [ ] deliver add-spanish-greeting",
+      "",
+    ].join("\n");
+
+    const next = removeRetryHintsForUnblockedTasks(content);
+
+    expect(next).not.toContain("Fixed?");
     expect(next).toContain("- [ ] deliver add-name-greeting");
     expect(next).toContain("- [ ] deliver add-spanish-greeting");
   });

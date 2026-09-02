@@ -37,7 +37,7 @@ export const opencodeProvider: ExecutorProvider = {
     };
   },
   buildRecoveryCommand(input: BuildRecoveryCommandInput) {
-    const args = ["run"];
+    const args = ["run", "--auto"];
     if (input.config.opencodePrintLogs) {
       args.push("--print-logs");
     }

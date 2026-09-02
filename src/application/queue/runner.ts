@@ -1042,7 +1042,7 @@ async function executeTask(
           kind: "no_progress",
           phase: "implement",
           reason,
-          safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+          safeWorkspaceAvailable: recoveryRootAvailable(config),
         }, {
           logPath,
           relativeLogPath,
@@ -1064,7 +1064,7 @@ async function executeTask(
           kind: "dependency_reconciliation",
           phase: "implement",
           reason,
-          safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+          safeWorkspaceAvailable: recoveryRootAvailable(config),
         }, {
           logPath,
           relativeLogPath,
@@ -1118,7 +1118,7 @@ async function executeTask(
           kind: "dependency_reconciliation",
           phase: "implement",
           reason,
-          safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+          safeWorkspaceAvailable: recoveryRootAvailable(config),
         }, {
           logPath,
           relativeLogPath,
@@ -1138,7 +1138,7 @@ async function executeTask(
     kind,
     phase: deliverPhase(task),
     reason,
-    safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, task)),
+    safeWorkspaceAvailable: recoveryRootAvailable(config),
     exitCode: result.exitCode,
   }, {
     logPath,
@@ -1718,15 +1718,17 @@ async function recoverOrBlock(
   const phase = deliverPhase(task);
   const attemptsForPhase = task.recoveryPhase === phase ? task.recoveryAttempts ?? 0 : 0;
   const shipperConfig = readShipperConfigSync(config.projectDir) ?? defaultShipperConfig();
-  const cwd = recoveryWorkspace(config, task) ?? config.projectDir;
+  const cwd = config.projectDir;
+  const targetWorkspace = recoveryWorkspace(config, task) ?? config.projectDir;
   const humanCheckoutBefore = captureHumanCheckout(config.projectDir);
-  const protectedCheckoutsBefore = captureProtectedCheckouts(config.projectDir, cwd);
+  const protectedCheckoutsBefore = captureProtectedCheckouts(config.projectDir, targetWorkspace);
   const result = await attemptAssistedRecovery({
     task,
     failure,
     policy: shipperConfig.recovery,
     attemptsForPhase,
     cwd,
+    targetWorkspace,
     baseBranch: configuredBaseBranch(config),
     logPath: activity.logPath,
     invoke: async (prompt, recoveryCwd, logPath) => {
@@ -1761,7 +1763,7 @@ async function recoverOrBlock(
       }
       const protectedCheckoutChange = changedProtectedCheckout(
         protectedCheckoutsBefore,
-        captureProtectedCheckouts(config.projectDir, cwd),
+        captureProtectedCheckouts(config.projectDir, targetWorkspace),
       );
       if (protectedCheckoutChange) {
         return {
@@ -1912,8 +1914,7 @@ function changedProtectedCheckout(
 function recoveryWorkspace(config: RunnerConfig, task: QueueTask): string | undefined {
   const phase = deliverPhase(task);
   if (["archive", "publish_archive"].includes(phase)) {
-    const workspace = archiveIntegrationWorkspace(config.projectDir);
-    return existsSync(workspace) ? workspace : undefined;
+    return archiveIntegrationWorkspace(config.projectDir);
   }
   if (!task.change) {
     return undefined;
@@ -1921,7 +1922,11 @@ function recoveryWorkspace(config: RunnerConfig, task: QueueTask): string | unde
   const worktree = task.deliveryWorktree
     ? join(config.projectDir, task.deliveryWorktree)
     : join(config.projectDir, "worktrees", task.change);
-  return existsSync(worktree) ? worktree : undefined;
+  return worktree;
+}
+
+function recoveryRootAvailable(config: RunnerConfig): boolean {
+  return existsSync(config.projectDir);
 }
 
 function isNativeTask(task: QueueTask): boolean {
@@ -2058,7 +2063,7 @@ async function executeNativeTask(
         kind: "dependency_reconciliation",
         phase: deliverPhase(effectiveTask),
         reason,
-        safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, effectiveTask)),
+        safeWorkspaceAvailable: recoveryRootAvailable(config),
       }, {
         logPath,
         relativeLogPath,
@@ -2086,30 +2091,18 @@ async function executeNativeTask(
         return 0;
       }
     }
-    if (!(error instanceof NativeTaskError)) {
-      return await recoverOrBlock(config, lines, effectiveTask, {
-        source: "native",
-        kind: nativeFailureKind(error),
-        phase: deliverPhase(effectiveTask),
-        reason,
-        safeWorkspaceAvailable: Boolean(recoveryWorkspace(config, effectiveTask)),
-      }, {
-        logPath,
-        relativeLogPath,
-        checkedAt: activity.checkedAt,
-        startedAt,
-      });
-    }
-    const nextContent = markTask(lines, effectiveTask, "blocked", {
-      timestamp: (config.now?.() ?? new Date()).toISOString(),
+    return await recoverOrBlock(config, lines, effectiveTask, {
+      source: "native",
+      kind: nativeFailureKind(error),
+      phase: deliverPhase(effectiveTask),
       reason,
-      logPath: relativeLogPath,
+      safeWorkspaceAvailable: recoveryRootAvailable(config),
+    }, {
+      logPath,
+      relativeLogPath,
       checkedAt: activity.checkedAt,
       startedAt,
     });
-    await writeFile(config.queuePath, nextContent);
-    console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
-    return 1;
   }
 }
 

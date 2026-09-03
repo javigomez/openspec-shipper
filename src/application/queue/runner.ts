@@ -1026,7 +1026,9 @@ async function executeTask(
     failureReason: error instanceof Error ? error.message : String(error),
   }));
 
-  const providerFailure = provider(config).classifyFailureSignal(result.output);
+  const providerFailure = result.failureReason
+    ? undefined
+    : provider(config).classifyFailureSignal(result.output);
   const failureSignal = providerFailure?.reason;
   if (result.exitCode === 0 && !failureSignal) {
     if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
@@ -1242,7 +1244,7 @@ async function reconcileQueue(
     const currentTask = currentQueue.tasks.find((candidate) => {
       return (
         candidate.lineIndex >= cursor &&
-        candidate.status === "pending" &&
+        (candidate.status === "pending" || blockedTaskMayHaveExternallyResolved(candidate)) &&
         candidate.action === "deliver" &&
         Boolean(candidate.change)
       );
@@ -1260,6 +1262,9 @@ async function reconcileQueue(
 
     const evidence = await collectDeliveryEvidence(config, currentTask);
     const decision = reconcileDeliveryTask(currentTask, evidence);
+    if (currentTask.status === "blocked" && !blockedTaskWaitWasResolved(currentTask, decision)) {
+      continue;
+    }
     if (decision.kind === "transition" && decision.phase !== deliverPhase(currentTask)) {
       const timestamp = (config.now?.() ?? new Date()).toISOString();
       const interventionUrl = decision.phase === "waiting_for_archive_merge"
@@ -1300,6 +1305,34 @@ async function reconcileQueue(
 
   await writeFile(config.queuePath, content);
   return await applyInferredArchiveDependencies(config, await loadQueue(config.queuePath));
+}
+
+function blockedTaskMayHaveExternallyResolved(task: QueueTask): boolean {
+  if (task.status !== "blocked") {
+    return false;
+  }
+
+  return ["push", "waiting_for_merge", "publish_archive", "waiting_for_archive_merge"]
+    .includes(deliverPhase(task));
+}
+
+function blockedTaskWaitWasResolved(
+  task: QueueTask,
+  decision: ReturnType<typeof reconcileDeliveryTask>,
+): boolean {
+  if (decision.kind === "done") {
+    return true;
+  }
+  if (decision.kind !== "transition") {
+    return false;
+  }
+
+  const phase = deliverPhase(task);
+  if (phase === "push" || phase === "waiting_for_merge") {
+    return ["archive", "publish_archive", "waiting_for_archive_merge", "cleanup_worktree"]
+      .includes(decision.phase);
+  }
+  return decision.phase === "cleanup_worktree";
 }
 
 async function applyInferredArchiveDependencies(
@@ -1791,7 +1824,9 @@ async function recoverOrBlock(
           failureReason: `protected checkout changed during assisted recovery: ${relative(normalizedCheckoutPath(config.projectDir), protectedCheckoutChange)}`,
         };
       }
-      const recoveryFailure = currentProvider.classifyFailureSignal(execution.output);
+      const recoveryFailure = execution.failureReason
+        ? undefined
+        : currentProvider.classifyFailureSignal(execution.output);
       return {
         ...execution,
         failureReason: recoveryFailure?.reason ?? execution.failureReason,

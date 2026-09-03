@@ -177,6 +177,20 @@ describe("queue parser", () => {
     expect(next).toContain("custom: keep-me");
   });
 
+  test("drops obsolete repair diagnostics when rewriting queue state", () => {
+    const result = parseQueue(
+      "- [ ] deliver add-name-greeting <!-- phase: implement; repair_attempts: 2; intelligent repair is required: old conflict; assisted recovery failed: old failure; custom: keep-me -->\n",
+    );
+    const task = result.tasks[0]!;
+
+    const next = markTaskChecking(result.lines, task, { timestamp: "2026-09-03T12:00:00.000Z" });
+
+    expect(next).not.toContain("repair_attempts");
+    expect(next).not.toContain("intelligent repair is required");
+    expect(next).not.toContain("assisted recovery failed");
+    expect(next).toContain("custom: keep-me");
+  });
+
   test("preserves an explicitly empty archive_after override", () => {
     const result = parseQueue(
       "- [ ] deliver add-name-greeting <!-- archive_after: -->\n",

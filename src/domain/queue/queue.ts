@@ -512,6 +512,9 @@ const TRANSIENT_METADATA_KEYS = new Set([
   "started",
   "reason",
   "log",
+  "repair_attempts",
+  "intelligent repair is required",
+  "assisted recovery failed",
 ]);
 
 function persistentMetadataParts(task: QueueTask): string[] {

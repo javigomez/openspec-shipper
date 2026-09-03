@@ -16,7 +16,12 @@ access.
 
 ## The simple case (most blocks)
 
-Many blocks need nothing more than flipping one character. A PR waiting for your merge, a transient network hiccup, a check that failed once — you resolve the cause (or it resolves itself), then:
+For a PR waiting for merge, resolve the conflict or merge the PR and run `queue
+status`, `queue dry-run`, or `queue run` again. Shipper checks blocked PR waits
+and reactivates the task automatically once GitHub confirms the merge.
+
+Other blocks need nothing more than flipping one character. For a transient
+network hiccup, a check that failed once, or a repository fix you applied:
 
 1. Change `[!]` back to `[ ]` in `queue.md`.
 2. Run `npx openspec-shipper queue run`.

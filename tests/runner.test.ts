@@ -1355,6 +1355,62 @@ describe("runner", () => {
     expect(queue).toContain("![archive ready](https://img.shields.io/badge/archive-ready-blue)");
   });
 
+  test("automatically reactivates a blocked waiting task after its PR merges", async () => {
+    const harness = await createHarness(
+      [
+        "- [!] deliver add-name-greeting <!-- phase: waiting_for_merge; pr_url: https://github.com/example/project/pull/1; blocked: earlier; reason: waits for merge -->",
+        WAITING_FOR_MERGE_RETRY_HINT,
+        "",
+      ].join("\n"),
+    );
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: archive");
+    expect(queue).not.toContain(WAITING_FOR_MERGE_RETRY_HINT);
+  });
+
+  test("automatically reactivates a blocked push task when its existing PR was merged", async () => {
+    const harness = await createHarness(
+      "- [!] deliver add-name-greeting <!-- phase: push; pr_url: https://github.com/example/project/pull/1; blocked: earlier -->\n",
+    );
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      pullRequestDetector: async () => undefined,
+      mergedPullRequestDetector: async (_projectDir, branch) =>
+        branch === "feat/add-name-greeting" ? "https://github.com/example/project/pull/1" : undefined,
+    });
+
+    expect(exitCode).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [ ] deliver add-name-greeting");
+    expect(queue).toContain("phase: archive");
+  });
+
+  test("leaves a blocked waiting task unchanged while its PR is still open", async () => {
+    const queueContent =
+      "- [!] deliver add-name-greeting <!-- phase: waiting_for_merge; pr_url: https://github.com/example/project/pull/1; blocked: earlier -->\n";
+    const harness = await createHarness(queueContent);
+
+    const exitCode = await runQueue("status", {
+      ...harness.config,
+      pullRequestDetector: async () => "https://github.com/example/project/pull/1",
+      mergedPullRequestDetector: async () => undefined,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(await readFile(harness.queuePath, "utf8")).toBe(queueContent);
+  });
+
   test("reconstructs waiting-for-merge from a bare deliver task when a PR is open", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting\n");
 

@@ -43,8 +43,10 @@ the task is blocked.
 The queue includes the PR URL and resumes only after GitHub reports that it has
 been merged. With auto-merge disabled, this hands control to a human. With
 auto-merge enabled, GitHub waits for required checks and approvals and merges
-the PR automatically. A conflicting PR still requires human intervention;
-auto-merge never resolves conflicts.
+the PR automatically. Blocked `push` and `waiting_for_merge` tasks are also
+reconciled, so the next status or queue command reactivates them after GitHub
+reports the merge without a manual checkbox edit. A conflicting PR still
+requires human intervention; auto-merge never resolves conflicts.
 
 ### `archive`
 

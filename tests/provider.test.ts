@@ -158,6 +158,26 @@ describe("executor providers", () => {
     });
   });
 
+  test("OpenCode ignores provider-error words in successful agent and test output", () => {
+    expect(opencodeProvider.classifyFailureSignal(
+      "Tests cover:\n- Discarding variants that modify an unauthorized slot\n## Summary\nImplementation progress committed.",
+    )).toBeUndefined();
+    expect(opencodeProvider.classifyFailureSignal(
+      "✔ normalizes authentication errors without returning data\n✔ normalizes rate limit errors without returning data\nℹ fail 0",
+    )).toBeUndefined();
+  });
+
+  test("OpenCode still detects explicit authentication and usage errors", () => {
+    expect(opencodeProvider.classifyFailureSignal("ERROR: Unauthorized: invalid API key")).toEqual({
+      kind: "authentication",
+      reason: "OpenCode provider authentication failed",
+    });
+    expect(opencodeProvider.classifyFailureSignal("ERROR: Rate limit exceeded")).toEqual({
+      kind: "provider_unavailable",
+      reason: "OpenCode provider usage limit was reached",
+    });
+  });
+
   test("OpenCode provider builds archive command with the target change", () => {
     const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: archive -->\n").tasks[0]!;
 

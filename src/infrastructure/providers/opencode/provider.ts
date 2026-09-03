@@ -98,21 +98,28 @@ export function detectFailureSignal(output: string): string | undefined {
 
 export function classifyFailureSignal(output: string): ProviderFailureSignal | undefined {
   const finalOutput = finalOutputSection(output);
+  const explicitErrorOutput = explicitProviderErrorSection(finalOutput);
   const blockedReason = finalBlockedReason(output);
   if (blockedReason) {
     return { kind: "worker_blocker", reason: `Worker reported a blocker: ${blockedReason}` };
   }
 
-  if (/only available hosted in China|model (?:is )?not (?:available|found)|unknown model/i.test(finalOutput)) {
+  if (
+    /only available hosted in China/i.test(finalOutput) ||
+    /model (?:is )?not (?:available|found)|unknown model/i.test(explicitErrorOutput)
+  ) {
     return { kind: "provider_unavailable", reason: "OpenCode model is unavailable" };
   }
-  if (/usage limit|rate limit|quota exceeded|insufficient credits/i.test(finalOutput)) {
+  if (/usage limit|rate limit|quota exceeded|insufficient credits/i.test(explicitErrorOutput)) {
     return { kind: "provider_unavailable", reason: "OpenCode provider usage limit was reached" };
   }
-  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(finalOutput)) {
+  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(explicitErrorOutput)) {
     return { kind: "authentication", reason: "OpenCode provider authentication failed" };
   }
-  if (/auto-rejecting|permission requested|permission denied/i.test(finalOutput)) {
+  if (
+    /auto-rejecting|permission requested/i.test(finalOutput) ||
+    /permission denied/i.test(explicitErrorOutput)
+  ) {
     return { kind: "permission", reason: "OpenCode reported a permission blocker" };
   }
 
@@ -131,6 +138,20 @@ export function classifyFailureSignal(output: string): ProviderFailureSignal | u
   ];
 
   return patterns.find(([pattern]) => pattern.test(finalOutput))?.[1];
+}
+
+function explicitProviderErrorSection(output: string): string {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\u001B\[[0-9;]*m/g, "").trim())
+    .filter((line) =>
+      /^(?:error|fatal)(?:\b|:)/i.test(line) ||
+      /^(?:http\s+)?(?:401|429)\b/i.test(line) ||
+      /^(?:unauthorized|authentication required|invalid api key)(?:\b|:)/i.test(line) ||
+      /^(?:AI_APICallError|UnknownError)(?:\b|:)/i.test(line) ||
+      /^"(?:error|level|type)"\s*:\s*(?:"(?:error|fatal|failed)"|\{)/i.test(line),
+    )
+    .join("\n");
 }
 
 function finalOutputSection(output: string, lineCount = 80): string {

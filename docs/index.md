@@ -27,3 +27,7 @@ Want to see it working before installing anything? Clone the **[one-minute demo 
 ## Reference
 
 When you need exact details: [Delivery flow](./reference/delivery-flow.md), [Providers](./providers/index.md), [CLI](./reference/cli.md), and [Configuration](./reference/configuration.md).
+
+## Design proposals
+
+- [Independent code review and requested-changes loop](./proposals/independent-code-review-phase.md) — compares local, GitHub-native and hybrid review gates before implementation.

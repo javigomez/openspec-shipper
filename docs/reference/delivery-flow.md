@@ -81,6 +81,14 @@ integration workspace, and it cannot advance the delivery phase itself.
 Shipper leaves the same phase pending and retries its normal deterministic
 operation; only that operation can certify success.
 
+Shipper also persists how many times each phase has executed. If the same phase
+becomes runnable for a third time, the runner treats that as a possible state
+cycle and invokes assisted recovery once. It then allows one final normal
+execution of the phase. If reconciliation makes that phase runnable again, the
+task is marked `[!]` with its log instead of continuing indefinitely. Because
+both counters live in `queue.md`, restarting the runner does not reset this
+circuit breaker.
+
 Shipper snapshots the human checkout and every other linked worktree around
 the recovery call. If the agent changes any protected checkout, the recovery is
 rejected and the task is blocked with that safety violation.

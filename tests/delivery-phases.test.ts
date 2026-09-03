@@ -28,12 +28,35 @@ describe("delivery phase definitions", () => {
       hasLocalClaim: true,
       tasksComplete: true,
       localClaimPublished: false,
+      hasRemoteBranch: true,
+      hasOpenPullRequest: true,
+      refreshRequired: true,
     });
 
     expect(decision).toEqual({
       kind: "unchanged",
       phase: "push",
       decision: { kind: "ready", phase: "push" },
+    });
+  });
+
+  test("moves a published pull request back to refresh when GitHub still reports it stale", () => {
+    const task = parseQueue("- [ ] deliver add-name-greeting <!-- phase: push -->\n").tasks[0]!;
+    const decision = reconcileDeliveryTask(task, {
+      ...evidence,
+      declaredPhase: "push",
+      hasLocalClaim: true,
+      tasksComplete: true,
+      localClaimPublished: true,
+      hasRemoteBranch: true,
+      hasOpenPullRequest: true,
+      refreshRequired: true,
+    });
+
+    expect(decision).toMatchObject({
+      kind: "transition",
+      phase: "refresh_branch",
+      reason: "open pull request needs its delivery branch refreshed",
     });
   });
 

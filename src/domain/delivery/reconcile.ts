@@ -111,11 +111,25 @@ function inferDeliveryState(evidence: DeliveryEvidence): DeliveryStateInference 
     return transitionInference("refresh_branch", "local implementation is complete but not published");
   }
 
+  if (
+    evidence.hasLocalClaim &&
+    evidence.tasksComplete &&
+    !evidence.localClaimPublished &&
+    evidence.declaredPhase === "push"
+  ) {
+    return { kind: "unchanged" };
+  }
+
   if (evidence.hasMergedPullRequest && phasePrecedes(evidence.declaredPhase, "archive")) {
     return transitionInference("archive", "pull request is merged");
   }
 
-  if (evidence.hasOpenPullRequest && evidence.refreshRequired && phasePrecedesOrMatches(evidence.declaredPhase, "waiting_for_merge")) {
+  if (
+    evidence.hasOpenPullRequest &&
+    evidence.localClaimPublished &&
+    evidence.refreshRequired &&
+    phasePrecedesOrMatches(evidence.declaredPhase, "waiting_for_merge")
+  ) {
     return transitionInference("refresh_branch", "open pull request needs its delivery branch refreshed");
   }
 

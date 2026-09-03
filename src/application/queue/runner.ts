@@ -108,6 +108,7 @@ export type RunnerConfig = {
   tasksCompleteDetector?: TasksCompleteDetector;
   worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
   deliveryBranchNeedsRefreshDetector?: DeliveryBranchNeedsRefreshDetector;
+  deliveryBranchRefreshRequiredDetector?: DeliveryBranchRefreshRequiredDetector;
   reconcileWorktreeDependencies?: ReconcileWorktreeDependencies;
   claudeContractVerifier?: ClaudeContractVerifier;
   prepareWorkspace?: PrepareWorkspace;
@@ -171,6 +172,7 @@ type TaskCompletionStatus =
   | { kind: "no_checkboxes"; tasksPath: string };
 export type WorktreeDependenciesReadyDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 export type DeliveryBranchNeedsRefreshDetector = (projectDir: string, changeName: string, baseBranch: string) => Promise<boolean>;
+export type DeliveryBranchRefreshRequiredDetector = (projectDir: string, branch: string, baseBranch: string) => Promise<boolean>;
 export type ReconcileWorktreeDependencies = (projectDir: string, changeName: string) => Promise<string>;
 export type ClaudeContractVerifier = (projectDir: string, claude: ClaudeCliOptions) => Promise<ClaudeContractResult>;
 export type PrepareWorkspace = (input: PrepareWorkspaceInput) => Promise<string>;
@@ -222,6 +224,10 @@ const DEFAULT_STATS_INTERVAL_MS = 120_000;
 const DEFAULT_STATS_TIMEOUT_MS = 10_000;
 const DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE = 2;
 const MAX_CONSECUTIVE_IMPLEMENT_NO_PROGRESS_ATTEMPTS = 2;
+const MAX_PHASE_EXECUTIONS_BEFORE_RECOVERY = 2;
+const MAX_PHASE_EXECUTIONS_AFTER_RECOVERY = 1;
+const PHASE_EXECUTIONS_METADATA = "phase_executions";
+const PHASE_RECOVERIES_METADATA = "phase_recoveries";
 const KILL_GRACE_MS = 10_000;
 const SIGINT_DUPLICATE_GRACE_MS = 1_500;
 const ROOT_DIR = fileURLToPath(new URL("../../..", import.meta.url));
@@ -973,12 +979,24 @@ async function executeTask(
   providerCommand: ProviderCommand,
   activity: { checkedAt?: string } = {},
 ): Promise<number> {
+  const startedAt = (config.now?.() ?? new Date()).toISOString();
+  const logPath = await createRunLogPath(config, task, startedAt);
+  const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
+  const phaseGuard = await guardRepeatedPhase(config, lines, task, {
+    logPath,
+    relativeLogPath,
+    checkedAt: activity.checkedAt,
+    startedAt,
+  });
+  if (phaseGuard.kind === "handled") {
+    return phaseGuard.exitCode;
+  }
+  task = phaseGuard.task;
+
   if (deliverPhase(task) === "archive") {
     const preparer = config.prepareArchiveWorkspace ?? prepareArchiveIntegrationWorkspace;
     await preparer(config.projectDir, configuredBaseBranch(config));
   }
-  const startedAt = (config.now?.() ?? new Date()).toISOString();
-  const logPath = await createRunLogPath(config, task, startedAt);
   const executor = config.executor ?? spawnExecutor;
 
   console.log(`[${startedAt}] running: ${task.rawCommand}`);
@@ -987,7 +1005,6 @@ async function executeTask(
   console.log(`Env PWD: ${providerCommand.cwd}`);
   console.log(`Log: ${toMarkdownPath(relative(config.projectDir, logPath))}`);
 
-  const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
   const implementProgressBefore = await captureImplementProgress(config, task);
   const runningContent = markTaskRunning(lines, task, {
     timestamp: startedAt,
@@ -1491,6 +1508,7 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
   const tasksCompleteDetector = config.tasksCompleteDetector ?? detectTasksComplete;
   const worktreeDependenciesReadyDetector = config.worktreeDependenciesReadyDetector ?? detectWorktreeDependenciesReady;
   const deliveryBranchNeedsRefreshDetector = config.deliveryBranchNeedsRefreshDetector ?? detectDeliveryBranchNeedsRefresh;
+  const deliveryBranchRefreshRequiredDetector = config.deliveryBranchRefreshRequiredDetector;
   const declaredPhase = deliverPhase(task);
 
   const [detectedActiveChange, hasArchivedChange, hasLocalClaim, localClaimPublished, tasksComplete, worktreeDependenciesReady] = await Promise.all([
@@ -1529,7 +1547,9 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     shouldCheckMergedPullRequest ? mergedPullRequestDetector(config.projectDir, branch) : Promise.resolve(undefined),
   ]);
   const refreshRequired = openPullRequest
-    ? await deliveryBranchRefreshRequired(config, branch, configuredBaseBranch(config))
+    ? await (deliveryBranchRefreshRequiredDetector
+        ? deliveryBranchRefreshRequiredDetector(config.projectDir, branch, configuredBaseBranch(config))
+        : deliveryBranchRefreshRequired(config, branch, configuredBaseBranch(config)))
     : declaredPhase === "refresh_branch" && !localClaimPublished;
   const shouldCheckArchivePullRequest = Boolean(task.archivePullRequestUrl)
     || !phasePrecedesForEvidence(declaredPhase, "publish_archive")
@@ -1819,6 +1839,102 @@ async function recoverOrBlock(
   return 1;
 }
 
+type PhaseGuardResult =
+  | { kind: "execute"; task: QueueTask }
+  | { kind: "handled"; exitCode: number };
+
+async function guardRepeatedPhase(
+  config: RunnerConfig,
+  lines: string[],
+  task: QueueTask,
+  activity: FailureHandlingActivity,
+): Promise<PhaseGuardResult> {
+  const phase = deliverPhase(task);
+  const executions = phaseCounter(task, PHASE_EXECUTIONS_METADATA, phase);
+  const loopRecoveries = phaseCounter(task, PHASE_RECOVERIES_METADATA, phase);
+  const assistedRecoveries = task.recoveryPhase === phase ? task.recoveryAttempts ?? 0 : 0;
+  const recoveries = Math.max(loopRecoveries, assistedRecoveries);
+
+  if (executions >= MAX_PHASE_EXECUTIONS_BEFORE_RECOVERY && recoveries === 0) {
+    const recoveryTask = setPhaseCounter(task, PHASE_RECOVERIES_METADATA, phase, 1);
+    const reason = `Phase ${phase} became runnable for a third time without durable forward progress.`;
+    await writeFile(activity.logPath, [
+      "## Repeated phase detected",
+      "",
+      reason,
+      "Shipper is invoking one assisted recovery before allowing a final retry.",
+      "",
+    ].join("\n"));
+    console.warn(`[${new Date().toISOString()}] repeated phase detected; invoking assisted recovery: ${task.rawCommand} (${phase})`);
+    return {
+      kind: "handled",
+      exitCode: await recoverOrBlock(config, lines, recoveryTask, {
+        source: "reconcile",
+        kind: "no_progress",
+        phase,
+        reason,
+        safeWorkspaceAvailable: recoveryRootAvailable(config),
+      }, activity),
+    };
+  }
+
+  if (
+    executions >= MAX_PHASE_EXECUTIONS_BEFORE_RECOVERY + MAX_PHASE_EXECUTIONS_AFTER_RECOVERY &&
+    recoveries > 0
+  ) {
+    const reason = `Phase ${phase} is still runnable after ${executions} executions and assisted recovery; stopping to prevent an infinite loop.`;
+    await writeFile(activity.logPath, [
+      "## Repeated phase blocked",
+      "",
+      reason,
+      "",
+    ].join("\n"));
+    const nextContent = markTask(lines, task, "blocked", {
+      timestamp: (config.now?.() ?? new Date()).toISOString(),
+      reason,
+      logPath: activity.relativeLogPath,
+      checkedAt: activity.checkedAt,
+      startedAt: activity.startedAt,
+    });
+    await writeFile(config.queuePath, nextContent);
+    console.error(`[${new Date().toISOString()}] blocked: ${reason}`);
+    return { kind: "handled", exitCode: 1 };
+  }
+
+  return {
+    kind: "execute",
+    task: setPhaseCounter(task, PHASE_EXECUTIONS_METADATA, phase, executions + 1),
+  };
+}
+
+function phaseCounter(task: QueueTask, metadataKey: string, phase: DeliverPhase): number {
+  const entry = task.metadata[metadataKey]
+    ?.split(",")
+    .map((part) => part.trim().split("="))
+    .find(([candidate]) => candidate === phase);
+  const value = Number(entry?.[1] ?? "0");
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function setPhaseCounter(task: QueueTask, metadataKey: string, phase: DeliverPhase, value: number): QueueTask {
+  const counters = new Map<string, number>();
+  for (const part of task.metadata[metadataKey]?.split(",") ?? []) {
+    const [candidate, rawValue] = part.trim().split("=");
+    const parsed = Number(rawValue);
+    if (candidate && Number.isSafeInteger(parsed) && parsed >= 0) {
+      counters.set(candidate, parsed);
+    }
+  }
+  counters.set(phase, value);
+  return {
+    ...task,
+    metadata: {
+      ...task.metadata,
+      [metadataKey]: [...counters.entries()].map(([candidate, count]) => `${candidate}=${count}`).join(","),
+    },
+  };
+}
+
 type HumanCheckoutSnapshot = {
   head: string;
   branch: string;
@@ -1965,10 +2081,19 @@ async function executeNativeTask(
   task: QueueTask,
   activity: { checkedAt?: string } = {},
 ): Promise<number> {
-  let effectiveTask = task;
   const startedAt = (config.now?.() ?? new Date()).toISOString();
   const logPath = await createRunLogPath(config, task, startedAt);
   const relativeLogPath = toMarkdownPath(relative(dirname(config.queuePath), logPath));
+  const phaseGuard = await guardRepeatedPhase(config, lines, task, {
+    logPath,
+    relativeLogPath,
+    checkedAt: activity.checkedAt,
+    startedAt,
+  });
+  if (phaseGuard.kind === "handled") {
+    return phaseGuard.exitCode;
+  }
+  let effectiveTask = phaseGuard.task;
 
   console.log(`[${startedAt}] running: ${task.rawCommand}`);
   console.log(`Native: ${describeNativeTask(task)}`);

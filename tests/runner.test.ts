@@ -1867,6 +1867,46 @@ describe("runner", () => {
     expect(queue).not.toContain("phase: refresh_branch");
   });
 
+  test("recovers once and then blocks a phase that keeps cycling", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: refresh_branch -->\n");
+    let refreshes = 0;
+    let recoveries = 0;
+    let pushes = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => true,
+      localClaimPublishedDetector: async () => true,
+      remoteBranchDetector: async () => true,
+      pullRequestDetector: async () => "https://github.com/example/project/pull/42",
+      deliveryBranchRefreshRequiredDetector: async () => true,
+      refreshDeliveryBranch: async () => {
+        refreshes += 1;
+        return "Delivery branch already contains origin/main.\n";
+      },
+      pushBranchAndOpenPullRequest: async () => {
+        pushes += 1;
+        return "pushed\n";
+      },
+      executor: async () => {
+        recoveries += 1;
+        return { exitCode: 0, output: "inspected the repeated phase and repaired what was safe" };
+      },
+      sleep: async () => {},
+    });
+
+    expect(exitCode).toBe(1);
+    expect(refreshes).toBe(3);
+    expect(recoveries).toBe(1);
+    expect(pushes).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("phase_executions: refresh_branch=3");
+    expect(queue).toContain("phase_recoveries: refresh_branch=1");
+    expect(queue).toContain("stopping to prevent an infinite loop");
+  });
+
   test("marks the first pending task blocked when the executor cannot start", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 

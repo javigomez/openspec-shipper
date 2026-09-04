@@ -123,10 +123,18 @@ export function classifyFailureSignal(output: string): ProviderFailureSignal | u
     return { kind: "permission", reason: "OpenCode reported a permission blocker" };
   }
 
-  const patterns: Array<[RegExp, ProviderFailureSignal]> = [
+  const explicitProviderPatterns: Array<[RegExp, ProviderFailureSignal]> = [
     [/UnknownError/i, { kind: "provider_unavailable", reason: "OpenCode returned UnknownError" }],
     [/Unexpected server error/i, { kind: "provider_unavailable", reason: "OpenCode returned an unexpected server error" }],
     [/AI_APICallError/i, { kind: "provider_unavailable", reason: "OpenCode stream failed with AI_APICallError" }],
+  ];
+  const explicitProviderFailure = explicitProviderPatterns
+    .find(([pattern]) => pattern.test(explicitErrorOutput))?.[1];
+  if (explicitProviderFailure) {
+    return explicitProviderFailure;
+  }
+
+  const patterns: Array<[RegExp, ProviderFailureSignal]> = [
     [/not a recognized command or skill/i, { kind: "configuration", reason: "OpenCode did not recognize the command" }],
     [/command not found:\s*openspec/i, { kind: "configuration", reason: "OpenSpec CLI was not available" }],
     [/^#+\s*Blocked:/im, { kind: "worker_blocker", reason: "Worker reported a blocker" }],
@@ -149,6 +157,7 @@ function explicitProviderErrorSection(output: string): string {
       /^(?:http\s+)?(?:401|429)\b/i.test(line) ||
       /^(?:unauthorized|authentication required|invalid api key)(?:\b|:)/i.test(line) ||
       /^(?:AI_APICallError|UnknownError)(?:\b|:)/i.test(line) ||
+      /^Unexpected server error(?:\b|:)/i.test(line) ||
       /^"(?:error|level|type)"\s*:\s*(?:"(?:error|fatal|failed)"|\{)/i.test(line),
     )
     .join("\n");

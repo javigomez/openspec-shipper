@@ -165,6 +165,9 @@ describe("executor providers", () => {
     expect(opencodeProvider.classifyFailureSignal(
       "✔ normalizes authentication errors without returning data\n✔ normalizes rate limit errors without returning data\nℹ fail 0",
     )).toBeUndefined();
+    expect(opencodeProvider.classifyFailureSignal(
+      "✔ maps UnknownError and AI_APICallError to provider failures\n✔ preserves Unexpected server error details\nℹ fail 0",
+    )).toBeUndefined();
   });
 
   test("OpenCode still detects explicit authentication and usage errors", () => {
@@ -175,6 +178,12 @@ describe("executor providers", () => {
     expect(opencodeProvider.classifyFailureSignal("ERROR: Rate limit exceeded")).toEqual({
       kind: "provider_unavailable",
       reason: "OpenCode provider usage limit was reached",
+    });
+    expect(opencodeProvider.classifyFailureSignal(
+      'Error: {"name":"UnknownError","data":{"message":"Unexpected server error"}}',
+    )).toEqual({
+      kind: "provider_unavailable",
+      reason: "OpenCode returned UnknownError",
     });
   });
 

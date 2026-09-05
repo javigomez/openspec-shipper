@@ -16,7 +16,7 @@ export const codexCliProvider: ExecutorProvider = {
       "-C",
       input.projectDir,
       "--sandbox",
-      "workspace-write",
+      "danger-full-access",
       "-c",
       'approval_policy="never"',
     ];

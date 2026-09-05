@@ -17,6 +17,7 @@ import {
   markTaskRunning,
   parseQueue,
   removeRetryHintsForUnblockedTasks,
+  resetManuallyRetriedTasks,
   taskSlug,
   type DeliverPhase,
   type QueueTask,
@@ -1037,6 +1038,7 @@ async function executeTask(
   const failureSignal = providerFailure?.reason;
   if (result.exitCode === 0 && !failureSignal) {
     if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
+      const change = task.change;
       const implementProgressAfter = await captureImplementProgress(config, task);
       if (
         implementProgressBefore &&
@@ -1074,10 +1076,17 @@ async function executeTask(
           startedAt,
         });
       }
+      if (
+        implementProgressBefore &&
+        implementProgressAfter &&
+        hasObservableImplementProgress(implementProgressBefore, implementProgressAfter)
+      ) {
+        task = clearPhaseCycleCounters(task, "implement");
+      }
 
       try {
         const reconciler = config.reconcileWorktreeDependencies ?? reconcileWorktreeDependencies;
-        const dependencyOutput = await reconciler(config.projectDir, task.change);
+        const dependencyOutput = await reconciler(config.projectDir, change);
         await appendFile(logPath, `\n## Native dependency reconciliation\n\n${dependencyOutput}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -1240,7 +1249,8 @@ async function reconcileQueue(
   queue: Awaited<ReturnType<typeof loadQueue>>,
 ): Promise<Awaited<ReturnType<typeof loadQueue>>> {
   const originalContent = queue.lines.join("\n");
-  let content = removeRetryHintsForUnblockedTasks(originalContent);
+  let content = resetManuallyRetriedTasks(originalContent);
+  content = removeRetryHintsForUnblockedTasks(content);
   let changed = content !== originalContent;
   let cursor = 0;
 
@@ -1974,6 +1984,22 @@ function setPhaseCounter(task: QueueTask, metadataKey: string, phase: DeliverPha
       [metadataKey]: [...counters.entries()].map(([candidate, count]) => `${candidate}=${count}`).join(","),
     },
   };
+}
+
+function clearPhaseCycleCounters(task: QueueTask, phase: DeliverPhase): QueueTask {
+  const metadata = { ...task.metadata };
+  for (const key of [PHASE_EXECUTIONS_METADATA, PHASE_RECOVERIES_METADATA]) {
+    const remaining = (metadata[key]?.split(",") ?? [])
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => part.split("=")[0] !== phase);
+    if (remaining.length > 0) {
+      metadata[key] = remaining.join(",");
+    } else {
+      delete metadata[key];
+    }
+  }
+  return { ...task, metadata };
 }
 
 type HumanCheckoutSnapshot = {

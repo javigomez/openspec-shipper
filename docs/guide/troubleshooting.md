@@ -139,6 +139,12 @@ Sometimes the last visible message is just `waiting`, or the terminal closes wit
 3. Run `queue status` and `queue dry-run` to force a fresh reconciliation.
 4. If the underlying issue is fixed, change `[!]` to `[ ]` and run the queue again.
 
+That marker change is an explicit human retry. Shipper clears the current
+phase's execution and recovery counters before running it again, while keeping
+the history of other phases. This matters after changing provider credentials,
+models, permissions, or configuration: an old cycle-breaker budget must not
+immediately block the newly corrected attempt.
+
 For a PR-related wait, use the PR link written in the queue and merge it on GitHub. Then run:
 
 ```bash

@@ -29,6 +29,14 @@ Model selection:
 Override per run with `OPENSPEC_SHIPPER_CODEX_MODEL` and
 `OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT`.
 
+Shipper runs Codex CLI implementation with `danger-full-access` and
+non-interactive approval so it can stage and commit inside linked worktrees.
+Codex CLI's `workspace-write` mode can deny writes to the shared
+`.git/worktrees/<change>` metadata even when the repository itself is writable.
+The workflow prompt still confines implementation to
+`worktrees/<change-name>` and forbids modifying the human checkout, but this is
+an agent instruction rather than an operating-system sandbox boundary.
+
 ## OpenCode
 
 ```bash

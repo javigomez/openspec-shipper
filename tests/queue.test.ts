@@ -17,6 +17,7 @@ import {
   openCodeCommandName,
   parseQueue,
   removeRetryHintsForUnblockedTasks,
+  resetManuallyRetriedTasks,
 } from "../src/queue";
 
 describe("queue parser", () => {
@@ -315,6 +316,28 @@ describe("queue parser", () => {
     expect(next).not.toContain(BLOCKED_TASK_RETRY_HINT);
     expect(next).toContain("- [ ] deliver add-name-greeting");
     expect(next).toContain("- [ ] deliver add-spanish-greeting");
+  });
+
+  test("resets the current phase retry budget when a human unblocks a task", () => {
+    const content = [
+      "- [ ] deliver add-name-greeting <!-- phase: implement; recovery_attempts: 1; recovery_phase: implement; recovery_failure: a1b2c3d4e5f6; phase_executions: prepare_worktree=1,implement=3; phase_recoveries: implement=1; implement_no_progress_attempts: 2; blocked: earlier; reason: fixed now --> ![implement blocked](https://img.shields.io/badge/implement-blocked-red)",
+      BLOCKED_TASK_RETRY_HINT,
+      "",
+    ].join("\n");
+
+    const next = resetManuallyRetriedTasks(content);
+
+    expect(next).toContain("- [ ] deliver add-name-greeting");
+    expect(next).toContain("phase_executions: prepare_worktree=1");
+    expect(next).not.toContain("implement=3");
+    expect(next).not.toContain("phase_recoveries");
+    expect(next).not.toContain("recovery_attempts");
+    expect(next).not.toContain("recovery_phase");
+    expect(next).not.toContain("recovery_failure");
+    expect(next).not.toContain("implement_no_progress_attempts");
+    expect(next).not.toContain("blocked:");
+    expect(next).not.toContain("reason:");
+    expect(next).not.toContain(BLOCKED_TASK_RETRY_HINT);
   });
 
   test("removes duplicate and manually rewritten retry hints from pending tasks", () => {

@@ -21,6 +21,36 @@ You already use [OpenSpec](https://github.com/Fission-AI/OpenSpec) to write chan
 
 Your working checkout is never touched. Everything happens in dedicated worktrees, so you can keep planning your next change while Shipper delivers the current one.
 
+## Designed for trusted, unattended execution
+
+Shipper is built to process a complete queue reliably, even when that means
+working for hours across many changes. Each coding task is bounded by an
+explicit OpenSpec change: its proposal, design, delta specs, and task list are
+the implementation contract. The runner then controls the mechanical delivery
+lifecycle, records durable evidence, applies bounded retries, opens the PR, and
+waits for human review.
+
+Worktrees are used for concurrency, not as a security sandbox. They isolate the
+human checkout and each change so that planning and several deliveries can
+coexist, but every worktree still shares Git metadata with its parent
+repository. A coding agent therefore needs the same practical access it would
+have when launched manually by a trusted developer: read the repository, edit
+its selected worktree, run project tooling, and create commits.
+
+For that reason, Shipper runs normal Codex CLI implementation with
+`danger-full-access` and non-interactive approval. Narrower filesystem modes can
+allow source edits yet reject writes to `.git/worktrees/*`, leaving a fully
+implemented change unable to commit. The safety boundary is the selected
+OpenSpec change, phase-specific instructions, deterministic worktree, automated
+checks, and PR review—not a sandbox that breaks required Git operations. Run
+Shipper only with agents and repositories you trust.
+
+One queue may take a long time; one stuck worker should not. Shipper watches
+provider output, enforces invocation timeouts, detects successful-looking runs
+that made no repository progress, and breaks repeated phase cycles. Productive
+implementation passes receive a fresh cycle budget, while a human retry (`[!]`
+changed back to `[ ]`) clears stale counters for the corrected phase.
+
 ## See it in action (1 minute)
 
 Check out **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** — a tiny repo pre-loaded with OpenSpec changes ready to be shipped. Clone it and follow the steps in its README to watch the whole flow end to end in about a minute.

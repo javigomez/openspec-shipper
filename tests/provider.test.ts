@@ -248,7 +248,7 @@ describe("executor providers", () => {
       "-C",
       projectDir,
       "--sandbox",
-      "workspace-write",
+      "danger-full-access",
       "-c",
       'approval_policy="never"',
       "--model",
@@ -258,6 +258,7 @@ describe("executor providers", () => {
     expect(command.args.at(-1)).toContain("OpenSpec Shipper Codex Phase: implement");
     expect(command.args.at(-1)).toContain("add-name-greeting");
     expect(command.args.at(-1)).toContain("Installed Workflow Reference");
+    expect(command.args.at(-1)).toContain("Commit useful progress with a Conventional Commit");
   });
 
   test("Codex CLI provider treats blocked sentinel lines as failures", () => {

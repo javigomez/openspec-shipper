@@ -2004,6 +2004,63 @@ describe("runner", () => {
     expect(queue).toContain("stopping to prevent an infinite loop");
   });
 
+  test("allows more than three implement passes while each pass makes durable progress", async () => {
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: implement -->\n");
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let implementPasses = 0;
+    let recoveries = 0;
+    const config: RunnerConfig = {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async (_command, args) => {
+        if (!args.includes("--command")) {
+          recoveries += 1;
+          return { exitCode: 0, output: "assisted recovery" };
+        }
+        implementPasses += 1;
+        await writeFile(join(worktreeDir, `progress-${implementPasses}.txt`), `progress ${implementPasses}\n`);
+        return { exitCode: 0, output: `completed implement pass ${implementPasses}` };
+      },
+    };
+
+    for (let pass = 0; pass < 4; pass += 1) {
+      expect(await runQueue("next", config)).toBe(0);
+    }
+
+    expect(implementPasses).toBe(4);
+    expect(recoveries).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).not.toContain("[!]");
+    expect(queue).not.toContain("phase_recoveries: implement");
+  });
+
+  test("gives a manually unblocked task a fresh phase execution budget", async () => {
+    const harness = await createHarness(
+      "- [ ] deliver add-name-greeting <!-- phase: implement; recovery_attempts: 1; recovery_phase: implement; recovery_failure: a1b2c3d4e5f6; phase_executions: implement=3; phase_recoveries: implement=1; blocked: earlier; reason: fixed now -->\n",
+    );
+    const worktreeDir = await createImplementWorktree(harness.rootDir, "add-name-greeting");
+    let calls = 0;
+
+    const exitCode = await runQueue("next", {
+      ...harness.config,
+      localClaimDetector: async () => true,
+      tasksCompleteDetector: async () => false,
+      executor: async () => {
+        calls += 1;
+        await writeFile(join(worktreeDir, "fresh-progress.txt"), "progress\n");
+        return { exitCode: 0, output: "implementation resumed" };
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(calls).toBe(1);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("phase: refresh_branch");
+    expect(queue).not.toContain("phase_recoveries");
+    expect(queue).not.toContain("recovery_attempts");
+  });
+
   test("marks the first pending task blocked when the executor cannot start", async () => {
     const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: archive -->\n");
 
@@ -2101,7 +2158,7 @@ describe("runner", () => {
       "-C",
       harness.rootDir,
       "--sandbox",
-      "workspace-write",
+      "danger-full-access",
       "-c",
       'approval_policy="never"',
       "--model",

@@ -350,6 +350,56 @@ export function removeRetryHintsForUnblockedTasks(content: string): string {
   return changed ? ensureTrailingNewline(nextLines.join("\n")) : content;
 }
 
+export function resetManuallyRetriedTasks(content: string): string {
+  const queue = parseQueue(content);
+  let lines = queue.lines;
+  let changed = false;
+
+  for (const task of [...queue.tasks].reverse()) {
+    if (task.status !== "pending" || !task.metadata.blocked) {
+      continue;
+    }
+
+    const phase = deliverPhase(task);
+    const metadata = { ...task.metadata };
+    resetPhaseCounter(metadata, "phase_executions", phase);
+    resetPhaseCounter(metadata, "phase_recoveries", phase);
+    if (phase === "implement") {
+      delete metadata.implement_no_progress_attempts;
+    }
+
+    const resetRecovery = task.recoveryPhase === phase;
+    const resetTask: QueueTask = {
+      ...task,
+      archiveAttempts: phase === "archive" ? undefined : task.archiveAttempts,
+      recoveryAttempts: resetRecovery ? undefined : task.recoveryAttempts,
+      recoveryPhase: resetRecovery ? undefined : task.recoveryPhase,
+      recoveryFailure: resetRecovery ? undefined : task.recoveryFailure,
+      metadata,
+    };
+    lines = rewritePendingTask(lines, resetTask).split(/\r?\n/);
+    changed = true;
+  }
+
+  return changed ? ensureTrailingNewline(lines.join("\n")) : content;
+}
+
+function resetPhaseCounter(
+  metadata: Record<string, string>,
+  key: "phase_executions" | "phase_recoveries",
+  phase: DeliverPhase,
+): void {
+  const remaining = (metadata[key]?.split(",") ?? [])
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => part.split("=")[0] !== phase);
+  if (remaining.length > 0) {
+    metadata[key] = remaining.join(",");
+  } else {
+    delete metadata[key];
+  }
+}
+
 export function deliverPhase(task: QueueTask): DeliverPhase {
   return task.phase ?? "prepare_worktree";
 }

@@ -55,8 +55,10 @@ import {
 import { attemptAssistedRecovery } from "../recovery/assisted-recovery.js";
 import {
   enablePullRequestAutoMerge,
+  inspectPullRequestAutoMergeWait,
   PullRequestAutoMergeError,
   type EnablePullRequestAutoMerge,
+  type PullRequestAutoMergeWaitState,
 } from "../github/enable-pull-request-auto-merge.js";
 import { findOpenPullRequest, openPullRequest } from "../github/open-pull-request.js";
 
@@ -95,6 +97,8 @@ export type RunnerConfig = {
   maxBlockedTasks: number;
   activeExecutorAllowance?: number;
   githubAutoMergePr?: boolean;
+  githubAutoMergePollIntervalMs?: number;
+  githubAutoMergeWaitTimeoutMs?: number;
   signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   executor?: Executor;
   processDetector?: ProcessDetector;
@@ -106,6 +110,7 @@ export type RunnerConfig = {
   remoteBranchDetector?: RemoteBranchDetector;
   pullRequestDetector?: PullRequestDetector;
   mergedPullRequestDetector?: MergedPullRequestDetector;
+  pullRequestWaitStateDetector?: PullRequestWaitStateDetector;
   tasksCompleteDetector?: TasksCompleteDetector;
   worktreeDependenciesReadyDetector?: WorktreeDependenciesReadyDetector;
   deliveryBranchNeedsRefreshDetector?: DeliveryBranchNeedsRefreshDetector;
@@ -167,6 +172,10 @@ export type LocalClaimPublishedDetector = (projectDir: string, changeName: strin
 export type RemoteBranchDetector = (projectDir: string, branch: string) => Promise<boolean>;
 export type PullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
 export type MergedPullRequestDetector = (projectDir: string, branch: string) => Promise<string | undefined>;
+export type PullRequestWaitStateDetector = (
+  projectDir: string,
+  pullRequest: string,
+) => Promise<PullRequestAutoMergeWaitState>;
 export type TasksCompleteDetector = (projectDir: string, changeName: string) => Promise<boolean>;
 type TaskCompletionStatus =
   | { kind: "complete"; tasksPath: string }
@@ -226,6 +235,8 @@ const reportedArchiveOrderings = new Set<string>();
 const DEFAULT_STATS_INTERVAL_MS = 120_000;
 const DEFAULT_STATS_TIMEOUT_MS = 10_000;
 const DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE = 2;
+const DEFAULT_AUTO_MERGE_POLL_INTERVAL_MS = 15_000;
+const DEFAULT_AUTO_MERGE_WAIT_TIMEOUT_MS = 30 * 60_000;
 const MAX_CONSECUTIVE_IMPLEMENT_NO_PROGRESS_ATTEMPTS = 2;
 const MAX_PHASE_EXECUTIONS_BEFORE_RECOVERY = 2;
 const MAX_PHASE_EXECUTIONS_AFTER_RECOVERY = 1;
@@ -277,6 +288,20 @@ export function defaultConfig(): RunnerConfig {
     maxBlockedTasks: parsePositiveInt(process.env.OPENSPEC_SHIPPER_MAX_BLOCKED_TASKS, 100),
     activeExecutorAllowance: parsePositiveInt(process.env.OPENSPEC_SHIPPER_ALLOW_ACTIVE_EXECUTOR, DEFAULT_ACTIVE_EXECUTOR_ALLOWANCE),
     githubAutoMergePr: optionalBooleanEnv("OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR") ?? shipperConfig?.github.autoMergePr ?? false,
+    githubAutoMergePollIntervalMs: parseStrictPositiveInt(
+      process.env.OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_POLL_INTERVAL_MS,
+      validPositiveIntOrFallback(
+        shipperConfig?.github.autoMergePollIntervalMs,
+        DEFAULT_AUTO_MERGE_POLL_INTERVAL_MS,
+      ),
+    ),
+    githubAutoMergeWaitTimeoutMs: parseStrictPositiveInt(
+      process.env.OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_WAIT_TIMEOUT_MS,
+      validPositiveIntOrFallback(
+        shipperConfig?.github.autoMergeWaitTimeoutMs,
+        DEFAULT_AUTO_MERGE_WAIT_TIMEOUT_MS,
+      ),
+    ),
   };
 }
 
@@ -319,6 +344,10 @@ export async function runQueue(mode: RunnerMode, config: RunnerConfig, options: 
     return 1;
   } else if (blockedTasks.length > 0) {
     printBlockedSkip("Queue has blocked task(s), continuing within configured limit", blockedTasks, config);
+  }
+
+  if (!pendingTask && mode === "run" && findAutomaticMergeWaitingTask(queue.tasks, config)) {
+    return await runLoopWithLock(config);
   }
 
   if (!pendingTask) {
@@ -443,6 +472,15 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
 
       const pendingTask = findFirstRunnableTask(queue.tasks);
       if (!pendingTask) {
+        const automaticMergeWait = findAutomaticMergeWaitingTask(queue.tasks, config);
+        if (automaticMergeWait) {
+          const waitResult = await waitForAutomaticMerge(config, queue.lines, automaticMergeWait, sleep);
+          if (waitResult === "continue") {
+            continue;
+          }
+          return 0;
+        }
+
         const waitingTasks = findWaitingTasks(queue.tasks);
         if (waitingTasks.length > 0) {
           console.log(`Queue waiting: ${waitingTasks.length} pending task(s) waiting for dependencies.`);
@@ -523,6 +561,104 @@ async function runLoopWithLock(config: RunnerConfig): Promise<number> {
   } finally {
     await lock.release();
   }
+}
+
+function withAutomaticMergeWaitStarted(
+  task: QueueTask,
+  timestamp: string,
+  pullRequestUrl?: string,
+): QueueTask {
+  return {
+    ...task,
+    pullRequestUrl: pullRequestUrl ?? task.pullRequestUrl,
+    metadata: {
+      ...task.metadata,
+      auto_merge_wait_started: timestamp,
+    },
+  };
+}
+
+function isAutomaticMergeWaitingTask(task: QueueTask, config: RunnerConfig): boolean {
+  return (
+    config.githubAutoMergePr === true
+    && task.status === "pending"
+    && deliverPhase(task) === "waiting_for_merge"
+    && Boolean(task.pullRequestUrl)
+    && Boolean(task.metadata.auto_merge_wait_started)
+    && !task.metadata.auto_merge_wait_terminal
+  );
+}
+
+function findAutomaticMergeWaitingTask(tasks: QueueTask[], config: RunnerConfig): QueueTask | undefined {
+  return tasks.find((task) => isAutomaticMergeWaitingTask(task, config));
+}
+
+async function waitForAutomaticMerge(
+  config: RunnerConfig,
+  lines: string[],
+  task: QueueTask,
+  sleep: Sleep,
+): Promise<"continue" | "stopped"> {
+  const pullRequestUrl = task.pullRequestUrl;
+  if (!pullRequestUrl) {
+    return await blockAutomaticMergeWait(config, lines, task, "Auto-merge wait has no pull request URL");
+  }
+
+  const detector = config.pullRequestWaitStateDetector
+    ?? ((projectDir: string, pullRequest: string) => inspectPullRequestAutoMergeWait({ projectDir, pullRequest }));
+  const state = await detector(config.projectDir, pullRequestUrl);
+  if (state.kind === "merged") {
+    console.log(`Auto-merge completed: ${pullRequestUrl}`);
+    return "continue";
+  }
+  if (state.kind === "failed") {
+    return await blockAutomaticMergeWait(config, lines, task, `Auto-merge cannot complete: ${state.detail}`);
+  }
+
+  const startedAt = Date.parse(task.metadata.auto_merge_wait_started ?? "");
+  const now = (config.now?.() ?? new Date()).getTime();
+  const elapsed = Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : 0;
+  const timeoutMs = config.githubAutoMergeWaitTimeoutMs ?? DEFAULT_AUTO_MERGE_WAIT_TIMEOUT_MS;
+  if (elapsed >= timeoutMs) {
+    return await blockAutomaticMergeWait(
+      config,
+      lines,
+      task,
+      `Auto-merge timed out after ${formatDuration(timeoutMs)}: ${state.detail}`,
+    );
+  }
+
+  const pollIntervalMs = Math.max(
+    1,
+    config.githubAutoMergePollIntervalMs ?? DEFAULT_AUTO_MERGE_POLL_INTERVAL_MS,
+  );
+  const waitMs = Math.min(pollIntervalMs, timeoutMs - elapsed);
+  console.log(
+    `Queue waiting for GitHub auto-merge without using an executor: ${pullRequestUrl} (${state.detail}). Next check in ${formatDuration(waitMs)}.`,
+  );
+  return await waitOrStop(config, sleep, waitMs) ? "stopped" : "continue";
+}
+
+async function blockAutomaticMergeWait(
+  config: RunnerConfig,
+  lines: string[],
+  task: QueueTask,
+  reason: string,
+): Promise<"continue"> {
+  const terminalTask: QueueTask = {
+    ...task,
+    metadata: {
+      ...task.metadata,
+      auto_merge_wait_terminal: "true",
+    },
+  };
+  await writeFile(config.queuePath, markTask(lines, terminalTask, "blocked", {
+    timestamp: (config.now?.() ?? new Date()).toISOString(),
+    reason,
+    pullRequestUrl: task.pullRequestUrl,
+  }));
+  console.error(reason);
+  return "continue";
 }
 
 async function acquireLock(
@@ -1285,7 +1421,10 @@ async function reconcileQueue(
       const interventionUrl = decision.phase === "waiting_for_archive_merge"
         ? evidence.archivePullRequestUrl
         : evidence.pullRequestUrl;
-      content = shipResultRequiresHuman(decision.phase)
+      const transitionTask = decision.phase === "waiting_for_merge" && config.githubAutoMergePr === true
+        ? withAutomaticMergeWaitStarted(currentTask, timestamp, interventionUrl)
+        : currentTask;
+      content = shipResultRequiresHuman(config, decision.phase)
         ? markTask(currentQueue.lines, {
             ...currentTask,
             phase: decision.phase,
@@ -1296,11 +1435,14 @@ async function reconcileQueue(
             reason: humanInterventionReason(decision.phase, interventionUrl),
             pullRequestUrl: interventionUrl,
           })
-        : advanceDeliverTaskToPhase(currentQueue.lines, currentTask, decision.phase, {
+        : advanceDeliverTaskToPhase(currentQueue.lines, transitionTask, decision.phase, {
             timestamp,
           });
       changed = true;
     } else if (decision.kind === "blocked") {
+      if (isAutomaticMergeWaitingTask(currentTask, config)) {
+        continue;
+      }
       content = markTask(currentQueue.lines, currentTask, "blocked", {
         timestamp: (config.now?.() ?? new Date()).toISOString(),
         reason: decision.reason,
@@ -1510,8 +1652,9 @@ function addRequirementKeys(keys: Set<string>, specPath: string, content: string
   }
 }
 
-function shipResultRequiresHuman(phase: DeliverPhase): boolean {
-  return phase === "waiting_for_merge" || phase === "waiting_for_archive_merge";
+function shipResultRequiresHuman(config: RunnerConfig, phase: DeliverPhase): boolean {
+  return (phase === "waiting_for_merge" && config.githubAutoMergePr !== true)
+    || phase === "waiting_for_archive_merge";
 }
 
 function humanInterventionReason(phase: DeliverPhase, pullRequestUrl?: string): string {
@@ -1619,7 +1762,10 @@ async function collectDeliveryEvidence(config: RunnerConfig, task: QueueTask): P
     hasRemoteBranch,
     hasOpenPullRequest: Boolean(openPullRequest),
     pullRequestUrl: openPullRequest,
-    requiresPullRequestAutoMerge: Boolean(openPullRequest) && config.githubAutoMergePr === true,
+    requiresPullRequestAutoMerge:
+      Boolean(openPullRequest)
+      && config.githubAutoMergePr === true
+      && !task.metadata.auto_merge_wait_started,
     hasMergedPullRequest: Boolean(mergedPullRequest),
     tasksComplete,
     refreshRequired,
@@ -2201,16 +2347,29 @@ async function executeNativeTask(
       ? !(await (config.tasksCompleteDetector ?? detectTasksComplete)(config.projectDir, effectiveTask.change))
       : false;
     const publicationUrl = phase === "publish_archive" ? extractPullRequestUrl(output) : undefined;
+    const implementationPullRequestUrl = phase === "push" ? extractPullRequestUrl(output) : undefined;
     const nextContent =
-      effectiveTask.action === "deliver" && phase === "push"
-        ? markTask(lines, { ...effectiveTask, phase: "waiting_for_merge", pullRequestUrl: extractPullRequestUrl(output) }, "blocked", {
-            timestamp,
-            reason: implementationMergeWaitingReason(config, extractPullRequestUrl(output)),
-            pullRequestUrl: extractPullRequestUrl(output),
-            logPath: relativeLogPath,
-            checkedAt: activity.checkedAt,
-            startedAt,
-          })
+      effectiveTask.action === "deliver" && phase === "push" && config.githubAutoMergePr === true
+        ? advanceDeliverTaskToPhase(
+            lines,
+            withAutomaticMergeWaitStarted(effectiveTask, timestamp, implementationPullRequestUrl),
+            "waiting_for_merge",
+            {
+              timestamp,
+              logPath: relativeLogPath,
+              checkedAt: activity.checkedAt,
+              startedAt,
+            },
+          )
+        : effectiveTask.action === "deliver" && phase === "push"
+          ? markTask(lines, { ...effectiveTask, phase: "waiting_for_merge", pullRequestUrl: implementationPullRequestUrl }, "blocked", {
+              timestamp,
+              reason: implementationMergeWaitingReason(config, implementationPullRequestUrl),
+              pullRequestUrl: implementationPullRequestUrl,
+              logPath: relativeLogPath,
+              checkedAt: activity.checkedAt,
+              startedAt,
+            })
         : effectiveTask.action === "deliver" && phase === "publish_archive" && publicationUrl
           ? markTask(lines, { ...effectiveTask, phase: "waiting_for_archive_merge", archivePullRequestUrl: publicationUrl }, "blocked", {
               timestamp,
@@ -3976,6 +4135,19 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function parseStrictPositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function validPositiveIntOrFallback(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function optionalPositiveNumber(name: string): number | undefined {

@@ -34,6 +34,8 @@ From highest to lowest priority:
   "github": {
     "autoOpenPr": false,
     "autoMergePr": false,
+    "autoMergePollIntervalMs": 15000,
+    "autoMergeWaitTimeoutMs": 1800000,
     "prChecks": false
   },
   "recovery": {
@@ -71,12 +73,21 @@ You can override the file setting per machine with:
 
 ```bash
 OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR=true
+OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_POLL_INTERVAL_MS=15000
+OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_WAIT_TIMEOUT_MS=1800000
 ```
 
 Auto-merge does not resolve conflicts. A `CONFLICTING` PR remains blocked for
 intervention. GitHub may merge immediately when a repository has no required
 checks or branch protection, so enable this only alongside appropriate
-protection for the base branch and a CI workflow.
+protection for the base branch and a CI workflow. In `queue run`, an enabled
+auto-merge stays pending and Shipper polls GitHub natively every
+`autoMergePollIntervalMs`; this does not invoke the coding provider or consume
+model tokens. A failed required check blocks immediately. A PR that remains
+pending for `autoMergeWaitTimeoutMs` (30 minutes by default) blocks with the
+last observed GitHub status. With auto-merge disabled, Shipper never polls: it
+leaves the PR as a human merge gate and exits after any other runnable queue
+items finish.
 
 The `checks` object adapts Shipper to the target repository. Empty typecheck,
 lint, format, or unit commands are valid; Shipper does not assume every project

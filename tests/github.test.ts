@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   enablePullRequestAutoMerge,
+  inspectPullRequestAutoMergeWait,
   PullRequestAutoMergeError,
 } from "../src/application/github/enable-pull-request-auto-merge";
 import { openPullRequest, type GitHubCliRunner, type GitHubCliResult } from "../src/application/github/open-pull-request";
@@ -105,6 +106,65 @@ describe("GitHub pull request adapters", () => {
     expect(permission.message).toContain("write access");
     expect(policy.failure).toBe("not_allowed");
     expect(policy.message).toContain("repository does not allow auto-merge");
+  });
+
+  test("reports pending and failed required checks while waiting for auto-merge", async () => {
+    const requiredChecks = (result: unknown) => (_projectDir: string, args: string[]) =>
+      args[1] === "view"
+        ? ok(JSON.stringify({
+            state: "OPEN",
+            url: pullRequestUrl,
+            mergeStateStatus: "BLOCKED",
+            autoMergeRequest: { mergeMethod: "SQUASH" },
+          }))
+        : ok(JSON.stringify(result));
+    const pending = await inspectPullRequestAutoMergeWait(
+      { projectDir: "/project", pullRequest: pullRequestUrl },
+      requiredChecks([{ name: "quality", state: "IN_PROGRESS", bucket: "pending" }]),
+    );
+    const failedCheck = await inspectPullRequestAutoMergeWait(
+      { projectDir: "/project", pullRequest: pullRequestUrl },
+      requiredChecks([{ name: "quality", state: "FAILURE", bucket: "fail" }]),
+    );
+
+    expect(pending).toEqual({ kind: "pending", detail: "waiting for check(s): quality" });
+    expect(failedCheck).toEqual({ kind: "failed", detail: "required check(s) failed: quality (FAILURE)" });
+  });
+
+  test("ignores failed optional checks when all required checks pass", async () => {
+    const commands: string[][] = [];
+    const state = await inspectPullRequestAutoMergeWait(
+      { projectDir: "/project", pullRequest: pullRequestUrl },
+      (_projectDir, args) => {
+        commands.push(args);
+        return args[1] === "view"
+          ? ok(JSON.stringify({
+              state: "OPEN",
+              url: pullRequestUrl,
+              mergeStateStatus: "BLOCKED",
+              autoMergeRequest: { mergeMethod: "SQUASH" },
+            }))
+          : ok(JSON.stringify([{ name: "quality", state: "SUCCESS", bucket: "pass" }]));
+      },
+    );
+
+    expect(state).toEqual({ kind: "pending", detail: "waiting for GitHub to complete auto-merge" });
+    expect(commands[1]).toContain("--required");
+  });
+
+  test("reports a merged PR without waiting for another poll", async () => {
+    const state = await inspectPullRequestAutoMergeWait(
+      { projectDir: "/project", pullRequest: pullRequestUrl },
+      () => ok(JSON.stringify({
+        state: "MERGED",
+        url: pullRequestUrl,
+        mergeStateStatus: "UNKNOWN",
+        autoMergeRequest: null,
+        statusCheckRollup: [],
+      })),
+    );
+
+    expect(state).toEqual({ kind: "merged", detail: `pull request merged: ${pullRequestUrl}` });
   });
 });
 

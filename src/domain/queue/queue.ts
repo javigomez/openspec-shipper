@@ -367,6 +367,10 @@ export function resetManuallyRetriedTasks(content: string): string {
     if (phase === "implement") {
       delete metadata.implement_no_progress_attempts;
     }
+    if (phase === "waiting_for_merge") {
+      delete metadata.auto_merge_wait_started;
+      delete metadata.auto_merge_wait_terminal;
+    }
 
     const resetRecovery = task.recoveryPhase === phase;
     const resetTask: QueueTask = {
@@ -612,11 +616,17 @@ function persistentMetadataParts(task: QueueTask): string[] {
 }
 
 function taskForPhaseMetadata(task: QueueTask, phase: DeliverPhase): QueueTask {
+  const metadata = { ...task.metadata };
+  if (phase !== "waiting_for_merge") {
+    delete metadata.auto_merge_wait_started;
+    delete metadata.auto_merge_wait_terminal;
+  }
   if (!task.recoveryPhase || task.recoveryPhase === phase) {
-    return task;
+    return { ...task, metadata };
   }
   return {
     ...task,
+    metadata,
     recoveryAttempts: undefined,
     recoveryPhase: undefined,
     recoveryFailure: undefined,

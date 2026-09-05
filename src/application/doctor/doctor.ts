@@ -133,12 +133,18 @@ function checkDeliveryConfig(config: ShipperConfig): DoctorCheck {
   if (typeof config.github.autoMergePr !== "boolean") {
     return error("delivery config", "github.autoMergePr must be a boolean");
   }
+  if (!Number.isInteger(config.github.autoMergePollIntervalMs) || config.github.autoMergePollIntervalMs < 1) {
+    return error("delivery config", "github.autoMergePollIntervalMs must be a positive integer");
+  }
+  if (!Number.isInteger(config.github.autoMergeWaitTimeoutMs) || config.github.autoMergeWaitTimeoutMs < 1) {
+    return error("delivery config", "github.autoMergeWaitTimeoutMs must be a positive integer");
+  }
   if (!Number.isInteger(config.recovery.maxAttemptsPerPhase) || config.recovery.maxAttemptsPerPhase < 1) {
     return error("delivery config", "recovery.maxAttemptsPerPhase must be a positive integer");
   }
   return ok(
     "delivery config",
-    `refresh ${config.delivery.refreshPolicy}; implementation auto-merge ${config.github.autoMergePr ? "enabled" : "disabled"}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s); assisted recovery ${config.recovery.enabled ? "enabled" : "disabled"} with ${config.recovery.maxAttemptsPerPhase} attempt(s) per phase`,
+    `refresh ${config.delivery.refreshPolicy}; implementation auto-merge ${config.github.autoMergePr ? `enabled (${config.github.autoMergePollIntervalMs}ms poll, ${config.github.autoMergeWaitTimeoutMs}ms timeout)` : "disabled"}; archive publication ${config.archive.publishMode}; ${config.archive.maxAttempts} archive attempt(s); assisted recovery ${config.recovery.enabled ? "enabled" : "disabled"} with ${config.recovery.maxAttemptsPerPhase} attempt(s) per phase`,
   );
 }
 

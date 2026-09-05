@@ -727,7 +727,157 @@ describe("runner", () => {
     expect(receivedAutoMerge).toBe(true);
     const queue = await readFile(harness.queuePath, "utf8");
     expect(queue).toContain("phase: waiting_for_merge");
-    expect(queue).toContain("auto-merge enabled and waits for GitHub checks and approvals");
+    expect(queue).toContain("auto_merge_wait_started: 2026-06-17T12:00:00.000Z");
+    expect(queue).toContain("![waiting_for_merge waiting]");
+    expect(queue).not.toContain("[!]");
+  });
+
+  test("polls auto-merge without invoking a model and resumes archive after GitHub merges", async () => {
+    const pullRequestUrl = "https://github.com/example/project/pull/7";
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    let merged = false;
+    let archived = false;
+    let cleaned = false;
+    let sleeps = 0;
+    let archiveCalls = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      githubAutoMergePr: true,
+      githubAutoMergePollIntervalMs: 100,
+      githubAutoMergeWaitTimeoutMs: 1_000,
+      ...implementedChangeEvidence("add-name-greeting"),
+      localClaimDetector: async () => !cleaned,
+      archivedChangeDetector: async () => archived,
+      remoteBranchDetector: async () => true,
+      pullRequestDetector: async () => merged ? undefined : pullRequestUrl,
+      mergedPullRequestDetector: async () => merged ? pullRequestUrl : undefined,
+      pullRequestWaitStateDetector: async () => ({ kind: "pending", detail: "quality is pending" }),
+      pushBranchAndOpenPullRequest: async () => `Enabled squash auto-merge: ${pullRequestUrl}\n`,
+      sleep: async () => {
+        sleeps += 1;
+        merged = true;
+      },
+      executor: async () => {
+        archiveCalls += 1;
+        archived = true;
+        return { exitCode: 0, output: "archive complete" };
+      },
+      cleanupWorkspace: async () => {
+        cleaned = true;
+        return "cleanup complete\n";
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(sleeps).toBe(1);
+    expect(archiveCalls).toBe(1);
+    expect(cleaned).toBe(true);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [x] deliver add-name-greeting");
+    expect(queue).not.toContain("auto_merge_wait_started");
+    expect(queue).not.toContain("recovery_attempts");
+  });
+
+  test("blocks auto-merge immediately when a required GitHub check fails", async () => {
+    const pullRequestUrl = "https://github.com/example/project/pull/7";
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    let sleeps = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      githubAutoMergePr: true,
+      maxBlockedTasks: 100,
+      githubAutoMergePollIntervalMs: 100,
+      githubAutoMergeWaitTimeoutMs: 1_000,
+      ...implementedChangeEvidence("add-name-greeting"),
+      remoteBranchDetector: async () => true,
+      pullRequestDetector: async () => pullRequestUrl,
+      mergedPullRequestDetector: async () => undefined,
+      pullRequestWaitStateDetector: async () => ({ kind: "failed", detail: "required check quality failed" }),
+      pushBranchAndOpenPullRequest: async () => `Enabled squash auto-merge: ${pullRequestUrl}\n`,
+      sleep: async () => {
+        sleeps += 1;
+      },
+      executor: async () => {
+        throw new Error("a GitHub check failure must not invoke a model");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(sleeps).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("required check quality failed");
+    expect(queue).not.toContain("recovery_attempts");
+  });
+
+  test("bounds auto-merge polling with a configurable timeout", async () => {
+    const pullRequestUrl = "https://github.com/example/project/pull/7";
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    let nowMs = Date.parse("2026-06-17T12:00:00.000Z");
+    let sleeps = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      githubAutoMergePr: true,
+      githubAutoMergePollIntervalMs: 100,
+      githubAutoMergeWaitTimeoutMs: 250,
+      ...implementedChangeEvidence("add-name-greeting"),
+      remoteBranchDetector: async () => true,
+      pullRequestDetector: async () => pullRequestUrl,
+      mergedPullRequestDetector: async () => undefined,
+      pullRequestWaitStateDetector: async () => ({ kind: "pending", detail: "quality is still pending" }),
+      pushBranchAndOpenPullRequest: async () => `Enabled squash auto-merge: ${pullRequestUrl}\n`,
+      now: () => new Date(nowMs),
+      sleep: async (ms) => {
+        sleeps += 1;
+        nowMs += ms;
+      },
+      executor: async () => {
+        throw new Error("auto-merge polling must not invoke a model");
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(sleeps).toBeGreaterThan(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("Auto-merge timed out after 250ms");
+    expect(queue).toContain("quality is still pending");
+    expect(queue).not.toContain("recovery_attempts");
+  });
+
+  test("does not poll when auto-merge is disabled and a human owns the merge", async () => {
+    const pullRequestUrl = "https://github.com/example/project/pull/7";
+    const harness = await createHarness("- [ ] deliver add-name-greeting <!-- phase: push -->\n");
+    let polls = 0;
+    let sleeps = 0;
+
+    const exitCode = await runQueue("run", {
+      ...harness.config,
+      githubAutoMergePr: false,
+      maxBlockedTasks: 100,
+      ...implementedChangeEvidence("add-name-greeting"),
+      remoteBranchDetector: async () => true,
+      pullRequestDetector: async () => pullRequestUrl,
+      mergedPullRequestDetector: async () => undefined,
+      pullRequestWaitStateDetector: async () => {
+        polls += 1;
+        return { kind: "pending", detail: "should not be inspected" };
+      },
+      pushBranchAndOpenPullRequest: async () => `Opened pull request: ${pullRequestUrl}\n`,
+      sleep: async () => {
+        sleeps += 1;
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(polls).toBe(0);
+    expect(sleeps).toBe(0);
+    const queue = await readFile(harness.queuePath, "utf8");
+    expect(queue).toContain("- [!] deliver add-name-greeting");
+    expect(queue).toContain("waits for a human to merge it");
   });
 
   test("advances a deliver task to archive publication after archive succeeds", async () => {

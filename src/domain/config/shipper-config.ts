@@ -38,6 +38,8 @@ export type ShipperConfig = {
   github: {
     autoOpenPr: boolean;
     autoMergePr: boolean;
+    autoMergePollIntervalMs: number;
+    autoMergeWaitTimeoutMs: number;
     prChecks: boolean;
   };
   checks: {
@@ -113,6 +115,8 @@ export function defaultShipperConfig(profile: ShipperProfile = "node-npm"): Ship
     github: {
       autoOpenPr: false,
       autoMergePr: false,
+      autoMergePollIntervalMs: 15_000,
+      autoMergeWaitTimeoutMs: 30 * 60_000,
       prChecks: false,
     },
     checks: {

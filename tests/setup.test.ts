@@ -29,9 +29,12 @@ describe("target setup", () => {
     expect(shipperConfig.archive).toEqual({ publishMode: "direct", maxAttempts: 3 });
     expect(shipperConfig.github.autoOpenPr).toBe(false);
     expect(shipperConfig.github.autoMergePr).toBe(false);
+    expect(shipperConfig.github.autoMergePollIntervalMs).toBe(15000);
+    expect(shipperConfig.github.autoMergeWaitTimeoutMs).toBe(1800000);
     expect(shipperConfig.executor.provider).toBe("codex-cli");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_PROVIDER=codex-cli");
     expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_PR=false");
+    expect(await readFile(join(harness.projectDir, ".openspec-shipper/.env.example"), "utf8")).toContain("OPENSPEC_SHIPPER_GITHUB_AUTO_MERGE_WAIT_TIMEOUT_MS=1800000");
     const installedReadme = await readFile(join(harness.projectDir, ".openspec-shipper/README.md"), "utf8");
     expect(installedReadme).toContain("Required After Init");
     expect(installedReadme).toContain("git commit -m \"chore: install openspec shipper\"");

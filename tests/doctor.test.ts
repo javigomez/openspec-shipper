@@ -98,6 +98,26 @@ describe("doctor", () => {
     )).toBe(true);
   });
 
+  test("rejects invalid automatic merge polling limits", async () => {
+    const projectDir = await createGitRepo();
+    await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });
+    await writeFile(join(projectDir, ".openspec-shipper/config.json"), `${JSON.stringify({
+      github: {
+        autoMergePr: true,
+        autoMergePollIntervalMs: 0,
+        autoMergeWaitTimeoutMs: -1,
+      },
+    })}\n`);
+
+    const checks = await runDoctor(projectDir);
+
+    expect(checks.some((check) =>
+      check.name === "delivery config"
+      && !check.ok
+      && check.message === "github.autoMergePollIntervalMs must be a positive integer",
+    )).toBe(true);
+  });
+
   test("executes configured OpenSpec command probes", async () => {
     const projectDir = await createGitRepo();
     await mkdir(join(projectDir, ".openspec-shipper"), { recursive: true });

@@ -51,6 +51,12 @@ that made no repository progress, and breaks repeated phase cycles. Productive
 implementation passes receive a fresh cycle budget, while a human retry (`[!]`
 changed back to `[ ]`) clears stale counters for the corrected phase.
 
+Merge waiting follows the same rule. With auto-merge enabled, Shipper polls
+GitHub without invoking an AI executor, resumes archiving as soon as required
+checks pass, and stops after a configurable timeout or failed check. With
+auto-merge disabled, the PR is an explicit human gate: Shipper finishes other
+runnable work and exits instead of polling forever.
+
 ## See it in action (1 minute)
 
 Check out **[clean-repo-for-openspec-shipper-demo](https://github.com/javigomez/clean-repo-for-openspec-shipper-demo)** — a tiny repo pre-loaded with OpenSpec changes ready to be shipped. Clone it and follow the steps in its README to watch the whole flow end to end in about a minute.

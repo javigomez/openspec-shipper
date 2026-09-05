@@ -25,7 +25,7 @@ import { reconcileDeliveryTask } from "../../domain/delivery/reconcile.js";
 import { phaseDefinition } from "../../domain/delivery/phases/index.js";
 import type { DeliveryEvidence } from "../../domain/delivery/phase.js";
 import { shouldRefreshDeliveryBranch } from "../../domain/delivery/refresh-policy.js";
-import type { ExecutorProviderId, ProviderCommand } from "../../domain/provider/provider.js";
+import type { ExecutorProviderId, ProviderCommand, ProviderFailureSignal } from "../../domain/provider/provider.js";
 import type { DeliveryFailure } from "../../domain/recovery/recovery.js";
 import { filterLocalStateStatus } from "../../domain/config/local-state.js";
 import {
@@ -137,6 +137,7 @@ type ExecutorOptions = {
   stdin?: string;
   env?: Record<string, string>;
   stats?: StatsOptions;
+  outputFailureDetector?: (output: string) => ProviderFailureSignal | undefined;
 };
 
 type StatsOptions = {
@@ -153,6 +154,7 @@ export type ExecutorResult = {
   exitCode: number | null;
   output: string;
   failureReason?: string;
+  failureSignal?: ProviderFailureSignal;
 };
 
 export type ProcessDetector = () => Promise<string[]>;
@@ -257,8 +259,10 @@ export function defaultConfig(): RunnerConfig {
     claudePermissionMode: optionalEnv("OPENSPEC_SHIPPER_CLAUDE_PERMISSION_MODE") ?? shipperConfig?.executor.claude.permissionMode,
     claudeMaxTurns: optionalPositiveNumber("OPENSPEC_SHIPPER_CLAUDE_MAX_TURNS") ?? shipperConfig?.executor.claude.maxTurns,
     claudeMaxBudgetUsd: optionalPositiveNumber("OPENSPEC_SHIPPER_CLAUDE_MAX_BUDGET_USD") ?? shipperConfig?.executor.claude.maxBudgetUsd,
-    opencodePrintLogs: (process.env.OPENSPEC_SHIPPER_PRINT_LOGS ?? process.env.OPENCODE_PRINT_LOGS) === "1",
-    opencodeLogLevel: optionalEnv("OPENSPEC_SHIPPER_LOG_LEVEL") ?? optionalEnv("OPENCODE_LOG_LEVEL"),
+    opencodePrintLogs: optionalBooleanEnv("OPENSPEC_SHIPPER_PRINT_LOGS")
+      ?? optionalBooleanEnv("OPENCODE_PRINT_LOGS")
+      ?? true,
+    opencodeLogLevel: optionalEnv("OPENSPEC_SHIPPER_LOG_LEVEL") ?? optionalEnv("OPENCODE_LOG_LEVEL") ?? "ERROR",
     opencodeStats: (process.env.OPENSPEC_SHIPPER_STATS ?? process.env.OPENCODE_STATS) === "1",
     opencodeStatsIntervalMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_STATS_INTERVAL_MS ?? process.env.OPENCODE_STATS_INTERVAL_MS, DEFAULT_STATS_INTERVAL_MS),
     opencodeStatsTimeoutMs: parsePositiveInt(process.env.OPENSPEC_SHIPPER_STATS_TIMEOUT_MS ?? process.env.OPENCODE_STATS_TIMEOUT_MS, DEFAULT_STATS_TIMEOUT_MS),
@@ -1020,15 +1024,16 @@ async function executeTask(
     stdin: providerCommand.stdin,
     env: providerCommand.env,
     stats: buildStatsOptions(config),
+    outputFailureDetector: provider(config).classifyStreamingFailureSignal,
   }).catch((error: unknown): ExecutorResult => ({
     exitCode: null,
     output: "",
     failureReason: error instanceof Error ? error.message : String(error),
   }));
 
-  const providerFailure = result.failureReason
+  const providerFailure = result.failureSignal ?? (result.failureReason
     ? undefined
-    : provider(config).classifyFailureSignal(result.output);
+    : provider(config).classifyFailureSignal(result.output));
   const failureSignal = providerFailure?.reason;
   if (result.exitCode === 0 && !failureSignal) {
     if (task.action === "deliver" && deliverPhase(task) === "implement" && task.change) {
@@ -1802,6 +1807,7 @@ async function recoverOrBlock(
         heartbeatMs: config.heartbeatMs,
         stdin: command.stdin,
         env: command.env,
+        outputFailureDetector: currentProvider.classifyStreamingFailureSignal,
       }).catch((error: unknown): ExecutorResult => ({
         exitCode: null,
         output: "",
@@ -1824,9 +1830,9 @@ async function recoverOrBlock(
           failureReason: `protected checkout changed during assisted recovery: ${relative(normalizedCheckoutPath(config.projectDir), protectedCheckoutChange)}`,
         };
       }
-      const recoveryFailure = execution.failureReason
+      const recoveryFailure = execution.failureSignal ?? (execution.failureReason
         ? undefined
-        : currentProvider.classifyFailureSignal(execution.output);
+        : currentProvider.classifyFailureSignal(execution.output));
       return {
         ...execution,
         failureReason: recoveryFailure?.reason ?? execution.failureReason,
@@ -2559,6 +2565,7 @@ export async function spawnExecutor(
     const log = createWriteStream(options.logPath, { flags: "a" });
     let output = "";
     let failureReason: string | undefined;
+    let failureSignal: ProviderFailureSignal | undefined;
     let forceKillTimeout: Timer | undefined;
     let heartbeat: Timer | undefined;
     const startedAt = Date.now();
@@ -2621,6 +2628,22 @@ export async function spawnExecutor(
       output = capOutput(`${output}${text}`);
       stream.write(text);
       log.write(text);
+      if (!failureSignal && !failureReason) {
+        const detected = options.outputFailureDetector?.(output);
+        if (detected) {
+          failureSignal = detected;
+          failureReason = detected.reason;
+          const message = `\nOpenSpec Shipper detected a terminal provider failure; terminating executor: ${detected.reason}\n`;
+          process.stderr.write(message);
+          log.write(message);
+          terminateChild(child, "SIGTERM");
+          forceKillTimeout = setTimeout(() => {
+            if (!settled) {
+              terminateChild(child, "SIGKILL");
+            }
+          }, KILL_GRACE_MS);
+        }
+      }
     };
 
     child.stdout!.on("data", (chunk: Buffer) => capture(chunk, process.stdout));
@@ -2641,7 +2664,7 @@ export async function spawnExecutor(
       if (activeChildProcess === child) {
         activeChildProcess = undefined;
       }
-      resolve({ exitCode, output, failureReason });
+      resolve({ exitCode, output, failureReason, failureSignal });
     });
   });
 }

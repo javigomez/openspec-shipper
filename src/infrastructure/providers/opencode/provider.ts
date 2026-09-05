@@ -55,6 +55,7 @@ export const opencodeProvider: ExecutorProvider = {
       env: { OPENCODE_CONFIG_DIR: openCodeConfigDir(input.assetsDir) },
     };
   },
+  classifyStreamingFailureSignal,
   classifyFailureSignal,
   detectFailureSignal,
 };
@@ -98,40 +99,22 @@ export function detectFailureSignal(output: string): string | undefined {
 
 export function classifyFailureSignal(output: string): ProviderFailureSignal | undefined {
   const finalOutput = finalOutputSection(output);
-  const explicitErrorOutput = explicitProviderErrorSection(finalOutput);
   const blockedReason = finalBlockedReason(output);
   if (blockedReason) {
     return { kind: "worker_blocker", reason: `Worker reported a blocker: ${blockedReason}` };
   }
 
-  if (
-    /only available hosted in China/i.test(finalOutput) ||
-    /model (?:is )?not (?:available|found)|unknown model/i.test(explicitErrorOutput)
-  ) {
-    return { kind: "provider_unavailable", reason: "OpenCode model is unavailable" };
-  }
-  if (/usage limit|rate limit|quota exceeded|insufficient credits/i.test(explicitErrorOutput)) {
-    return { kind: "provider_unavailable", reason: "OpenCode provider usage limit was reached" };
-  }
-  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(explicitErrorOutput)) {
-    return { kind: "authentication", reason: "OpenCode provider authentication failed" };
-  }
-  if (
-    /auto-rejecting|permission requested/i.test(finalOutput) ||
-    /permission denied/i.test(explicitErrorOutput)
-  ) {
-    return { kind: "permission", reason: "OpenCode reported a permission blocker" };
+  const streamingFailure = classifyStreamingFailureSignal(finalOutput);
+  if (streamingFailure) {
+    return streamingFailure;
   }
 
-  const explicitProviderPatterns: Array<[RegExp, ProviderFailureSignal]> = [
-    [/UnknownError/i, { kind: "provider_unavailable", reason: "OpenCode returned UnknownError" }],
-    [/Unexpected server error/i, { kind: "provider_unavailable", reason: "OpenCode returned an unexpected server error" }],
-    [/AI_APICallError/i, { kind: "provider_unavailable", reason: "OpenCode stream failed with AI_APICallError" }],
-  ];
-  const explicitProviderFailure = explicitProviderPatterns
-    .find(([pattern]) => pattern.test(explicitErrorOutput))?.[1];
-  if (explicitProviderFailure) {
-    return explicitProviderFailure;
+  if (/only available hosted in China/i.test(finalOutput)) {
+    return { kind: "provider_unavailable", reason: "OpenCode model is unavailable" };
+  }
+
+  if (/auto-rejecting|permission requested/i.test(finalOutput)) {
+    return { kind: "permission", reason: "OpenCode reported a permission blocker" };
   }
 
   const patterns: Array<[RegExp, ProviderFailureSignal]> = [
@@ -148,16 +131,45 @@ export function classifyFailureSignal(output: string): ProviderFailureSignal | u
   return patterns.find(([pattern]) => pattern.test(finalOutput))?.[1];
 }
 
+export function classifyStreamingFailureSignal(output: string): ProviderFailureSignal | undefined {
+  const explicitErrorOutput = explicitProviderErrorSection(finalOutputSection(output));
+  if (
+    /only available hosted in China/i.test(explicitErrorOutput) ||
+    /model (?:is )?not (?:available|found)|unknown model/i.test(explicitErrorOutput)
+  ) {
+    return { kind: "provider_unavailable", reason: "OpenCode model is unavailable" };
+  }
+  if (/usage limit|rate limit|quota exceeded|insufficient credits/i.test(explicitErrorOutput)) {
+    return { kind: "provider_unavailable", reason: "OpenCode provider usage limit was reached" };
+  }
+  if (/not logged in|unauthorized|authentication required|invalid api key/i.test(explicitErrorOutput)) {
+    return { kind: "authentication", reason: "OpenCode provider authentication failed" };
+  }
+  if (/permission denied/i.test(explicitErrorOutput)) {
+    return { kind: "permission", reason: "OpenCode reported a permission blocker" };
+  }
+
+  const patterns: Array<[RegExp, ProviderFailureSignal]> = [
+    [/UnknownError/i, { kind: "provider_unavailable", reason: "OpenCode returned UnknownError" }],
+    [/Unexpected server error/i, { kind: "provider_unavailable", reason: "OpenCode returned an unexpected server error" }],
+    [/AI_APICallError/i, { kind: "provider_unavailable", reason: "OpenCode stream failed with AI_APICallError" }],
+  ];
+  return patterns.find(([pattern]) => pattern.test(explicitErrorOutput))?.[1];
+}
+
 function explicitProviderErrorSection(output: string): string {
   return output
     .split(/\r?\n/)
     .map((line) => line.replace(/\u001B\[[0-9;]*m/g, "").trim())
+    .filter((line) => !/\bsmall=true\b/i.test(line))
     .filter((line) =>
       /^(?:error|fatal)(?:\b|:)/i.test(line) ||
       /^(?:http\s+)?(?:401|429)\b/i.test(line) ||
       /^(?:unauthorized|authentication required|invalid api key)(?:\b|:)/i.test(line) ||
       /^(?:AI_APICallError|UnknownError)(?:\b|:)/i.test(line) ||
       /^Unexpected server error(?:\b|:)/i.test(line) ||
+      /\blevel=(?:ERROR|FATAL)\b/i.test(line) ||
+      /"level"\s*:\s*"(?:ERROR|FATAL)"/i.test(line) ||
       /^"(?:error|level|type)"\s*:\s*(?:"(?:error|fatal|failed)"|\{)/i.test(line),
     )
     .join("\n");

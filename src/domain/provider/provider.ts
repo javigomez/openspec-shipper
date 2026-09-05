@@ -71,6 +71,7 @@ export type ExecutorProvider = {
   activeProcessNames: string[];
   buildCommand(input: BuildCommandInput): ProviderCommand;
   buildRecoveryCommand(input: BuildRecoveryCommandInput): ProviderCommand;
+  classifyStreamingFailureSignal?(output: string): ProviderFailureSignal | undefined;
   classifyFailureSignal(output: string): ProviderFailureSignal | undefined;
   detectFailureSignal(output: string): string | undefined;
 };

@@ -185,6 +185,15 @@ describe("executor providers", () => {
       kind: "provider_unavailable",
       reason: "OpenCode returned UnknownError",
     });
+    expect(opencodeProvider.classifyStreamingFailureSignal?.(
+      'timestamp=2026-09-05T08:20:31.149Z level=ERROR message="stream error" error.error="AI_APICallError: Weekly usage limit reached. Resets in 1 day."',
+    )).toEqual({
+      kind: "provider_unavailable",
+      reason: "OpenCode provider usage limit was reached",
+    });
+    expect(opencodeProvider.classifyStreamingFailureSignal?.(
+      'timestamp=2026-09-05T08:20:36.780Z level=ERROR message="stream error" modelID=qwen3.7-plus small=true agent=title error.error="AI_RetryError: Weekly usage limit reached."',
+    )).toBeUndefined();
   });
 
   test("OpenCode provider builds archive command with the target change", () => {

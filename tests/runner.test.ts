@@ -8,6 +8,7 @@ import { BLOCKED_TASK_RETRY_HINT, WAITING_FOR_MERGE_RETRY_HINT, parseQueue } fro
 import { installClaudeTemplates, installCodexTemplates } from "../src/application/init/setup";
 import { defaultShipperConfig, writeShipperConfig } from "../src/domain/config/shipper-config";
 import { claudeSettingsContent, parseClaudeResult } from "../src/infrastructure/providers/claude-code/provider";
+import { opencodeProvider } from "../src/infrastructure/providers/opencode/provider";
 import { silenceConsoleDuringTests } from "./test-console";
 
 silenceConsoleDuringTests();
@@ -65,6 +66,10 @@ describe("runner", () => {
     delete process.env.PROJECT_DIR;
     delete process.env.OPENCODE_BIN;
     delete process.env.OPENCODE_MODEL;
+    delete process.env.OPENSPEC_SHIPPER_PRINT_LOGS;
+    delete process.env.OPENCODE_PRINT_LOGS;
+    delete process.env.OPENSPEC_SHIPPER_LOG_LEVEL;
+    delete process.env.OPENCODE_LOG_LEVEL;
     process.chdir(projectDir);
     try {
       const config = defaultConfig();
@@ -72,6 +77,8 @@ describe("runner", () => {
       expect(config.providerId).toBe("opencode");
       expect(config.opencodeBin).toBe("custom-opencode");
       expect(config.opencodeModel).toBe("opencode-go/deepseek-v4-pro");
+      expect(config.opencodePrintLogs).toBe(true);
+      expect(config.opencodeLogLevel).toBe("ERROR");
     } finally {
       process.chdir(previousCwd);
     }
@@ -1065,14 +1072,22 @@ describe("runner", () => {
       tasksCompleteDetector: async () => false,
       executor: async () => {
         calls += 1;
-        return { exitCode: 1, output: "The latest version of this model is only available hosted in China\n" };
+        return {
+          exitCode: null,
+          output: "Weekly usage limit reached\n",
+          failureReason: "OpenCode provider usage limit was reached",
+          failureSignal: {
+            kind: "provider_unavailable",
+            reason: "OpenCode provider usage limit was reached",
+          },
+        };
       },
     });
 
     expect(exitCode).toBe(1);
     expect(calls).toBe(1);
     const queue = await readFile(harness.queuePath, "utf8");
-    expect(queue).toContain("OpenCode model is unavailable");
+    expect(queue).toContain("OpenCode provider usage limit was reached");
     expect(queue).not.toContain("recovery_attempts");
   });
 
@@ -1789,6 +1804,32 @@ describe("runner", () => {
     expect(parseClaudeResult(result.output)?.structured_output?.status).toBe("completed");
     expect(terminalOutput).toContain("still running");
     expect(await readFile(logPath, "utf8")).toContain("still running");
+  });
+
+  test("spawnExecutor terminates a silent OpenCode process when streamed logs expose a terminal provider failure", async () => {
+    const harness = await createHarness("");
+    const logPath = join(harness.config.stateDir, "runs/opencode-provider-failure.log");
+    const script = [
+      "process.stderr.write('timestamp=2026-09-05T08:20:31.149Z level=ERROR message=\\\"stream error\\\" error.error=\\\"AI_APICallError: Weekly usage limit reached. Resets in 1 day.\\\"\\n');",
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    const startedAt = Date.now();
+
+    const result = await spawnExecutor(process.execPath, ["-e", script], {
+      cwd: harness.rootDir,
+      logPath,
+      timeoutMs: 5_000,
+      heartbeatMs: 0,
+      outputFailureDetector: opencodeProvider.classifyStreamingFailureSignal,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(result.failureSignal).toEqual({
+      kind: "provider_unavailable",
+      reason: "OpenCode provider usage limit was reached",
+    });
+    expect(result.failureReason).toBe("OpenCode provider usage limit was reached");
+    expect(await readFile(logPath, "utf8")).toContain("Weekly usage limit reached");
   });
 
   test("offers recovery before blocking an unclassified non-zero exit", async () => {

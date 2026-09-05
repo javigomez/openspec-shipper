@@ -102,11 +102,27 @@ The matching environment overrides are:
 
 ```bash
 OPENSPEC_SHIPPER_OPENCODE_MODEL=
+OPENSPEC_SHIPPER_PRINT_LOGS=true
+OPENSPEC_SHIPPER_LOG_LEVEL=ERROR
 OPENSPEC_SHIPPER_CODEX_MODEL=
 OPENSPEC_SHIPPER_CODEX_REASONING_EFFORT=
 OPENSPEC_SHIPPER_CLAUDE_MODEL=
 OPENSPEC_SHIPPER_CLAUDE_EFFORT=
 ```
+
+OpenCode executions include `--print-logs --log-level ERROR` by default. Some
+OpenCode provider errors are only emitted through that diagnostic stream and
+the CLI can remain alive after reporting them. Shipper inspects the stream as
+it is written and terminates the executor immediately when it reports a
+terminal quota, authentication, permission, model-availability, or provider
+failure. Terminal provider failures are blocked directly instead of consuming
+an assisted-recovery attempt.
+
+Set `OPENSPEC_SHIPPER_PRINT_LOGS=false` to suppress OpenCode's diagnostic
+stream, or change `OPENSPEC_SHIPPER_LOG_LEVEL` if a provider requires another
+level. Disabling printed logs also disables early detection of errors that
+OpenCode does not expose in its normal output, so Shipper can only stop those
+runs when the phase timeout expires.
 
 See [Pick the right model for each job](../guide/choosing-models.md) for how to
 choose values.

@@ -82,6 +82,16 @@ To watch a log while it is being written:
 tail -f .openspec-shipper/runs/<run-log>.log
 ```
 
+For OpenCode, Shipper enables the executor's `ERROR` diagnostic stream by
+default and watches it live. A terminal quota, authentication, permission,
+model-availability, or provider error should therefore stop the current phase
+and appear in the run log within seconds, even when OpenCode itself would stay
+alive. Shipper does not send these failures to assisted recovery because a
+second model invocation cannot repair them. If an OpenCode run still shows
+only heartbeats after a provider error, check that
+`OPENSPEC_SHIPPER_PRINT_LOGS` has not been set to `false` and inspect the
+installed OpenCode version and its log format.
+
 The queue's lock also tells you whether a runner is still alive:
 
 ```bash
